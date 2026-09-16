@@ -289,10 +289,11 @@ def test_record_prefix_does_not_depend_on_the_record_length():
     _assert_close(long, simulate_rf(**{**kwargs, "n_ax": 256}))
 
 
-def _record_args(kwargs):
-    """The arguments of the record helpers, out of a simulator call."""
+def _record_args(kwargs, geometry=True):
+    """The arguments of the record helpers, out of a simulator call; ``record_reach`` takes
+    them without the geometry."""
     names = (
-        "probe_geometry",
+        *(("probe_geometry",) if geometry else ()),
         "sound_speed",
         "n_ax",
         "sampling_frequency",
@@ -310,13 +311,13 @@ def _record_args(kwargs):
 
 
 def test_gate_keeps_a_scatterer_inside_the_record_and_drops_one_past_it():
-    reach = record_reach(**_record_args(_single_element()))
+    reach = record_reach(**_record_args(_single_element(), geometry=False))
     assert abs(reach / ((N_AX / SAMPLING_FREQUENCY + PULSE_TAIL) * SOUND_SPEED / 2) - 1) < 1e-12
     # A Hann tone has a compact support, so the reach puts its peak just inside the record.
     waveform = _waveform()
     tail = transmit_pulses(1, CENTER_FREQUENCY, SAMPLING_FREQUENCY, waveform)[0].n_after
     kwargs = _single_element(waveforms_two_way=waveform)
-    reach = record_reach(**_record_args(kwargs))
+    reach = record_reach(**_record_args(kwargs, geometry=False))
     expected = (N_AX / SAMPLING_FREQUENCY + tail / SAMPLING_FREQUENCY) * SOUND_SPEED / 2
     assert abs(reach / expected - 1) < 1e-12
     # An echo peaking a few samples before the end of the record straddles it: energy in the
@@ -365,7 +366,7 @@ def test_record_helpers_agree_with_the_gate():
     low, high = record_bounds(**args)
     assert (positions[mask] >= low).all() and (positions[mask] <= high).all()
     # A scatterer straight below an element is kept up to the reach and dropped past it.
-    reach = record_reach(**args)
+    reach = record_reach(**_record_args(kwargs, geometry=False))
     probe = [kwargs["probe_geometry"][3]]
     on_axis = np.array([probe[0] + [0.0, 0.0, 0.99 * reach], probe[0] + [0.0, 0.0, 1.01 * reach]])
     assert _np(in_record(on_axis.astype(np.float32), **args)).tolist() == [True, False]

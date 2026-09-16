@@ -280,39 +280,34 @@ def simulate_rf(
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
-    _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
     _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y)
-    _validate_baffle(baffle_impedance_ratio)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_ax = int(n_ax)
     n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
     pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
-    element_width = _resolve_element_width(probe_geometry, element_width)
-    element_height = _resolve_element_height(probe_geometry, element_width, element_height)
-    _validate_lens(
-        apply_lens_correction,
-        lens_thickness,
-        lens_sound_speed,
+    model = _element_model(
+        probe_geometry,
         sound_speed,
-        elevation_focus,
-        element_height,
+        fc,
+        pulses,
+        element_width=element_width,
+        element_height=element_height,
+        attenuation_coef=attenuation_coef,
+        apply_lens_correction=apply_lens_correction,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
+        two_dimensional=two_dimensional,
+        baffle_impedance_ratio=baffle_impedance_ratio,
+        element_normals=element_normals,
+        n_sub_elements=n_sub_elements,
+        elevation_focus=elevation_focus,
+        lens_attenuation_coef=lens_attenuation_coef,
     )
-    n_sub_elements = _resolve_sub_elements(
-        n_sub_elements,
-        elevation_focus,
-        element_width,
-        element_height,
-        sound_speed,
-        max(pulse.band[1] for pulse in pulses),
-        two_dimensional,
-    )
-    positions = ops.cast(scatterer_positions, "float32")
+    positions = _scene_positions(scatterer_positions, model)
     magnitudes = ops.cast(scatterer_magnitudes, "float32")
-    geometry = ops.cast(probe_geometry, "float32")
-    _validate_scatter_exponent(scatter_exponent, int(ops.shape(positions)[0]))
+    n_scat = int(ops.shape(positions)[0])
+    _validate_scatter_exponent(scatter_exponent, n_scat)
     scatter_exponent = _resolve_scatter_exponent(scatter_exponent)
-    if two_dimensional:
-        positions = _snap_elevation(positions, geometry)
 
     # Concrete views of the raw inputs, before any op puts them into an outer jit.
     raw = [_concrete(x) for x in (t0_delays, initial_times, t_peak, probe_geometry, sound_speed)]
@@ -356,14 +351,13 @@ def simulate_rf(
             rf[..., None], noise_level_db, tgc_max_db, noise_seed, noise_reference
         )
 
-    if int(ops.shape(positions)[0]) == 0:
+    if n_scat == 0:
         return finish(ops.zeros((n_tx, n_ax, n_el), "float32"))
 
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
     k0, k1 = band_bins(n_fft, fs, pulses, fc, scatter_exponent, band_db, scatter_exponent_range)
 
     # Forward of one block per bin: the complex responses and the two matrix product outputs.
-    n_scat = int(ops.shape(positions)[0])
     per_bin = 8 * ((2 if two_dimensional else 1) * n_scat * n_el + n_tx * n_scat + n_tx * n_el)
     f_block = int(max(1, min(k1 - k0, max_chunk_gb * 2**30 // per_bin)))
     n_blocks = -(-(k1 - k0) // f_block)
@@ -372,7 +366,7 @@ def simulate_rf(
     n_band = n_blocks * f_block
 
     # Band padded to whole blocks; the pad repeats the last bin and is dropped after the loop.
-    freqs_all = _rfft_freqs(n_fft, fs)
+    freqs_all = np.fft.rfftfreq(n_fft, 1 / fs)
     freqs = np.full(n_band, freqs_all[k1 - 1], np.float32)
     freqs[: k1 - k0] = freqs_all[k0:k1]
     wave = _pulse_spectra(pulses, freqs_all[k0:k1])
@@ -381,44 +375,32 @@ def simulate_rf(
     # The straight-ray slowness of every path, once for all frequency blocks.
     slowness = _ray_slowness(
         positions,
-        geometry,
-        _as_f32(sound_speed),
+        model.geometry,
+        model.sound_speed,
         sos_map,
         sos_grid_x,
         sos_grid_z,
         sos_grid_y,
         n_sos_ray_samples,
-        bool(apply_lens_correction),
-        _as_f32(lens_thickness),
-        element_normals,
+        model.apply_lens_correction,
+        model.lens_thickness,
+        model.element_normals,
     )
 
+    # The partial keeps everything but the frequencies out of the checkpoint's arguments:
+    # tf.recompute_grad converts every argument to a tensor, which None (no map) cannot be.
     block = checkpoint(
         functools.partial(
             _rf_block,
             positions=positions,
             magnitudes=magnitudes,
-            geometry=geometry,
+            model=model,
             slowness=slowness,
             shift=shift,
             tx_apodizations=ops.cast(tx_apodizations, "float32"),
             center_frequency=fc,
-            sound_speed=_as_f32(sound_speed),
-            element_width=_as_f32(element_width),
-            element_height=_as_f32(element_height),
-            attenuation_coef=_as_f32(attenuation_coef),
-            lens_thickness=_as_f32(lens_thickness),
-            lens_sound_speed=_as_f32(lens_sound_speed),
             gate_time=_record_gate_time(n_ax, fs, _pulse_tail(pulses)),
             scatter_exponent=scatter_exponent,
-            apply_lens_correction=bool(apply_lens_correction),
-            two_dimensional=bool(two_dimensional),
-            baffle_impedance_ratio=float(baffle_impedance_ratio),
-            element_normals=None if element_normals is None else _as_f32(element_normals),
-            n_sub_elements=n_sub_elements,
-            elevation_focus=None if elevation_focus is None else float(elevation_focus),
-            lens_attenuation_coef=_as_f32(lens_attenuation_coef),
-            min_dist=min_distance(_as_f32(sound_speed), fc),
         )
     )
 
@@ -447,27 +429,13 @@ def _rf_block(
     freqs,
     positions,
     magnitudes,
-    geometry,
+    model,
     slowness,
     shift,
     tx_apodizations,
     center_frequency,
-    sound_speed,
-    element_width,
-    element_height,
-    attenuation_coef,
-    lens_thickness,
-    lens_sound_speed,
     gate_time,
     scatter_exponent,
-    apply_lens_correction,
-    two_dimensional,
-    baffle_impedance_ratio,
-    element_normals,
-    n_sub_elements,
-    elevation_focus,
-    lens_attenuation_coef,
-    min_dist,
 ):
     """Band spectrum [f, t, e] of one frequency block over all scatterers.
 
@@ -477,25 +445,7 @@ def _rf_block(
     [s, e] of the straight rays through a sound speed map, or None for a homogeneous medium.
     """
     tx_response, rx_response, tau = _element_responses(
-        positions,
-        geometry,
-        freqs,
-        sound_speed,
-        element_width,
-        element_height,
-        attenuation_coef,
-        lens_thickness,
-        lens_sound_speed,
-        apply_lens_correction,
-        two_dimensional,
-        baffle_impedance_ratio,
-        element_normals,
-        n_sub_elements,
-        elevation_focus,
-        lens_attenuation_coef,
-        min_dist,
-        frequency_first=True,
-        slowness=slowness,
+        positions, model, freqs, frequency_first=True, slowness=slowness
     )
     keep = _record_keep(tau, ops.min(shift), gate_time)
     weight = ops.where(keep, magnitudes, 0.0)
@@ -504,14 +454,19 @@ def _rf_block(
         weight = weight[None] * (freqs[:, None] / center_frequency) ** scatter_exponent
     else:
         weight = weight[None]
-    f3 = freqs[:, None, None]
-    tx_weights = _to_complex(tx_apodizations[None]) * ops.exp(
-        ops.array(-2j * np.pi, "complex64") * _to_complex(shift[None] * f3)
-    )
+    tx_weights = _transmit_weights(freqs, shift, tx_apodizations)
     with highest_matmul_precision():
         incident = ops.einsum("fte,fse->fts", tx_weights, tx_response)
         scattered = incident * _to_complex(weight)[:, None, :]
         return ops.einsum("fts,fse->fte", scattered, rx_response)
+
+
+def _transmit_weights(freqs, shift, tx_apodizations):
+    """Apodization and delay phasor of every transmit and element, [f, t, e] complex64."""
+    f3 = freqs[:, None, None]
+    return _to_complex(tx_apodizations[None]) * ops.exp(
+        ops.array(-2j * np.pi, "complex64") * _to_complex(shift[None] * f3)
+    )
 
 
 def pressure_field(
@@ -583,41 +538,35 @@ def pressure_field(
     """
     if output not in ("rms", "time"):
         raise ValueError(f"output must be 'rms' or 'time', got {output!r}.")
-    _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
     _validate_sos_map(sos_map, sos_grid_x, sos_grid_z, sos_grid_y)
-    _validate_baffle(baffle_impedance_ratio)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_tx, n_el = (int(d) for d in ops.shape(t0_delays))
     pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
+    model = _element_model(
+        probe_geometry,
+        sound_speed,
+        fc,
+        pulses,
+        element_width=element_width,
+        element_height=element_height,
+        attenuation_coef=attenuation_coef,
+        apply_lens_correction=apply_lens_correction,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
+        two_dimensional=two_dimensional,
+        baffle_impedance_ratio=baffle_impedance_ratio,
+        element_normals=element_normals,
+        n_sub_elements=n_sub_elements,
+        elevation_focus=elevation_focus,
+        lens_attenuation_coef=lens_attenuation_coef,
+    )
     grid_shape = tuple(int(d) for d in ops.shape(grid)[:-1])
-    positions = ops.reshape(ops.cast(grid, "float32"), (-1, 3))
-    geometry = ops.cast(probe_geometry, "float32")
-    if two_dimensional:
-        positions = _snap_elevation(positions, geometry)
-    element_width = _resolve_element_width(geometry, element_width)
-    element_height = _resolve_element_height(geometry, element_width, element_height)
-    _validate_lens(
-        apply_lens_correction,
-        lens_thickness,
-        lens_sound_speed,
-        sound_speed,
-        elevation_focus,
-        element_height,
-    )
-    n_sub_elements = _resolve_sub_elements(
-        n_sub_elements,
-        elevation_focus,
-        element_width,
-        element_height,
-        sound_speed,
-        max(pulse.band[1] for pulse in pulses),
-        two_dimensional,
-    )
+    positions = _scene_positions(ops.reshape(grid, (-1, 3)), model)
     n_points = int(ops.shape(positions)[0])
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
 
     if n_fft is None or n_ax is None:
-        raw = [_concrete(x) for x in (positions, geometry, shift, sound_speed)]
+        raw = [_concrete(x) for x in (positions, model.geometry, shift, sound_speed)]
         bounds = _sound_speed_minmax(sound_speed, sos_map)
         if any(x is None for x in raw) or bounds is None:
             raise ValueError(
@@ -639,49 +588,36 @@ def pressure_field(
 
     k0, k1 = band_bins(n_fft, fs, pulses, fc, 0.0, band_db)
     n_kept = k1 - k0
-    freqs_all = _rfft_freqs(n_fft, fs)
+    freqs_all = np.fft.rfftfreq(n_fft, 1 / fs)
     wave_kept = _pulse_spectra(pulses, freqs_all[k0:k1])
-
-    # workaround for tensorflow. tf.recompute_grad converts every argument to a tensor, crashing
-    # when no sound speed map is available (i.e. None).
-    block_kwargs = dict(
-        geometry=geometry,
-        shift=shift,
-        tx_apodizations=ops.cast(tx_apodizations, "float32"),
-        sound_speed=_as_f32(sound_speed),
-        element_width=_as_f32(element_width),
-        element_height=_as_f32(element_height),
-        attenuation_coef=_as_f32(attenuation_coef),
-        lens_thickness=_as_f32(lens_thickness),
-        lens_sound_speed=_as_f32(lens_sound_speed),
-        apply_lens_correction=bool(apply_lens_correction),
-        two_dimensional=bool(two_dimensional),
-        baffle_impedance_ratio=float(baffle_impedance_ratio),
-        element_normals=None if element_normals is None else _as_f32(element_normals),
-        n_sub_elements=n_sub_elements,
-        elevation_focus=None if elevation_focus is None else float(elevation_focus),
-        lens_attenuation_coef=_as_f32(lens_attenuation_coef),
-        min_dist=min_distance(_as_f32(sound_speed), fc),
-    )
-
+    tx_apodizations = ops.cast(tx_apodizations, "float32")
     slowness = _ray_slowness(
         positions,
-        geometry,
-        _as_f32(sound_speed),
+        model.geometry,
+        model.sound_speed,
         sos_map,
         sos_grid_x,
         sos_grid_z,
         sos_grid_y,
         n_sos_ray_samples,
-        bool(apply_lens_correction),
-        _as_f32(lens_thickness),
-        element_normals,
+        model.apply_lens_correction,
+        model.lens_thickness,
+        model.element_normals,
     )
 
     def blocked(points, slow, budget):
         """Band spectrum [f, t, p] or its Parseval energy [t, p] over ``points``."""
+        # The partial keeps everything but the frequencies out of the checkpoint's arguments,
+        # as in simulate_rf.
         block = checkpoint(
-            functools.partial(_pressure_block, positions=points, slowness=slow, **block_kwargs)
+            functools.partial(
+                _pressure_block,
+                positions=points,
+                slowness=slow,
+                model=model,
+                shift=shift,
+                tx_apodizations=tx_apodizations,
+            )
         )
         n_pts = int(ops.shape(points)[0])
         per_bin = 8 * ((2 if two_dimensional else 1) * n_pts * n_el + n_tx * n_pts)
@@ -746,54 +682,12 @@ def pressure_field(
     return ops.reshape(field, lead + grid_shape)
 
 
-def _pressure_block(
-    freqs,
-    positions,
-    slowness,
-    geometry,
-    shift,
-    tx_apodizations,
-    sound_speed,
-    element_width,
-    element_height,
-    attenuation_coef,
-    lens_thickness,
-    lens_sound_speed,
-    apply_lens_correction,
-    two_dimensional,
-    baffle_impedance_ratio,
-    element_normals,
-    n_sub_elements,
-    elevation_focus,
-    lens_attenuation_coef,
-    min_dist,
-):
+def _pressure_block(freqs, positions, slowness, model, shift, tx_apodizations):
     """Incident field spectrum [f, t, p] of one frequency block, without the pulse."""
     tx_response, _, _ = _element_responses(
-        positions,
-        geometry,
-        freqs,
-        sound_speed,
-        element_width,
-        element_height,
-        attenuation_coef,
-        lens_thickness,
-        lens_sound_speed,
-        apply_lens_correction,
-        two_dimensional,
-        baffle_impedance_ratio,
-        element_normals,
-        n_sub_elements,
-        elevation_focus,
-        lens_attenuation_coef,
-        min_dist,
-        frequency_first=True,
-        slowness=slowness,
+        positions, model, freqs, frequency_first=True, slowness=slowness
     )
-    f3 = freqs[:, None, None]
-    tx_weights = _to_complex(tx_apodizations[None]) * ops.exp(
-        ops.array(-2j * np.pi, "complex64") * _to_complex(shift[None] * f3)
-    )
+    tx_weights = _transmit_weights(freqs, shift, tx_apodizations)
     with highest_matmul_precision():
         return ops.einsum("fte,fpe->ftp", tx_weights, tx_response)
 
@@ -863,7 +757,6 @@ def _record_keep(tau, shift_min, gate_time):
 
 
 def record_reach(
-    probe_geometry,
     sound_speed,
     n_ax,
     sampling_frequency,
@@ -876,12 +769,7 @@ def record_reach(
     apply_lens_correction=False,
     lens_thickness=0.0,
     lens_sound_speed=None,
-    two_dimensional=False,
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
-    sos_grid_y=None,
-    n_sos_ray_samples=64,
 ):
     """Farthest one-way distance [m] from an element at which :func:`simulate_rf` still
     simulates a scatterer.
@@ -892,7 +780,6 @@ def record_reach(
     of the lens thickness. If a sound speed map is provided, uses the fastest speed in the map.
 
     Args:
-        probe_geometry (array-like): Element positions [m] of shape (n_el, 3).
         sound_speed (float): Speed of sound [m/s].
         n_ax (int): Number of axial samples in the record.
         sampling_frequency (float): Sampling frequency [Hz].
@@ -907,15 +794,12 @@ def record_reach(
         apply_lens_correction (bool): Whether the simulation models the lens.
         lens_thickness (float): Lens thickness [m].
         lens_sound_speed (float, optional): Speed of sound in the lens [m/s].
-        two_dimensional (bool): Unused; accepted so the record helpers share their arguments.
-        sos_map (array-like, optional): Sound speed map of :func:`simulate_rf`. Its grids and
-            ``n_sos_ray_samples`` are unused, but accepted so the record helpers share arguments.
+        sos_map (array-like, optional): Sound speed map of :func:`simulate_rf`; only its
+            fastest speed matters here.
 
     Returns:
         float: The reach [m].
     """
-    # unused, but accepted so all record helpers share arguments
-    del probe_geometry, two_dimensional, sos_grid_x, sos_grid_z, sos_grid_y, n_sos_ray_samples
     fs, fc = float(sampling_frequency), float(center_frequency)
     raw = [_concrete(x) for x in (t0_delays, initial_times, t_peak)]
     minmax = _sound_speed_minmax(sound_speed, sos_map)
@@ -926,7 +810,7 @@ def record_reach(
     c_max = minmax[1]
     t0_np, t_init_np, t_peak_np = (np.asarray(x, np.float64) for x in raw)
     shift = t0_np - t_init_np[:, None] + t_peak_np[:, None]
-    pulses = _scan_pulses(fc, fs, waveforms_two_way, waveform_sampling_frequency)
+    pulses = transmit_pulses(None, fc, fs, waveforms_two_way, waveform_sampling_frequency)
     gate_time = _record_gate_time(int(n_ax), fs, _pulse_tail(pulses))
     time = (gate_time - float(shift.min())) / 2
     if not apply_lens_correction or lens_sound_speed is None:
@@ -951,23 +835,22 @@ def record_bounds(
     lens_sound_speed=None,
     two_dimensional=False,
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
-    sos_grid_y=None,
-    n_sos_ray_samples=64,
 ):
     """Box [m] in front of the probe outside which :func:`simulate_rf` simulates no scatterer.
 
     The bounding box of the elements grown by :func:`record_reach`, starting in z at the
     shallowest element and, in 2D, collapsed onto the imaging plane. A phantom drawn inside it
     wastes no scatterers on the gate; :func:`in_record` gives the exact gate. Takes the
-    arguments of :func:`record_reach`.
+    arguments of :func:`record_reach`, plus:
+
+    Args:
+        probe_geometry (array-like): Element positions [m] of shape (n_el, 3).
+        two_dimensional (bool): Collapse the box onto the imaging plane.
 
     Returns:
         ndarray: The box as ``[[x_min, y_min, z_min], [x_max, y_max, z_max]]``, shape (2, 3).
     """
     reach = record_reach(
-        probe_geometry,
         sound_speed,
         n_ax,
         sampling_frequency,
@@ -980,9 +863,8 @@ def record_bounds(
         apply_lens_correction,
         lens_thickness,
         lens_sound_speed,
-        sos_map=sos_map,
+        sos_map,
     )
-    del sos_grid_x, sos_grid_z, sos_grid_y, n_sos_ray_samples
     geometry = _concrete(probe_geometry)
     if geometry is None:
         raise ValueError("record_bounds needs a concrete probe geometry.")
@@ -1021,11 +903,16 @@ def in_record(
 
     A scatterer is dropped when even its earliest echo has no pulse support inside the record.
     Takes the arguments of :func:`record_reach`; ``two_dimensional`` moves the points into the
-    imaging plane first, as the simulator does, and a sound speed map times the paths along
-    their straight rays (``element_normals`` places the lens face for those rays). Jittable.
+    imaging plane first, as the simulator does, and a sound speed map with its grids times the
+    paths along their straight rays (``element_normals`` places the lens face for those rays).
+    Jittable.
 
     Args:
         points (array-like): Positions [m] of shape (n_points, 3).
+        probe_geometry (array-like): Element positions [m] of shape (n_el, 3).
+        two_dimensional (bool): Gate the points projected onto the imaging plane.
+        sos_map, sos_grid_x, sos_grid_z, sos_grid_y, n_sos_ray_samples: The sound speed map
+            of :func:`simulate_rf` with its grids and ray sampling.
         element_normals (array-like, optional): Element normals of :func:`simulate_rf`, used
             only with a lens and a sound speed map to start the rays at the lens face.
 
@@ -1060,7 +947,8 @@ def in_record(
         _as_f32(sound_speed),
         slowness,
     )
-    pulses = _scan_pulses(
+    pulses = transmit_pulses(
+        None,
         float(center_frequency),
         float(sampling_frequency),
         waveforms_two_way,
@@ -1077,38 +965,123 @@ def in_record(
 # ---------------------------------------------------------------------------------------------
 
 
-def _element_responses(
-    positions,
-    geometry,
-    freqs,
+@dataclass(frozen=True)
+class _ElementModel:
+    """The transducer as :func:`_element_responses` sees it: the element positions and the
+    physics of one element, cast for the block kernels. Built by :func:`_element_model` once
+    per simulator call and closed over by every frequency block.
+
+    Attributes:
+        geometry: Element positions [m], (n_el, 3) float32.
+        sound_speed, element_width, element_height, attenuation_coef, lens_thickness,
+        lens_sound_speed, lens_attenuation_coef, min_dist: The scalars of :func:`simulate_rf`
+            as float32 (a lens speed of None is 0, unused without the lens).
+        apply_lens_correction, two_dimensional: Static switches.
+        baffle_impedance_ratio: Static float, see :func:`obliquity_factor`.
+        element_normals: Unit normals (n_el, 3) float32, or None for +z.
+        n_sub_elements: Static (n_lateral, n_elevation), see :func:`_resolve_sub_elements`.
+        elevation_focus: Static focal distance [m], or None.
+    """
+
+    geometry: object
+    sound_speed: object
+    element_width: object
+    element_height: object
+    attenuation_coef: object
+    lens_thickness: object
+    lens_sound_speed: object
+    apply_lens_correction: bool
+    two_dimensional: bool
+    baffle_impedance_ratio: float
+    element_normals: object
+    n_sub_elements: tuple
+    elevation_focus: float | None
+    lens_attenuation_coef: object
+    min_dist: object
+
+
+def _element_model(
+    probe_geometry,
     sound_speed,
+    center_frequency,
+    pulses,
+    *,
     element_width,
     element_height,
     attenuation_coef,
+    apply_lens_correction,
     lens_thickness,
     lens_sound_speed,
-    apply_lens_correction,
     two_dimensional,
     baffle_impedance_ratio,
     element_normals,
-    n_sub_elements=(1, 1),
-    elevation_focus=None,
-    lens_attenuation_coef=0.0,
-    min_dist=0.0,
-    frequency_first=False,
-    slowness=None,
+    n_sub_elements,
+    elevation_focus,
+    lens_attenuation_coef,
 ):
+    """The :class:`_ElementModel` of the element arguments of :func:`simulate_rf`, validated
+    and with the defaults resolved: the element width from the pitch, the height from the
+    width, and the sub-element counts from the top of the band of ``pulses``."""
+    _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
+    _validate_baffle(baffle_impedance_ratio)
+    element_width = _resolve_element_width(probe_geometry, element_width)
+    element_height = _resolve_element_height(probe_geometry, element_width, element_height)
+    _validate_lens(
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        elevation_focus,
+        element_height,
+    )
+    n_sub_elements = _resolve_sub_elements(
+        n_sub_elements,
+        elevation_focus,
+        element_width,
+        element_height,
+        sound_speed,
+        max(pulse.band[1] for pulse in pulses),
+        two_dimensional,
+    )
+    return _ElementModel(
+        geometry=ops.cast(probe_geometry, "float32"),
+        sound_speed=_as_f32(sound_speed),
+        element_width=_as_f32(element_width),
+        element_height=_as_f32(element_height),
+        attenuation_coef=_as_f32(attenuation_coef),
+        lens_thickness=_as_f32(lens_thickness),
+        lens_sound_speed=_as_f32(lens_sound_speed),
+        apply_lens_correction=bool(apply_lens_correction),
+        two_dimensional=bool(two_dimensional),
+        baffle_impedance_ratio=float(baffle_impedance_ratio),
+        element_normals=None if element_normals is None else _as_f32(element_normals),
+        n_sub_elements=n_sub_elements,
+        elevation_focus=None if elevation_focus is None else float(elevation_focus),
+        lens_attenuation_coef=_as_f32(lens_attenuation_coef),
+        min_dist=min_distance(_as_f32(sound_speed), float(center_frequency)),
+    )
+
+
+def _scene_positions(positions, model):
+    """The positions (n, 3) as float32, moved into the imaging plane in 2D."""
+    positions = ops.cast(positions, "float32")
+    if model.two_dimensional:
+        positions = _snap_elevation(positions, model.geometry)
+    return positions
+
+
+def _element_responses(positions, model, freqs, frequency_first=False, slowness=None):
     """Transmit and receive one-way responses and the one-way travel time [s, e].
 
-    The responses are [s, e, f], or [f, s, e] when ``frequency_first`` is True. Each element is
-    the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
-    own distance, phase and sinc directivity, so the response holds in the near field too. The
-    sub-element distance is clamped at ``min_dist`` for the phase and the spreading (see
-    :func:`min_distance`), not for the angles. An
-    elevation focus is the ideal focusing advance of each elevation sub-element, or with the lens
-    the refracted (Fermat) path through the local lens thickness, which the focus thins towards
-    the edges. The lens path is expressed as the medium distance with the same travel time for the
-    phase, and spreads as the refracted ray tube (:func:`_lens_spread_distance`); the lens part is
+    The responses are [s, e, f], or [f, s, e] when ``frequency_first`` is True. ``model`` is
+    the :class:`_ElementModel`. Each element is the mean of its ``n_sub_elements`` (lateral,
+    elevation) sub-elements with their own distance, phase and sinc directivity, so the response
+    holds in the near field too. The sub-element distance is clamped at ``min_dist`` for the
+    phase and the spreading (see :func:`min_distance`), not for the angles. An elevation focus
+    is the ideal focusing advance of each elevation sub-element, or with the lens the refracted
+    (Fermat) path through the local lens thickness, which the focus thins towards the edges. The
+    lens path is expressed as the medium distance with the same travel time for the phase, and
+    spreads as the refracted ray tube (:func:`_lens_spread_distance`); the lens part is
     attenuated with ``lens_attenuation_coef``. The returned travel time is the element center's.
 
     ``slowness`` is the mean slowness [s, e] of the straight rays through a sound speed map
@@ -1120,11 +1093,15 @@ def _element_responses(
     In 2D the positions are expected in the imaging plane (:func:`_snap_elevation`): there is no
     elevation directivity, and the transmit spreads cylindrically, as behind an ideal lens.
     """
-    n_lateral, n_elevation = n_sub_elements
+    geometry, sound_speed, min_dist = model.geometry, model.sound_speed, model.min_dist
+    lens_thickness, lens_sound_speed = model.lens_thickness, model.lens_sound_speed
+    apply_lens_correction, two_dimensional = model.apply_lens_correction, model.two_dimensional
+    elevation_focus = model.elevation_focus
+    n_lateral, n_elevation = model.n_sub_elements
     n_sub = n_lateral * n_elevation
     relative_center = positions[:, None] - geometry[None]
     dtype = relative_center.dtype
-    lateral_axis, elevation_axis, _ = frame = _element_frame(element_normals, dtype)
+    lateral_axis, elevation_axis, _ = frame = _element_frame(model.element_normals, dtype)
     tau = _one_way_time(
         positions,
         geometry,
@@ -1134,7 +1111,7 @@ def _element_responses(
         sound_speed,
         slowness,
     )
-    u, v = _sub_element_offsets(n_lateral, n_elevation, element_width, element_height)
+    u, v = _sub_element_offsets(n_lateral, n_elevation, model.element_width, model.element_height)
     u, v = ops.cast(u, dtype), ops.cast(v, dtype)
     if elevation_focus is None or apply_lens_correction:
         advance = ops.zeros_like(v)
@@ -1145,8 +1122,8 @@ def _element_responses(
         thickness = lens_thickness - _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed)
     else:
         thickness = ops.full_like(v, lens_thickness)
-    sub_width = element_width / n_lateral
-    sub_height = element_height / n_elevation
+    sub_width = model.element_width / n_lateral
+    sub_height = model.element_height / n_elevation
     f3 = freqs[:, None, None] if frequency_first else freqs[None, None, :]
 
     def fx(x):
@@ -1177,14 +1154,14 @@ def _element_responses(
             spread_dist = _lens_spread_distance(
                 lens_len, medium_len, thickness[j], sound_speed, lens_sound_speed
             )
-            amplitude = amplitude * attenuate(f3, lens_attenuation_coef, fx(lens_len))
+            amplitude = amplitude * attenuate(f3, model.lens_attenuation_coef, fx(lens_len))
         else:
             medium_len = spread_dist = ops.linalg.norm(relative, axis=-1)
             sub_time = medium_time(medium_len)
+        # The distance is clamped for the phase here and for the spreading in spread().
         sub_time = ops.maximum(sub_time, min_dist / sound_speed)
-        spread_dist = ops.maximum(spread_dist, min_dist)
-        amplitude = amplitude * attenuate(f3, attenuation_coef, fx(medium_len))
-        amplitude = amplitude * fx(obliquity_factor(obliquity, baffle_impedance_ratio))
+        amplitude = amplitude * attenuate(f3, model.attenuation_coef, fx(medium_len))
+        amplitude = amplitude * fx(obliquity_factor(obliquity, model.baffle_impedance_ratio))
         phase = ops.exp(
             ops.array(-2j * np.pi, "complex64")
             * ops.cast((fx(sub_time) - advance[j]) * f3, "complex64")
@@ -1443,22 +1420,6 @@ def _pulse_span(pulses):
     return (before + after) / pulses[0].sampling_frequency
 
 
-def _scan_pulses(
-    center_frequency, sampling_frequency, waveforms_two_way=None, waveform_sampling_frequency=250e6
-):
-    """The pulses of :func:`transmit_pulses` for helpers that are not told the transmit count:
-    one per row of ``waveforms_two_way``, or the single default pulse."""
-    n_tx = 1 if waveforms_two_way is None else len(np.atleast_2d(waveforms_two_way))
-    return transmit_pulses(
-        n_tx, center_frequency, sampling_frequency, waveforms_two_way, waveform_sampling_frequency
-    )
-
-
-def _rfft_freqs(n_fft, sampling_frequency):
-    """The rfft frequency grid of ``n_fft`` samples, in numpy."""
-    return np.arange(n_fft // 2 + 1) / n_fft * sampling_frequency
-
-
 def band_bins(
     n_fft,
     sampling_frequency,
@@ -1474,7 +1435,7 @@ def band_bins(
     ``band_db`` there. If ``scatter_exponent`` is a vector of per-scatterer exponents, the band
     is calculated from the union of the min and max exponents.
     """
-    freqs = _rfft_freqs(n_fft, sampling_frequency)
+    freqs = np.fft.rfftfreq(n_fft, 1 / sampling_frequency)
     if band_db is None:
         return 0, len(freqs)
     w = np.max([np.abs(pulse.spectrum(freqs)) for pulse in _unique_pulses(pulses)], axis=0)
@@ -1545,7 +1506,8 @@ def fft_length(
     Returns:
         int: FFT length, a product of powers of 2, 3 and 5.
     """
-    pulses = _scan_pulses(
+    pulses = transmit_pulses(
+        None,
         float(center_frequency),
         float(sampling_frequency),
         waveforms_two_way,
@@ -2143,11 +2105,14 @@ def transmit_pulses(
     The rows of ``waveforms_two_way`` when given, of shape (n_tx, n_samples), or (n_samples,)
     for the same waveform on every transmit (see :func:`measured_pulse`; identical rows share
     one :class:`Pulse`); otherwise the default pulse of :func:`transmit_pulse` at
-    ``center_frequency``, on every transmit.
+    ``center_frequency``, on every transmit. ``n_tx`` may be None for a helper that is not told
+    the transmit count: one pulse per row of the waveforms, or the single default pulse.
     """
     if waveforms_two_way is None:
-        return [transmit_pulse(center_frequency, sampling_frequency)] * n_tx
+        return [transmit_pulse(center_frequency, sampling_frequency)] * (n_tx or 1)
     waveforms = np.atleast_2d(np.asarray(waveforms_two_way, np.float64))
+    if n_tx is None:
+        n_tx = waveforms.shape[0]
     if waveforms.ndim != 2 or waveforms.shape[0] not in (1, n_tx):
         raise ValueError(
             f"waveforms_two_way must have shape (n_tx, n_samples) or (n_samples,), got "

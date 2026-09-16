@@ -326,7 +326,6 @@ def _slab_scene(n_el=48, speed=1400.0):
     args = {
         k: scan[k]
         for k in (
-            "probe_geometry",
             "sound_speed",
             "n_ax",
             "sampling_frequency",
@@ -337,6 +336,7 @@ def _slab_scene(n_el=48, speed=1400.0):
         )
     }
     reach = record_reach(**args, sos_map=trio["sos_map"])
+    args["probe_geometry"] = geometry
     rng = np.random.default_rng(4)
     x = rng.uniform(-0.012, 0.012, 200)
     z = rng.uniform(0.6, 1.0, 200) * reach
@@ -442,7 +442,8 @@ def test_record_helpers_gate_through_the_map():
     simulator's: kept scatterers give the record, dropped ones give zeros."""
     kwargs, args, trio = _slab_scene(n_el=16)
     rng = np.random.default_rng(5)
-    reach = record_reach(**args, sos_map=trio["sos_map"])
+    reach_args = {k: v for k, v in args.items() if k != "probe_geometry"}
+    reach = record_reach(**reach_args, sos_map=trio["sos_map"])
     positions = np.stack(
         [rng.uniform(-0.01, 0.01, 300), np.zeros(300), rng.uniform(0.5, 1.5, 300) * reach], -1
     ).astype(np.float32)
