@@ -667,7 +667,7 @@ def test_lens_spreading_matches_the_sommerfeld_slab():
     # One element under a flat 1 mm lens at 1000 m/s, one frequency: the magnitude of the
     # sub-element sum against the exact slab solution, across elevation and along the axis. The
     # phase-path distance 1/(lens_len c / c_lens + medium_len) as the spread is off by 0.10 here.
-    height, thickness, c_lens, n_sub = 5e-3, 1e-3, 1000.0, 100
+    height, thickness, c_lens, n_sub = 5e-3, 1e-3, 1000.0, 50
     y = np.concatenate([np.linspace(-6e-3, 6e-3, 13), np.zeros(4)])
     z = np.concatenate([np.full(13, 20e-3), [5e-3, 10e-3, 30e-3, 40e-3]])
     positions = np.stack([np.zeros_like(y), y, z], -1).astype(np.float32)

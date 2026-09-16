@@ -131,7 +131,8 @@ def test_every_feature_is_invariant_to_fft_length_and_frequency_blocks(name):
     kwargs = tensors(CASES[name])
     reference = simulate_rf(**kwargs)
     assert np.isfinite(to_np(reference)).all() and np.abs(to_np(reference)).max() > 0
-    assert_close(reference, simulate_rf(**kwargs, n_fft=2048, max_chunk_gb=1e-4), rel_tol=1e-4)
+    # 1e-3 GB splits every case into 3 to 7 blocks; smaller budgets only cost eager time.
+    assert_close(reference, simulate_rf(**kwargs, n_fft=2048, max_chunk_gb=1e-3), rel_tol=1e-4)
 
 
 def test_band_limit_drops_only_the_spectral_floor():

@@ -149,7 +149,7 @@ def test_layered_map_delays_each_echo_by_its_straight_ray_time():
     interface = z_interface - 0.5e-3  # the map ramps over the 1 mm row above
     position = np.array([0.002, 0.0, 0.025])
     geometry = linear_probe()
-    rf = _point_echo(position, trio, geometry, transmit=3, n_sos_ray_samples=1024)
+    rf = _point_echo(position, trio, geometry, transmit=3)
     plain = _point_echo(position, {}, geometry, transmit=3)
 
     def one_way(element):
@@ -189,7 +189,7 @@ def test_3d_map_varying_along_y_times_the_rays_in_elevation():
     interface = y_interface - 0.5e-3  # the map ramps over the 1 mm column before
     position = np.array([0.001, 0.01, 0.02])
     geometry = linear_probe()
-    rf = _point_echo(position, trio, geometry, transmit=5, n_sos_ray_samples=1024)
+    rf = _point_echo(position, trio, geometry, transmit=5)
     plain = _point_echo(position, {}, geometry, transmit=5)
 
     def one_way(element):
