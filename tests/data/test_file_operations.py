@@ -821,6 +821,7 @@ class TestStreamingOperations:
 
     @staticmethod
     def _assert_files_equal(expected, actual):
+        """Assert two files hold the same datasets, with the same contents."""
         left, right = (
             TestStreamingOperations._datasets(expected),
             TestStreamingOperations._datasets(actual),
@@ -854,6 +855,7 @@ class TestStreamingOperations:
         self._assert_files_equal(tmp_path / "eager.hdf5", tmp_path / "streamed.hdf5")
 
     def test_resave_never_reads_more_than_one_slab(self, input_path, tmp_path, reads, monkeypatch):
+        """Peak memory is one slab: no single read pulls in more than the budget."""
         monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 64 * 1024)
 
         resave(input_path, tmp_path / "streamed.hdf5")
@@ -866,6 +868,7 @@ class TestStreamingOperations:
     def test_results_do_not_depend_on_the_slab_size(
         self, input_path, tmp_path, monkeypatch, max_slab_bytes
     ):
+        """How an array is cut up is an implementation detail, not part of the result."""
         monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 64 << 20)
         reference = tmp_path / "reference.hdf5"
         resave(input_path, reference)
@@ -887,6 +890,7 @@ class TestStreamingOperations:
         self._assert_files_equal(tmp_path / "extract_reference.hdf5", tmp_path / "extract.hdf5")
 
     def test_extract_reads_only_the_requested_frames(self, input_path, tmp_path, reads):
+        """Extracting costs the size of the extraction, not that of the input."""
         extract_frames_transmits(input_path, tmp_path / "extracted.hdf5", frame_indices=[1])
 
         with File(input_path) as f:
@@ -895,6 +899,7 @@ class TestStreamingOperations:
         assert raw_data_read == frame_bytes, "only the extracted frame should be read"
 
     def test_extract_selects_the_requested_data(self, input_path, tmp_path):
+        """Partial reads still honour an out-of-order selection, HDF5 or not."""
         with File(input_path) as f:
             # h5py only takes increasing selections; index the loaded array instead.
             raw_data = f["data/raw_data"][()]

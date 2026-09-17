@@ -2295,6 +2295,7 @@ class TestSlabIteration:
     @pytest.mark.parametrize("max_bytes", [1, 8, 64, 1 << 20])
     @pytest.mark.parametrize("split_axes", [True, False])
     def test_slabs_tile_the_array(self, shape, max_bytes, split_axes):
+        """The slabs cover every element exactly once, whatever the budget."""
         array = np.arange(int(np.prod(shape)), dtype=np.int32).reshape(shape)
         reassembled = np.zeros_like(array)
         covered = 0
@@ -2305,11 +2306,13 @@ class TestSlabIteration:
         assert covered == array.size, "slabs must not overlap"
 
     def test_slabs_respect_the_budget(self):
+        """No slab holds more than the bytes it was allowed."""
         array = np.zeros((16, 4, 8), dtype=np.float32)  # 128 bytes per frame
         sizes = {slab.nbytes for _, slab in iter_slabs(array, max_bytes=512)}
         assert max(sizes) <= 512
 
     def test_an_oversized_frame_splits_the_next_axis_in(self):
+        """A frame over budget is cut further rather than blowing the budget."""
         array = np.zeros((4, 8, 4), dtype=np.float32)  # 128 bytes per frame
         slabs = list(iter_slabs(array, max_bytes=64))
         assert max(slab.nbytes for _, slab in slabs) <= 64
@@ -2318,12 +2321,14 @@ class TestSlabIteration:
         )
 
     def test_split_axes_false_keeps_whole_frames(self):
+        """A reduction needs each frame intact, so oversized frames stay whole."""
         array = np.zeros((4, 8, 4), dtype=np.float32)
         slabs = list(iter_slabs(array, max_bytes=64, split_axes=False))
         # Oversized, but each slab is one whole frame: a reduction needs them intact.
         assert [slab.shape for _, slab in slabs] == [(1, 8, 4)] * 4
 
     def test_slabs_align_to_chunk_boundaries(self):
+        """Slabs start on a chunk boundary, so no chunk is written twice."""
         array = np.zeros((10, 4), dtype=np.float32)  # 16 bytes per frame
         selections = [selection for selection, _ in iter_slabs(array, 100, chunks=(3, 4))]
         starts = [selection[0].start for selection in selections]
@@ -2332,9 +2337,11 @@ class TestSlabIteration:
         )
 
     def test_empty_array_yields_no_slabs(self):
+        """An empty array has nothing to copy."""
         assert list(iter_slabs(np.zeros((0, 3), dtype=np.float32))) == []
 
     def test_scalar_array_yields_one_slab(self):
+        """A 0-d array is one slab selected by the empty tuple."""
         [(selection, slab)] = list(iter_slabs(np.array(3.0)))
         assert selection == () and slab == 3.0
 
@@ -2363,6 +2370,7 @@ class TestLazyArrays:
             file.close()
 
     def test_is_array_like_excludes_values_that_merely_have_a_dtype(self):
+        """Numpy scalars and strings carry a dtype and a shape, but are values."""
         assert is_array_like(np.zeros(3))
         assert not is_array_like(np.str_("label"))
         assert not is_array_like(np.float32(1.0))
@@ -2370,12 +2378,14 @@ class TestLazyArrays:
         assert not is_array_like([1, 2, 3])
 
     def test_an_hdf5_dataset_is_a_lazy_array(self, on_disk):
+        """An unread dataset describes itself like an array, and is marked lazy."""
         dataset = on_disk(np.zeros((2, 3), dtype=np.float32))
         assert is_array_like(dataset) and is_lazy_array(dataset)
         assert not is_lazy_array(np.zeros((2, 3)))
         assert spec_module.value_shape(dataset) == (2, 3)
 
     def test_spec_validates_shape_and_dtype_of_a_lazy_array(self, on_disk):
+        """Metadata is enough to accept a valid array and reject a wrong dtype."""
         image = Image(values=on_disk(np.zeros((2, 4, 4), dtype=np.float32)))
         assert image.values.shape == (2, 4, 4)
 
@@ -2390,6 +2400,7 @@ class TestLazyArrays:
         Image(values=on_disk(invalid_db))
 
     def test_lazy_values_are_written_slab_by_slab(self, tmp_path, on_disk, monkeypatch):
+        """A dataset filled one slab at a time holds exactly the source values."""
         values = np.arange(8 * 16, dtype=np.float32).reshape(8, 16)
         source = on_disk(values)
         monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 64)  # one frame per slab
