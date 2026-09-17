@@ -756,20 +756,23 @@ class H5DataSource:
         self._all_caches_lock = threading.Lock()
 
     def _collect_file_dim_sizes(self, num_dims: int) -> dict[str, dict[str, int]]:
-        """Map each file to the full extent it stores for every selected dimension.
+        """Map each file to the full extent it stores for every selected or indexed dimension.
 
         Read per file because files may disagree on ``n_tx`` even under one selection.
-        See :func:`~zea.data.metadata.select_metadata_axes` for what it is used for.
+        See :func:`~zea.data.metadata.select_metadata_axes` and
+        :func:`~zea.data.metadata.index_metadata_axes` for what it is used for.
         """
-        if not self._dim_selections:
+        if not self._dim_selections and not self._indexed_dimensions:
             return {}
-        # Not None: _dim_selections is only non-empty when the spec named these axes.
+        # Not None: _dim_selections and _indexed_dimensions are only non-empty when the spec named these axes.
         dim_names = dim_names_for_key(self.key, num_dims)
         assert dim_names is not None
+        # Collect axes for both axis_selections (slice/list) and additional_axes_iter (int index)
+        relevant_dims = (self._dim_selections.keys() if self._dim_selections else set()) | self._indexed_dimensions
         selected_axes = {
             axis: dim
-            for axis in self.normalized_axis_selections
-            if (dim := dim_names[axis]) is not None and dim in self._dim_selections
+            for axis, dim in enumerate(dim_names)
+            if dim is not None and dim in relevant_dims
         }
         return {
             path: {dim: shape[axis] for axis, dim in selected_axes.items()}
