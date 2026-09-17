@@ -280,7 +280,11 @@ class _CompoundTransmits:
 
 @dataclass
 class _Resave:
-    """Resave a file to change format version."""
+    """Resave a file to change format version.
+
+    The data is copied one slab at a time and never held whole in memory, so a file
+    larger than RAM can be resaved.
+    """
 
     input_path: tyro.conf.Positional[str]
     """Input HDF5 file or folder. Also accepts an 'hf://' path."""
