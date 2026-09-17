@@ -191,8 +191,9 @@ def checkpoint(func):
         import torch.utils.checkpoint
 
         @functools.wraps(func)
-        def wrapper(*args):
-            return torch.utils.checkpoint.checkpoint(func, *args, use_reentrant=False)
+        def wrapper(*args, **kwargs):
+            # Keyword arguments are only forwarded by the non-reentrant checkpoint.
+            return torch.utils.checkpoint.checkpoint(func, *args, use_reentrant=False, **kwargs)
 
         return wrapper
     return func

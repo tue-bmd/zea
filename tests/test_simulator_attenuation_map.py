@@ -116,6 +116,22 @@ UNIFORM_CASES = {
 }
 
 
+def test_straight_ray_sampler_rejects_no_samples():
+    from zea.func.ultrasound import straight_ray_mean
+
+    axis = np.linspace(0.0, 1.0, 4, dtype=np.float32)
+    with pytest.raises(ValueError, match="n_samples"):
+        straight_ray_mean(
+            np.zeros((2, 3), np.float32),
+            np.zeros((1, 3), np.float32),
+            np.ones((4, 4), np.float32),
+            axis,
+            axis,
+            0.0,
+            n_samples=0,
+        )
+
+
 @pytest.mark.parametrize("name", list(UNIFORM_CASES))
 def test_uniform_map_is_the_homogeneous_medium(name):
     kwargs = dict(UNIFORM_CASES[name])

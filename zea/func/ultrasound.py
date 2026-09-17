@@ -702,6 +702,8 @@ def _straight_ray_mean(
         axes.append((1, ops.cast(grid_y, "float32")))
     segment = positions[:, None] - start
     n_samples = int(n_samples)
+    if n_samples < 1:
+        raise ValueError(f"n_samples must be at least 1, got {n_samples}.")
 
     def body(i, total):
         t = (ops.cast(i, "float32") + 0.5) / n_samples

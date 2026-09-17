@@ -119,7 +119,7 @@ from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 from zea.probes import Probe, fit_curved_probe_radius
-from zea.simulator import fft_length
+from zea.simulator import _shift_np, fft_length
 
 
 class Parameters(BaseParameters):
@@ -346,6 +346,8 @@ class Parameters(BaseParameters):
         # Attenuation map [dB/cm/MHz] of zea.simulator.simulate_rf, on the grid of sos_map.
         "attenuation_map": {"dtype": (np.float32, type(None)), "default": None},
         "element_normals": {"dtype": (type(None), np.ndarray), "default": None},
+        # Sampling frequency [Hz] of waveforms_two_way (Verasonics stores them at 250 MHz).
+        "waveform_sampling_frequency": {"dtype": np.float32, "default": 250e6},
     }
 
     # Add some defaults that are not stored in a file
@@ -947,8 +949,8 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("selected_transmits", "n_el", "n_tx")
     def t0_delays(self):
-        """Transmit delays in seconds of
-        shape (n_tx, n_el), shifted such that the smallest delay is 0."""
+        """Transmit delays in seconds of shape (n_tx, n_el), shifted such that the smallest
+        delay is 0. (n_tx, n_mpt, n_el) for the multi-plane transmits of the simulator."""
         value = self._params.get("t0_delays")
         if value is None:
             log.warning_once(
@@ -1077,7 +1079,9 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "selected_transmits", "waveforms_two_way")
+    @cache_with_dependencies(
+        "center_frequency", "selected_transmits", "waveforms_two_way", "waveform_sampling_frequency"
+    )
     def t_peak(self):
         """The time of the peak of the pulse in seconds of shape (n_tx,).
 
@@ -1094,7 +1098,11 @@ class Parameters(BaseParameters):
         waveforms = self.waveforms_two_way
         if waveforms is None:
             return np.full(self.n_tx, 1 / self.center_frequency)
-        t_peak = ops.convert_to_numpy(compute_time_to_peak_stack(waveforms, self.center_frequency))
+        t_peak = ops.convert_to_numpy(
+            compute_time_to_peak_stack(
+                waveforms, self.center_frequency, self.waveform_sampling_frequency
+            )
+        )
         if t_peak.shape[0] == 1:
             t_peak = np.repeat(t_peak, self.n_tx)
         return t_peak
@@ -1109,6 +1117,7 @@ class Parameters(BaseParameters):
         "initial_times",
         "t_peak",
         "waveforms_two_way",
+        "waveform_sampling_frequency",
         "sos_map",
     )
     def n_fft(self):
@@ -1122,7 +1131,7 @@ class Parameters(BaseParameters):
         n_fft = self._params.get("n_fft")
         if n_fft is not None:
             return n_fft
-        shift = self.t0_delays - self.initial_times[:, None] + self.t_peak[:, None]
+        shift = _shift_np(self.t0_delays, self.initial_times, self.t_peak)  # rank-aware (mpt)
         return fft_length(
             self.n_ax,
             self.sampling_frequency,
@@ -1132,6 +1141,7 @@ class Parameters(BaseParameters):
             shift.min(),
             shift.max(),
             waveforms_two_way=self.waveforms_two_way,
+            waveform_sampling_frequency=self.waveform_sampling_frequency,
             sos_map=self.sos_map,
         )
 

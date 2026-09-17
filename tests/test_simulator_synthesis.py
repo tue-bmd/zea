@@ -566,6 +566,80 @@ def test_parameters_derive_n_fft_for_a_jitted_pipeline():
     assert_close(simulate_rf(**kwargs), outputs["data"], rel_tol=1e-3)
 
 
+def _parameters(transmit, **overrides):
+    return zea.Parameters(
+        n_tx=4,
+        n_el=16,
+        n_ax=N_AX,
+        center_frequency=CENTER_FREQUENCY,
+        sampling_frequency=SAMPLING_FREQUENCY,
+        probe_geometry=transmit["probe_geometry"],
+        t0_delays=transmit["t0_delays"],
+        initial_times=transmit["initial_times"],
+        t_peak=transmit.get("t_peak"),
+        tx_apodizations=transmit["tx_apodizations"],
+        sound_speed=SOUND_SPEED,
+        selected_transmits="all",
+        apply_lens_correction=False,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        element_width=0.27e-3,
+        attenuation_coef=0.5,
+        **overrides,
+    )
+
+
+def test_multi_plane_delays_derive_n_fft():
+    """(n_tx, n_mpt, n_el) delays size the FFT from the latest delay set, in the op and in the
+    parameters."""
+    from zea.ops.ultrasound import _derived_fft_length
+
+    kwargs = dict(CASES["linear"])
+    single = kwargs["t0_delays"]
+    kwargs["t0_delays"] = np.stack([single, single + 2e-6], axis=1)
+    kwargs["initial_times"] = np.full(4, 1e-6, np.float32)
+    kwargs["t_peak"] = np.linspace(0, 1e-6, 4, dtype=np.float32)
+    shift = kwargs["t0_delays"] + (kwargs["t_peak"] - kwargs["initial_times"])[:, None, None]
+    expected = fft_length(
+        N_AX,
+        SAMPLING_FREQUENCY,
+        CENTER_FREQUENCY,
+        SOUND_SPEED,
+        kwargs["probe_geometry"],
+        shift.min(),
+        shift.max(),
+    )
+    assert _derived_fft_length(kwargs) == expected
+    assert _parameters(kwargs).n_fft == expected
+
+    op = Simulate(jit_compile=False, with_batch_dim=False)
+    assert_close(simulate_rf(**kwargs, n_fft=expected), op(**tensors(kwargs))[op.output_key])
+
+
+def test_parameters_use_the_waveform_sampling_frequency():
+    """``t_peak`` and ``n_fft`` read ``waveforms_two_way`` at ``waveform_sampling_frequency``."""
+    transmit = scan(linear_probe())
+    transmit.pop("t_peak")
+    waveform = hann_waveform()[None, ::5]  # the 250 MHz pulse, sampled at 50 MHz
+    default = _parameters(transmit, waveforms_two_way=waveform)
+    at_rate = _parameters(transmit, waveforms_two_way=waveform, waveform_sampling_frequency=50e6)
+    np.testing.assert_allclose(at_rate.t_peak, 5 * default.t_peak, rtol=0.05)
+    shift = transmit["t0_delays"] + (at_rate.t_peak - transmit["initial_times"])[:, None]
+    assert at_rate.n_fft == fft_length(
+        N_AX,
+        SAMPLING_FREQUENCY,
+        CENTER_FREQUENCY,
+        SOUND_SPEED,
+        transmit["probe_geometry"],
+        shift.min(),
+        shift.max(),
+        waveforms_two_way=waveform,
+        waveform_sampling_frequency=50e6,
+    )
+    inputs = Pipeline([Simulate()], with_batch_dim=False).prepare_parameters(at_rate)
+    assert float(inputs["waveform_sampling_frequency"]) == 50e6
+
+
 def test_per_scatterer_scatter_exponent_matches_the_shared_one():
     """A constant vector of exponents is the scalar it repeats."""
     kwargs = CASES["matrix"]

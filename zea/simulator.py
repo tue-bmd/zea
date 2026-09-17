@@ -291,6 +291,7 @@ def simulate_rf(
         n_sos_ray_samples (int): Samples of the maps along each ray. Must be static under jit.
         attenuation_map (array-like, optional): Attenuation map [dB/cm/MHz] on the grid of
             ``sos_map`` (the same ``map_grid_*`` arguments, with or without a ``sos_map``).
+            :class:`zea.data.spec.AttenuationMap` stores dB/m/Hz: multiply a stored map by 1e4.
             The medium part of every path is then attenuated by the mean coefficient along its
             straight ray (:func:`zea.func.ultrasound.straight_ray_mean`), with
             ``attenuation_coef`` outside the map. The lens part keeps ``lens_attenuation_coef``.

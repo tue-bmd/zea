@@ -36,6 +36,7 @@ from zea.ops.base import Filter, Operation
 from zea.simulator import (
     _concrete,
     _ndim,
+    _shift_np,
     apply_receive_chain,
     fft_length,
     scatter_exponent_bounds,
@@ -115,7 +116,7 @@ def _derived_fft_length(kwargs):
         if sos_map is None:
             return None
     t0, t_init, t_peak, geometry, sound_speed = raw
-    shift = t0 - t_init[:, None] + t_peak[:, None]
+    shift = _shift_np(t0, t_init, t_peak)  # rank-aware: t0 may hold multi-plane delay sets
     return fft_length(
         int(kwargs["n_ax"]),
         float(kwargs["sampling_frequency"]),
