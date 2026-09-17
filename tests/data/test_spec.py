@@ -2421,6 +2421,16 @@ class TestLazyArrays:
         assert is_lazy_array(image.values), "recasting must not materialise the array"
         np.testing.assert_array_equal(image.values[0:1], values[0:1].astype(np.float32))
 
+    def test_a_recast_slab_stays_within_the_budget(self, on_disk):
+        """A slab that converts on read holds both buffers, and both count against it."""
+        source = on_disk(np.zeros((8, 16), dtype=np.float64))
+        casting = spec_module._CastArray(source, np.float32)
+
+        budget = 16 * (8 + 4)  # one row of source plus its float32 conversion
+        for _, slab in iter_slabs(casting, max_bytes=budget):
+            held = slab.nbytes + slab.size * source.dtype.itemsize
+            assert held <= budget, f"a slab held {held} bytes of a {budget} byte budget"
+
     def test_a_recast_lazy_value_is_written_in_the_schema_dtype(self, tmp_path, on_disk):
         """What lands on disk is the converted array, whatever the source dtype was."""
         values = np.arange(2 * 4 * 4, dtype=np.float64).reshape(2, 4, 4)

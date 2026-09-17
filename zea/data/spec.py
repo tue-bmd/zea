@@ -250,9 +250,10 @@ def iter_slabs(
 
     Args:
         array: Any array-like (see :func:`is_array_like`).
-        max_bytes (int, optional): Memory budget for one slab, uncompressed. Read from
-            :data:`MAX_SLAB_BYTES` when not given, so that setting the module constant
-            takes effect everywhere.
+        max_bytes (int, optional): Memory budget for one slab, uncompressed, covering
+            everything a slab holds at once — including the source buffer where the array
+            converts on read (see :func:`_read_itemsize`). Read from :data:`MAX_SLAB_BYTES`
+            when not given, so that setting the module constant takes effect everywhere.
         chunks (tuple, optional): The *destination* chunk shape, when copying into an HDF5
             dataset; slab boundaries are aligned to it.
         split_axes (bool): Whether a slab may cover only part of an outer index when a
@@ -271,7 +272,7 @@ def iter_slabs(
     if max_bytes is None:
         max_bytes = MAX_SLAB_BYTES
     for selection in _slab_selections(
-        tuple(array.shape), array.dtype.itemsize, max_bytes, chunks, split_axes
+        tuple(array.shape), _read_itemsize(array), max_bytes, chunks, split_axes
     ):
         yield selection, np.asarray(array[selection])
 
@@ -287,7 +288,7 @@ class _CastArray:
     Provides :data:`_ARRAY_ATTRIBUTES`, so it is an array everywhere a spec looks.
     """
 
-    __slots__ = ("_source", "dtype", "shape", "ndim", "size", "nbytes")
+    __slots__ = ("_source", "dtype", "shape", "ndim", "size", "nbytes", "source_itemsize")
 
     def __init__(self, source: Any, dtype: Any):
         self._source = source
@@ -298,6 +299,7 @@ class _CastArray:
         self.ndim = len(self.shape)
         self.size = int(math.prod(self.shape))
         self.nbytes = self.size * self.dtype.itemsize
+        self.source_itemsize = np.dtype(source.dtype).itemsize
 
     def __getitem__(self, selection) -> np.ndarray:
         """Read a selection from the source and convert just that much."""
@@ -310,6 +312,17 @@ class _CastArray:
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__} shape={self.shape} dtype={self.dtype}>"
+
+
+def _read_itemsize(array: Any) -> int:
+    """Bytes one element of ``array`` costs to read, which is not always its dtype's.
+
+    Reading a slab of a :class:`_CastArray` holds the source element and the converted one
+    at the same time, so budgeting by the destination dtype alone would let a float64
+    source read twice :data:`MAX_SLAB_BYTES`. Any array that does not convert on read
+    reports ``source_itemsize`` of 0 by omission, and costs just its own dtype.
+    """
+    return array.dtype.itemsize + getattr(array, "source_itemsize", 0)
 
 
 def value_shape(value: Any) -> tuple:
