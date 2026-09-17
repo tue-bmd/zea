@@ -133,6 +133,25 @@ def test_multi_plane_transmit_is_the_sum_of_its_delay_sets(fish_scan):
     np.testing.assert_allclose(mpt[0], separate.sum(0), atol=1e-4 * np.abs(separate).max())
 
 
+def test_scatterer_chunks_below_one_bin_budget_sum_to_the_whole(fish_scan):
+    """A budget below one frequency bin of all scatterers chunks the scatterers instead."""
+    positions, args, _ = fish_scan
+    grid_x = np.linspace(-30e-3, 30e-3, 61, dtype=np.float32)
+    grid_z = np.linspace(0, 40e-3, 41, dtype=np.float32)
+    sos_map = np.full((41, 61), SOUND_SPEED, np.float32)
+    sos_map[15:25, 20:40] = 1600.0
+    args = {
+        **args,
+        "scatter_exponent": np.linspace(0.5, 2.0, len(positions), dtype=np.float32),
+        "sos_map": sos_map,
+        "map_grid_x": grid_x,
+        "map_grid_z": grid_z,
+    }
+    whole = _np(simulate_rf(**args))
+    chunked = _np(simulate_rf(**args, max_chunk_gb=2e-5))  # four chunks of the fish
+    np.testing.assert_allclose(chunked, whole, atol=1e-4 * np.abs(whole).max())
+
+
 def _dot_brightness(image, positions):
     z = np.linspace(ZLIMS[0], ZLIMS[1], image.shape[0])
     x = np.linspace(XLIMS[0], XLIMS[1], image.shape[1])

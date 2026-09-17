@@ -192,9 +192,12 @@ def simulate_rf(
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity. If None, an eighth of the width of a 1D probe (at least
             ``element_width``), or ``element_width`` for a 2D probe.
-        max_chunk_gb (float): Memory budget [GB] for one frequency block. Larger blocks run
-            the batched matrix products more efficiently: 4 GB is about 25% faster than 1 GB
-            at 100k scatterers on a GPU, and up to 2x on CPU. Lower it if memory is tight.
+        max_chunk_gb (float): Memory budget [GB] for one block of work: a block of frequency
+            bins over all scatterers, or, when one bin of every scatterer-element response
+            (about ``8 * n_scat * n_el`` bytes) exceeds the budget, one bin over a chunk of
+            scatterers, with the chunks summed. Larger blocks run the batched matrix products
+            more efficiently: 4 GB is about 25% faster than 1 GB at 100k scatterers on a GPU,
+            and up to 2x on CPU. Lower it if memory is tight.
         noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
             maximum. None disables the noise. Must be static under jit.
         tgc_max_db (float): Time gain compensation in dB at the last axial sample, ramped
@@ -382,35 +385,44 @@ def simulate_rf(
     wave = _pulse_spectra(pulses, np.fft.rfftfreq(n_fft, 1 / fs)[k0:k1])
 
     # Forward of one block per bin: the complex responses and the two matrix product outputs.
-    per_bin = 8 * ((2 if two_dimensional else 1) * n_scat * n_el + n_tx * n_scat + n_tx * n_el)
-    blocks = _band_blocks(n_fft, fs, k0, k1, per_bin, max_chunk_gb * 2**30)
+    # A single bin can still exceed the budget, so scatterers are chunked as well.
+    budget = max_chunk_gb * 2**30
+    per_scat = 8 * ((2 if two_dimensional else 1) * n_el + n_tx)
+    chunk = int(min(n_scat, max(1, (budget - 8 * n_tx * n_el) // per_scat)))
+    n_chunks = -(-n_scat // chunk)
+    chunk = -(-n_scat // n_chunks)
+    blocks = _band_blocks(n_fft, fs, k0, k1, per_scat * chunk + 8 * n_tx * n_el, budget)
+    per_scatterer_exponent = scatter_exponent is not None and _ndim(scatter_exponent) == 1
 
-    # The straight-ray slowness and attenuation of every path, once for all frequency blocks.
-    slowness, attenuation = _ray_means(
-        positions,
-        model,
-        sos_map,
-        attenuation_map,
-        map_grid_x,
-        map_grid_z,
-        map_grid_y,
-        n_sos_ray_samples,
-    )
-
-    block = _checkpointed_block(
-        _rf_block,
-        positions=positions,
-        magnitudes=magnitudes,
-        model=model,
-        slowness=slowness,
-        attenuation=attenuation,
-        shift=shift,
-        tx_apodizations=ops.cast(tx_apodizations, "float32"),
-        center_frequency=fc,
-        gate_time=_record_gate_time(n_ax, fs, _pulse_tail(pulses)),
-        scatter_exponent=scatter_exponent,
-    )
-    spectrum = _band_spectrum(block, blocks, (n_tx, n_el)) * ops.convert_to_tensor(wave)[:, :, None]
+    spectrum = ops.zeros((blocks.n_kept, n_tx, n_el), "complex64")
+    for start in range(0, n_scat, chunk):
+        part = slice(start, start + chunk)
+        # The straight-ray slowness and attenuation of every path, once for all frequency blocks.
+        slowness, attenuation = _ray_means(
+            positions[part],
+            model,
+            sos_map,
+            attenuation_map,
+            map_grid_x,
+            map_grid_z,
+            map_grid_y,
+            n_sos_ray_samples,
+        )
+        block = _checkpointed_block(
+            _rf_block,
+            positions=positions[part],
+            magnitudes=magnitudes[part],
+            model=model,
+            slowness=slowness,
+            attenuation=attenuation,
+            shift=shift,
+            tx_apodizations=ops.cast(tx_apodizations, "float32"),
+            center_frequency=fc,
+            gate_time=_record_gate_time(n_ax, fs, _pulse_tail(pulses)),
+            scatter_exponent=scatter_exponent[part] if per_scatterer_exponent else scatter_exponent,
+        )
+        spectrum = spectrum + _band_spectrum(block, blocks, (n_tx, n_el))
+    spectrum = spectrum * ops.convert_to_tensor(wave)[:, :, None]
 
     # Transmits in groups, so a long record over many transmits does not allocate at once.
     group = min(32, n_tx)
