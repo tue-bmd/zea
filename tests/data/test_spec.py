@@ -2377,6 +2377,18 @@ class TestLazyArrays:
         assert not is_array_like("label")
         assert not is_array_like([1, 2, 3])
 
+    def test_a_partial_array_is_not_array_like(self):
+        """Everything the save path uses is required up front, not discovered mid-write."""
+
+        class OnlyShapeAndDtype:
+            shape = (2, 3)
+            dtype = np.dtype("float32")
+
+            def __getitem__(self, selection):
+                raise AssertionError("should never be read")
+
+        assert not is_array_like(OnlyShapeAndDtype())
+
     def test_an_hdf5_dataset_is_a_lazy_array(self, on_disk):
         """An unread dataset describes itself like an array, and is marked lazy."""
         dataset = on_disk(np.zeros((2, 3), dtype=np.float32))
@@ -2398,6 +2410,25 @@ class TestLazyArrays:
         with pytest.raises(ValueError, match="dB scale"):
             Image(values=invalid_db)
         Image(values=on_disk(invalid_db))
+
+    def test_a_lazy_value_is_recast_without_being_read(self, on_disk):
+        """A float64 field for a float32 schema is converted per slab, not loaded whole."""
+        values = np.zeros((2, 4, 4), dtype=np.float64)
+        image = Image(values=on_disk(values))
+
+        assert image.values.dtype == np.float32
+        assert is_lazy_array(image.values), "recasting must not materialise the array"
+        np.testing.assert_array_equal(image.values[0:1], values[0:1].astype(np.float32))
+
+    def test_a_recast_lazy_value_is_written_in_the_schema_dtype(self, tmp_path, on_disk):
+        """What lands on disk is the converted array, whatever the source dtype was."""
+        values = np.arange(2 * 4 * 4, dtype=np.float64).reshape(2, 4, 4)
+        image = Image(values=on_disk(-values))
+
+        with h5py.File(tmp_path / "out.hdf5", "w") as out:
+            image.store_in_group(out, warn_missing_optional_fields=False)
+            assert out["values"].dtype == np.float32
+            np.testing.assert_array_equal(out["values"][()], -values.astype(np.float32))
 
     def test_lazy_values_are_written_slab_by_slab(self, tmp_path, on_disk, monkeypatch):
         """A dataset filled one slab at a time holds exactly the source values."""

@@ -136,15 +136,23 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     )
 
 
+#: What an array has to provide to be stored by a spec: ``shape`` and ``dtype`` to
+#: validate it against the schema, ``ndim``/``size``/``nbytes`` to pick a chunk shape and
+#: a slab size, and indexing to read it. Everything downstream — :meth:`Spec.create_dataset`,
+#: :meth:`Spec._resolve_chunks`, :func:`iter_slabs` — uses only these, so an object with
+#: all of them can be saved, and one without them is not treated as an array at all rather
+#: than failing later with an ``AttributeError``.
+_ARRAY_ATTRIBUTES = ("shape", "dtype", "ndim", "size", "nbytes", "__getitem__")
+
+
 def is_array_like(value: Any) -> bool:
     """Whether ``value`` is an n-dimensional array the spec can describe and store.
 
-    A :class:`numpy.ndarray`, but also any object that carries a ``shape``, a ``dtype``
-    and numpy-style indexing without holding its contents in memory — an
-    :class:`h5py.Dataset`, a :class:`zea.data.file.ChunkedDataset`, and anything else
-    that reads like one.  Such a *lazy* array is validated from its metadata and copied
-    slab by slab (see :func:`iter_slabs`), so a file can be rewritten without ever fitting
-    in RAM.
+    A :class:`numpy.ndarray`, but also any object providing :data:`_ARRAY_ATTRIBUTES`
+    without holding its contents in memory — an :class:`h5py.Dataset`, a
+    :class:`zea.data.file.ChunkedDataset`, and anything else that reads like one.  Such a
+    *lazy* array is validated from its metadata and copied slab by slab (see
+    :func:`iter_slabs`), so a file can be rewritten without ever fitting in RAM.
 
     Strings and numpy scalars are excluded: they carry a ``dtype`` and a ``shape`` of
     their own but are values, not arrays.
@@ -153,7 +161,7 @@ def is_array_like(value: Any) -> bool:
         return True
     if isinstance(value, (str, bytes, np.generic)):
         return False
-    return hasattr(value, "shape") and hasattr(value, "dtype") and hasattr(value, "__getitem__")
+    return all(hasattr(value, attribute) for attribute in _ARRAY_ATTRIBUTES)
 
 
 def is_lazy_array(value: Any) -> bool:
@@ -266,6 +274,50 @@ def iter_slabs(
         tuple(array.shape), array.dtype.itemsize, max_bytes, chunks, split_axes
     ):
         yield selection, np.asarray(array[selection])
+
+
+class _CastArray:
+    """A lazy array read through a dtype conversion.
+
+    Reports ``dtype`` while its contents stay where they are: they are converted only as
+    (part of) the array is read.  A field an older file stored as float64 where the schema
+    says float32 is therefore still written out slab by slab, instead of being loaded whole
+    to be recast — which is exactly what the lazy path exists to avoid.
+
+    Provides :data:`_ARRAY_ATTRIBUTES`, so it is an array everywhere a spec looks.
+    """
+
+    __slots__ = ("_source", "dtype")
+
+    def __init__(self, source: Any, dtype: Any):
+        self._source = source
+        self.dtype = np.dtype(dtype)
+
+    @property
+    def shape(self) -> tuple:
+        return tuple(self._source.shape)
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
+
+    @property
+    def size(self) -> int:
+        return int(math.prod(self.shape))
+
+    @property
+    def nbytes(self) -> int:
+        return self.size * self.dtype.itemsize
+
+    def __getitem__(self, selection) -> np.ndarray:
+        return np.asarray(self._source[selection]).astype(self.dtype, copy=False)
+
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        values = self[...]
+        return values if dtype is None else values.astype(dtype)
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} shape={self.shape} dtype={self.dtype}>"
 
 
 def value_shape(value: Any) -> tuple:
@@ -486,11 +538,10 @@ class Spec:
                 and np.issubdtype(value_dtype, np.floating)
                 and value_dtype != expected_float_dtype
             ):
-                # Recasting is the one thing a lazy array cannot do in place, so it is read
-                # here — the same memory an eager load would have taken, and only for the
-                # float dtypes a zea file does not store (a stored field is already float32).
+                # A lazy array is recast as it is read, one slab at a time, rather than
+                # being loaded whole just to change dtype.
                 if is_lazy_array(value):
-                    value = np.asarray(value)
+                    return _CastArray(value, expected_float_dtype)
                 return value.astype(expected_float_dtype, copy=False)
 
             return value
@@ -803,7 +854,10 @@ class Spec:
 
         A lazy value — an ``h5py.Dataset`` or any other array-like whose contents are
         still on disk (see :func:`is_lazy_array`) — is copied slab by slab rather than
-        materialised, so the peak memory is one slab instead of the whole array.
+        materialised, so the peak memory is one slab instead of the whole array. A lazy
+        *string* array is the exception and is read whole: zea never defers strings (they
+        are channel labels and names, see :func:`zea.data.file._load_group_dict`), so the
+        read is bounded by construction.
         """
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
         chunks = None if dataset_is_scalar else Spec._resolve_chunks(value, dim_names, chunk_axes)
