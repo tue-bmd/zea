@@ -349,12 +349,14 @@ def tof_correction(
     if sos_map is None:
         return vmap(_correct_single_tx)(data, txdel)
 
-    # Heterogeneous path: apply transmit f-number mask and use gradient
-    # checkpointing to limit memory consumption. A pixel is lit by a transmit when at
-    # least one of its firing elements sees it inside the f-number cone.
+    # Heterogeneous path: gradient checkpointing to limit memory consumption, and the
+    # f-number mask of the firing element on the transmit side for single-element transmits
+    # (multistatic data): one element's directivity bounds the insonified region like a
+    # receive element's. Other transmit schemes get no transmit mask, as in the homogeneous path.
     active = ops.cast(ops.not_equal(tx_apodizations, 0.0), mask.dtype)  # (n_tx, n_el)
+    one_hot = ops.all(ops.sum(active, axis=-1) == 1)
     mask_tx = ops.max(mask[None, :, :, 0] * active[:, None, :], axis=-1)  # (n_tx, n_pix)
-    mask_tx = mask_tx[..., None]
+    mask_tx = ops.where(one_hot, mask_tx, ops.ones_like(mask_tx))[..., None]
     _correct_single_tx_ckpt = keras.remat(_correct_single_tx)
     return vmap(_correct_single_tx_ckpt)(data, txdel, mask_tx)
 

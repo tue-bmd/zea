@@ -841,6 +841,29 @@ def test_tof_correction_flat_map_grid_matches_homogeneous(probe_geometry, flatgr
     return heterogeneous
 
 
+def test_tof_correction_flat_map_grid_keeps_the_receive_aperture_only(probe_geometry, flatgrid):
+    """With an f-number and sub-aperture transmits, a constant map still matches the homogeneous
+    path: the transmit-side mask is reserved for single-element transmits."""
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=2)
+    inputs["f_number"] = 1.0
+    inputs["tx_apodizations"] = np.array([[1.0] * 3 + [0.0] * 5, [0.0] * 5 + [1.0] * 3], np.float32)
+    homogeneous = keras.ops.convert_to_numpy(tof_correction(**inputs))
+    nx_sos, nz_sos = 16, 16
+    heterogeneous = keras.ops.convert_to_numpy(
+        tof_correction(
+            **inputs,
+            sos_map=np.full((nz_sos, nx_sos), SOUND_SPEED, dtype=np.float32),
+            map_grid_x=np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32),
+            map_grid_z=np.linspace(0.0, 25e-3, nz_sos).astype(np.float32),
+        )
+    )
+    assert (np.abs(homogeneous).sum((0, 2, 3)) > 0).sum() > 0.5 * flatgrid.shape[0]
+    np.testing.assert_array_equal(
+        np.abs(homogeneous).sum((0, 2, 3)) > 0, np.abs(heterogeneous).sum((0, 2, 3)) > 0
+    )
+    assert np.mean(np.abs(homogeneous - heterogeneous)) < 1e-2 * np.mean(np.abs(homogeneous))
+
+
 def test_tof_correction_accepts_the_old_grid_names(probe_geometry, flatgrid, caplog):
     import logging
 
