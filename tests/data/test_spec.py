@@ -2385,6 +2385,7 @@ class TestLazyArrays:
             dtype = np.dtype("float32")
 
             def __getitem__(self, selection):
+                """Never called: the value should be rejected before anything reads it."""
                 raise AssertionError("should never be read")
 
         assert not is_array_like(OnlyShapeAndDtype())

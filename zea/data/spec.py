@@ -287,32 +287,24 @@ class _CastArray:
     Provides :data:`_ARRAY_ATTRIBUTES`, so it is an array everywhere a spec looks.
     """
 
-    __slots__ = ("_source", "dtype")
+    __slots__ = ("_source", "dtype", "shape", "ndim", "size", "nbytes")
 
     def __init__(self, source: Any, dtype: Any):
         self._source = source
         self.dtype = np.dtype(dtype)
-
-    @property
-    def shape(self) -> tuple:
-        return tuple(self._source.shape)
-
-    @property
-    def ndim(self) -> int:
-        return len(self.shape)
-
-    @property
-    def size(self) -> int:
-        return int(math.prod(self.shape))
-
-    @property
-    def nbytes(self) -> int:
-        return self.size * self.dtype.itemsize
+        # Fixed for the life of the wrapper (the source is a stored array), so they are
+        # resolved once here rather than on every slab.
+        self.shape = tuple(source.shape)
+        self.ndim = len(self.shape)
+        self.size = int(math.prod(self.shape))
+        self.nbytes = self.size * self.dtype.itemsize
 
     def __getitem__(self, selection) -> np.ndarray:
+        """Read a selection from the source and convert just that much."""
         return np.asarray(self._source[selection]).astype(self.dtype, copy=False)
 
     def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        """Materialise the whole array, for the callers that insist on one."""
         values = self[...]
         return values if dtype is None else values.astype(dtype)
 
