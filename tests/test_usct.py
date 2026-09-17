@@ -390,6 +390,50 @@ def test_usct_das_sos_map_matches_constant_speed_when_uniform():
     with_sos = np.asarray(ops.convert_to_numpy(with_sos))
     np.testing.assert_allclose(no_sos, with_sos, rtol=1e-3, atol=1e-3)
 
+    old_names = usct_reflectivity_das(
+        s["analytic"],
+        s["tx"],
+        s["rx"],
+        s["pixels"],
+        s["fs"],
+        s["t0"],
+        c,
+        **common,
+        sos_map=sos_map,
+        sos_grid_x=x_axis,
+        sos_grid_z=z_axis,
+        n_sos_ray_samples=32,
+    )
+    np.testing.assert_array_equal(np.asarray(ops.convert_to_numpy(old_names)), with_sos)
+
+
+def test_usct_op_accepts_the_old_grid_names():
+    """The pipeline op renames ``sos_grid_*`` before it checks that the map trio is complete."""
+    from zea.ops.usct import USCTReflectivityDAS
+
+    s = _small_scene(seed=13)
+    x_axis = np.linspace(-0.01, 0.01, 33).astype(np.float32)
+    z_axis = np.linspace(-0.01, 0.01, 33).astype(np.float32)
+    sos_map = np.full((33, 33), s["c"], dtype=np.float32)
+    op = USCTReflectivityDAS(tx_chunk=2, jit_compile=False)
+
+    def in_plane(xz):  # the op images the (x, z) plane of (x, y, z) positions
+        return np.insert(xz, 1, 0.0, axis=-1)
+
+    kwargs = dict(
+        flatgrid=in_plane(s["pixels"]),
+        probe_geometry=in_plane(s["rx"]),
+        transmit_origins=in_plane(s["tx"]),
+        sampling_frequency=s["fs"],
+        initial_times=s["t0"],
+        sound_speed=s["c"],
+        sos_map=sos_map,
+    )
+    kwargs[op.key] = s["analytic"].real[..., None]
+    new = op(**kwargs, map_grid_x=x_axis, map_grid_z=z_axis)[op.output_key]
+    old = op(**kwargs, sos_grid_x=x_axis, sos_grid_z=z_axis)[op.output_key]
+    np.testing.assert_array_equal(ops.convert_to_numpy(old), ops.convert_to_numpy(new))
+
 
 def test_usct_das_point_scatterer_peaks_at_true_location():
     """A single point scatterer on a full ring reconstructs to a peak at its

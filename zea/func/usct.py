@@ -18,6 +18,7 @@ from keras import ops
 
 from zea.func.tensor import vmap
 from zea.func.ultrasound import straight_ray_slowness
+from zea.internal.utils import renamed_keywords
 
 __all__ = [
     "straight_ray_times",
@@ -102,6 +103,7 @@ def _gather_time(trace, sample_pos, n_ax, interpolation):
     raise ValueError(f"interpolation must be 'linear' or 'nearest', got {interpolation!r}.")
 
 
+@renamed_keywords(sos_grid_x="map_grid_x", sos_grid_z="map_grid_z")
 def usct_reflectivity_das(
     analytic,
     transmit_origins,
@@ -158,7 +160,8 @@ def usct_reflectivity_das(
             transmits caused by sound-speed mismatch or calibration error,
             which grows with the size of the aperture spanned by a full ring.
         sos_map, map_grid_x, map_grid_z: optional SoS map and its in-plane axes,
-            enabling straight-ray SoS-corrected delays.
+            enabling straight-ray SoS-corrected delays. The old names ``sos_grid_x`` and
+            ``sos_grid_z`` are still accepted, with a warning.
         n_sos_ray_samples: ray samples for the SoS integral.
 
     Returns:

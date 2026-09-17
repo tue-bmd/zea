@@ -117,7 +117,7 @@ from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
 from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
-from zea.internal.utils import deprecated
+from zea.internal.utils import deprecated, renamed_items
 from zea.probes import Probe, fit_curved_probe_radius
 from zea.simulator import _shift_np, fft_length
 
@@ -1365,19 +1365,7 @@ class Parameters(BaseParameters):
 
     @classmethod
     def _renamed_items(cls, items):
-        """``items`` under their current names. An old name given next to its new one is dropped,
-        whatever the order: the value under the new name is used, and a warning says so."""
-        renamed = {}
-        for name, value in items.items():
-            new = cls._renamed(name)
-            if new != name and new in items:
-                log.warning(
-                    f"Both {name} and {new} were given: {name} is the old name of {new}, "
-                    f"so the value of {new} is used and the one of {name} is ignored."
-                )
-                continue
-            renamed[new] = value
-        return renamed
+        return renamed_items(items, cls._RENAMED_PARAMS)
 
     def __setattr__(self, name: str, value):
         name = self._renamed(name)

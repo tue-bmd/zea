@@ -6,6 +6,7 @@ from zea.func.ultrasound import channels_to_analytic
 from zea.func.usct import usct_reflectivity_das
 from zea.internal.core import DataTypes
 from zea.internal.registry import ops_registry
+from zea.internal.utils import renamed_keywords
 from zea.ops.base import Operation
 
 __all__ = ["USCTReflectivityDAS"]
@@ -124,6 +125,7 @@ class USCTReflectivityDAS(Operation):
         self.n_sos_ray_samples = n_sos_ray_samples
         self.axial_axis = axial_axis
 
+    @renamed_keywords(sos_grid_x="map_grid_x", sos_grid_z="map_grid_z")
     def call(
         self,
         flatgrid=None,

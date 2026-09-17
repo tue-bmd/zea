@@ -15,6 +15,7 @@ from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 from zea.internal.checks import _check_raw_data
 from zea.internal.precision import signal_compute_dtype
+from zea.internal.utils import renamed_keywords
 from zea.log import warning_once as _warning_once
 
 
@@ -111,6 +112,7 @@ def fnum_window_fn_tukey(normalized_angle, alpha=0.5):
     )
 
 
+@renamed_keywords(sos_grid_x="map_grid_x", sos_grid_z="map_grid_z")
 def tof_correction(
     data,
     flatgrid,
@@ -195,7 +197,8 @@ def tof_correction(
             ``(Nz, Nx)`` in m/s.  When provided, delays are computed
             numerically (heterogeneous mode). Defaults to ``None``.
         map_grid_x (Tensor, optional): x-coordinates of ``sos_map`` columns.
-        map_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows.
+        map_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows. The old names
+            ``sos_grid_x`` and ``sos_grid_z`` are still accepted, with a warning.
         focal_region_length (float, optional): Full length in meters of the
             region around the focal plane of focused transmits where
             first-arrival and last-arrival delays are linearly blended. This
