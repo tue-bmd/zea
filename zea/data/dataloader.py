@@ -45,6 +45,8 @@ from zea.data.layers import Resizer
 from zea.data.metadata import (
     batch_leaf_shape,
     has_per_frame_paths,
+    index_metadata_axes,
+    indexed_dimensions,
     normalize_metadata_paths,
     read_metadata,
     select_metadata_axes,
@@ -436,6 +438,7 @@ def _metadata_batch_conflicts(
     file_n_frames: dict,
     dim_selections: dict | None = None,
     file_dim_sizes: dict | None = None,
+    dim_indices: dict | None = None,
 ) -> dict[str, dict[tuple, list[str]]]:
     """Find metadata leaves whose shape differs between files.
 
@@ -451,6 +454,9 @@ def _metadata_batch_conflicts(
             file missing from it keeps its stored shapes.
         dim_selections: Selections applied to the metadata, keyed by dimension name.
         file_dim_sizes: File path -> ``{dimension name: extent in that file}``.
+        dim_indices: Placeholder int indices for dimensions indexed by
+            ``additional_axes_iter``, keyed by dimension name. The values are not used
+            (any sample's int works), only the keys matter for knowing which axes drop.
 
     Returns:
         dict: Leaf path -> ``{normalized shape: file paths}``, holding only leaves
@@ -463,7 +469,7 @@ def _metadata_batch_conflicts(
         n_frames = file_n_frames.get(file_path)
         dim_sizes = file_dim_sizes.get(file_path, {})
         for leaf, shape in signature.items():
-            shape = batch_leaf_shape(leaf, shape, n_frames, dim_selections, dim_sizes)
+            shape = batch_leaf_shape(leaf, shape, n_frames, dim_selections, dim_sizes, dim_indices)
             per_leaf[leaf][shape].append(file_path)
 
     conflicts = {}
@@ -665,6 +671,9 @@ class H5DataSource:
         self._dim_selections = selected_dimensions(
             self.key, num_dims, self.normalized_axis_selections
         )
+        self._indexed_dimensions = indexed_dimensions(
+            self.key, num_dims, self.additional_axes_iter
+        )
         self._file_dim_sizes = self._collect_file_dim_sizes(num_dims)
         if self.return_metadata and self.normalized_axis_selections and not self._dim_selections:
             key_dims = dim_names_for_key(key, num_dims)
@@ -728,6 +737,7 @@ class H5DataSource:
             self._file_n_frames if self._slice_metadata_per_frame else {},
             self._dim_selections,
             self._file_dim_sizes,
+            {dim: 0 for dim in self._indexed_dimensions} if self._indexed_dimensions else None,
         )
 
         # Last, so the cap counts samples the loader actually yields rather than ones a
@@ -871,7 +881,22 @@ class H5DataSource:
                     indices[self.source_frame_axis],
                     self._file_n_frames.get(file_name),
                 )
-            else:
+            if self._indexed_dimensions:
+                # Extract int indices from additional_axes_iter and apply them to metadata.
+                dim_names = dim_names_for_key(self.key, len(indices))
+                dim_indices = {}
+                if dim_names is not None:
+                    for axis in self.additional_axes_iter:
+                        dim = dim_names[axis]
+                        if dim in self._indexed_dimensions:
+                            idx = indices[axis]
+                            if isinstance(idx, int):
+                                dim_indices[dim] = idx
+                if dim_indices:
+                    metadata = index_metadata_axes(
+                        metadata, dim_indices, self._file_dim_sizes.get(file_name, {})
+                    )
+            if not self._slice_metadata_per_frame and not self._indexed_dimensions:
                 metadata = dict(metadata)
         metadata["file"] = {
             # For streamed hf:// files ``filename`` is a placeholder for the

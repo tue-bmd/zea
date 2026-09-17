@@ -24,6 +24,8 @@ from zea.data.spec import (
 __all__ = [
     "has_per_frame_paths",
     "batch_leaf_shape",
+    "index_metadata_axes",
+    "indexed_dimensions",
     "metadata_signature",
     "missing_metadata_paths",
     "normalize_metadata_paths",
@@ -338,6 +340,26 @@ def selected_dimensions(key: str, num_dims: int, axis_selections: dict) -> dict[
     }
 
 
+def indexed_dimensions(key: str, num_dims: int, additional_axes_iter: Sequence[int]) -> set[str]:
+    """Resolve ``additional_axes_iter`` axes on ``key`` into dimension names.
+
+    Naming the dimension is what lets int indexing reach metadata laid out differently:
+    axis 1 of ``data/raw_data`` is ``n_tx``, which is axis 0 of ``scan.t0_delays``.
+    Empty for a key the spec cannot name, and for dimensions that may not travel along
+    (:data:`PROPAGATED_DIMENSIONS`).
+    """
+    if not additional_axes_iter:
+        return set()
+    dim_names = dim_names_for_key(key, num_dims)
+    if dim_names is None:
+        return set()
+    return {
+        dim_names[axis]
+        for axis in additional_axes_iter
+        if dim_names[axis] in PROPAGATED_DIMENSIONS
+    }
+
+
 def _leaf_axis_selections(
     path: str, shape: tuple, dim_selections: dict, dim_sizes: dict
 ) -> dict[int, Any]:
@@ -384,16 +406,22 @@ def batch_leaf_shape(
     n_frames: int | None,
     dim_selections: dict | None = None,
     dim_sizes: dict | None = None,
+    dim_indices: dict | None = None,
 ) -> tuple:
     """Return ``shape`` as batching sees it: selected, with the frame axis a placeholder.
 
     Batching stacks metadata leaf by leaf, so the leaves of every file must line up.
-    Both cuts a sample's metadata undergoes are applied here, since a leaf only has to
-    match after them: the selection (:func:`selected_leaf_shape`), and the frame axis,
-    sliced to the sample's frame count and so normalized rather than compared.
-    Everything else must match exactly.
+    All cuts a sample's metadata undergoes are applied here, since a leaf only has to
+    match after them: the selection (:func:`selected_leaf_shape`), int indexing from
+    ``additional_axes_iter``, and the frame axis, sliced to the sample's frame count
+    and so normalized rather than compared. Everything else must match exactly.
     """
     shape = selected_leaf_shape(path, shape, dim_selections or {}, dim_sizes or {})
+    if dim_indices:
+        # Drop axes that are int-indexed (additional_axes_iter), high to low.
+        indices_map = _leaf_axis_indices(path, shape, dim_indices, dim_sizes or {})
+        if indices_map:
+            shape = tuple(s for axis, s in enumerate(shape) if axis not in indices_map)
     if _is_per_frame_shape(path, shape, n_frames):
         return ("n_frames",) + tuple(shape[1:])
     return tuple(shape)
@@ -470,4 +498,71 @@ def select_metadata_axes(
             out[name] = select_metadata_axes(value, dim_selections, dim_sizes, prefix=f"{path}.")
         else:
             out[name] = _select_value(path, value, dim_selections, dim_sizes)
+    return out
+
+
+def _leaf_axis_indices(
+    path: str, shape: tuple, dim_indices: dict, dim_sizes: dict
+) -> dict[int, int]:
+    """Map axis -> int index for the axes of ``path`` carrying an indexed dimension.
+
+    The int-indexing counterpart of :func:`_leaf_axis_selections`, for
+    ``additional_axes_iter`` which indexes axes with integers rather than slices or
+    lists. An axis is only indexed when its length is the file's full extent for that
+    dimension (``dim_sizes``), which is what the int indexes into.
+    """
+    if not dim_indices or not shape:
+        return {}
+    dim_names = dim_names_for_key(path, len(shape))
+    if dim_names is None:
+        return {}
+    return {
+        axis: dim_indices[dim]
+        for axis, dim in enumerate(dim_names)
+        if dim in dim_indices and dim_sizes.get(dim) == shape[axis]
+    }
+
+
+def _index_value(path: str, value, dim_indices: dict, dim_sizes: dict):
+    """Index the specified axes of ``value`` with ints, dropping those dimensions."""
+    if not isinstance(value, np.ndarray):
+        return value
+    indices_map = _leaf_axis_indices(path, value.shape, dim_indices, dim_sizes)
+    if not indices_map:
+        return value
+    # Index from high to low axis so dropping one doesn't affect the others.
+    for axis in sorted(indices_map.keys(), reverse=True):
+        idx = indices_map[axis]
+        value = np.take(value, idx, axis=axis)
+    return value
+
+
+def index_metadata_axes(
+    tree: dict, dim_indices: dict, dim_sizes: dict, prefix: str = ""
+) -> dict:
+    """Return a copy of ``tree`` with int-indexed dimensions dropped.
+
+    Used for ``additional_axes_iter``, which indexes axes with integers rather than
+    slices. An int index drops the axis (as h5py does for the sample itself), so a
+    metadata field carrying that dimension is indexed the same way and its axis removed.
+    Unlike the frame axis of :func:`slice_metadata`, the indexing is the same for every
+    sample of a file sharing the same ``additional_axes_iter`` selection, so this can
+    run once per file rather than per sample when the selections are constant.
+
+    Args:
+        tree: Nested metadata dict as returned by :func:`read_metadata`.
+        dim_indices: Dimension name -> int index, derived from ``additional_axes_iter``.
+        dim_sizes: Dimension name -> that dimension's full extent in this file.
+        prefix: Dotted prefix of ``tree`` within the file spec (internal).
+
+    Returns:
+        dict: A new nested dict; values with no indexed axis are shared, not copied.
+    """
+    out = {}
+    for name, value in tree.items():
+        path = f"{prefix}{name}"
+        if isinstance(value, dict):
+            out[name] = index_metadata_axes(value, dim_indices, dim_sizes, prefix=f"{path}.")
+        else:
+            out[name] = _index_value(path, value, dim_indices, dim_sizes)
     return out
