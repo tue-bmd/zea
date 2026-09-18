@@ -8,8 +8,10 @@ on:
       - 'docker/**'
     tags:
       - '*'
-      # The rolling tags are moved onto a commit whose images were already built
-      # by the release tag itself -- rebuilding them here is pure duplication.
+      # `release-tags.yaml` moves these onto the commit the release tag already
+      # built, so building here would only duplicate that run. The images they
+      # name are tagged by the release build itself -- see the `tags:` lists
+      # below, which push `:latest` and `:openh-rf-latest` alongside `:vX.Y.Z`.
       - '!latest'
       - '!openh-rf-latest'
 
@@ -51,6 +53,7 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}-cpu:${{ needs.tag.outputs.docker_tag }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}/{2}-cpu:latest', env.REGISTRY, env.IMAGE_PREFIX, matrix.backend) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}/{2}-cpu:openh-rf-latest', env.REGISTRY, env.IMAGE_PREFIX, matrix.backend) || '' }}
           build-args: |
             INSTALL_JAX=${{ contains('all,jax', matrix.backend) && 'cpu' || 'false' }}
             INSTALL_TORCH=${{ contains('all,torch', matrix.backend) && 'cpu' || 'false' }}
@@ -68,6 +71,7 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.backend }}:${{ needs.tag.outputs.docker_tag }}
             ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}/{2}:latest', env.REGISTRY, env.IMAGE_PREFIX, matrix.backend) || '' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/{1}/{2}:openh-rf-latest', env.REGISTRY, env.IMAGE_PREFIX, matrix.backend) || '' }}
           build-args: |
             INSTALL_JAX=${{ (matrix.backend == 'all' || matrix.backend == 'jax') && 'gpu' || 'false' }}
             INSTALL_TORCH=${{ (matrix.backend == 'all' || matrix.backend == 'torch') && 'gpu' || 'false' }}
