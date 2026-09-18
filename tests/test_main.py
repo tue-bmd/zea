@@ -100,7 +100,7 @@ def test_process_defaults():
     args = cli_args.subcommand
     assert args.key == "data/raw_data"
     assert args.n_frames is None
-    assert args.save_as == "gif"
+    assert args.save_as is None  # resolved from the frame count at save time
     assert args.overwrite is False
     assert args.keep_dynamic_range is False
     assert args.revision is None
