@@ -10,6 +10,7 @@ Examples::
     zea convert cetus ./raw ./output --download
     zea convert echonet ./raw ./output
     zea convert echoxflow ./raw ./output
+    zea convert us4us ./recording.pkl ./recording.hdf5 --mapping 0:image 1:raw_data
 
 Run ``zea convert --help`` for all options.
 
@@ -29,6 +30,7 @@ from zea.cli_args import (
     _EchonetLVH,
     _EchoXFlow,
     _Picmus,
+    _Us4us,
     _Verasonics,
 )
 from zea.cli_args import ConvertDataset as Dataset
@@ -43,6 +45,7 @@ __all__ = [
     "_EchonetLVH",
     "_EchoXFlow",
     "_Picmus",
+    "_Us4us",
     "_Verasonics",
     "main",
 ]

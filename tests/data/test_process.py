@@ -53,6 +53,22 @@ def test_key_requires_pipeline_false():
     assert _key_requires_pipeline(None) is False
 
 
+def test_resolve_save_as_honours_explicit_format():
+    """An explicit --save-as wins, whatever the frame count."""
+    from zea.data.process import _resolve_save_as
+
+    assert _resolve_save_as("mp4", 1) == "mp4"
+    assert _resolve_save_as("hdf5", 7) == "hdf5"
+
+
+def test_resolve_save_as_defaults_to_frame_count():
+    """Omitted, a still becomes a PNG and a sequence stays a GIF."""
+    from zea.data.process import _resolve_save_as
+
+    assert _resolve_save_as(None, 1) == "png"
+    assert _resolve_save_as(None, 2) == "gif"
+
+
 def test_cli_defaults():
     import tyro
 
@@ -62,7 +78,7 @@ def test_cli_defaults():
     assert args.key == "data/raw_data"
     assert args.track is None
     assert args.n_frames is None
-    assert args.save_as == "gif"
+    assert args.save_as is None  # resolved from the frame count at save time
     assert args.overwrite is False
     assert args.keep_dynamic_range is False
     assert args.revision is None
@@ -87,6 +103,68 @@ def test_run_passthrough_gif(tmp_path):
 
     assert (out_dir / "scan_a.gif").exists()
     assert (out_dir / "scan_b.gif").exists()
+
+
+def test_run_passthrough_png_single_frame(tmp_path):
+    """A single frame lands in <filestem>.png, not a numbered one."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "scan.hdf5", n_frames=1)
+    out_dir = tmp_path / "out"
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, "png", False)
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_passthrough_png_multiple_frames(tmp_path):
+    """Several frames are numbered so they do not overwrite each other."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "scan.hdf5", n_frames=3)
+    out_dir = tmp_path / "out"
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, "png", False)
+
+    assert sorted(p.name for p in out_dir.glob("*.png")) == [
+        "scan_0000.png",
+        "scan_0001.png",
+        "scan_0002.png",
+    ]
+
+
+def test_run_passthrough_png_overwrite_false(tmp_path):
+    """Existing PNGs are left alone unless overwrite is requested."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "scan.hdf5", n_frames=1)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    sentinel = out_dir / "scan.png"
+    sentinel.write_bytes(b"sentinel")
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, "png", False)
+
+    assert sentinel.read_bytes() == b"sentinel"
+
+
+def test_run_passthrough_default_format_follows_frame_count(tmp_path):
+    """With no --save-as, a one-frame file becomes a PNG and a longer one a GIF."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "still.hdf5", n_frames=1)
+    _make_image_file(ds_dir / "clip.hdf5", n_frames=3)
+    out_dir = tmp_path / "out"
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, None, False)
+
+    assert (out_dir / "still.png").exists()
+    assert (out_dir / "clip.gif").exists()
+    assert not (out_dir / "still.gif").exists()
 
 
 def test_run_passthrough_hdf5(tmp_path):
@@ -195,6 +273,54 @@ def test_run_processing_raw_without_pipeline_raises(tmp_path):
             save_dir=out_dir,
             save_as="gif",
         )
+
+
+def test_run_processing_png_single_frame(tmp_path):
+    """The pipeline path writes a single PNG for a one-frame run."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n  sound_speed: 1540\npipeline:\n  operations:\n    - envelope_detect\n"
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+        save_as="png",
+    )
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_processing_default_format_for_single_frame(tmp_path):
+    """The pipeline path writes a PNG for a one-frame run when no format is given."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n  sound_speed: 1540\npipeline:\n  operations:\n    - envelope_detect\n"
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+    )
+
+    assert (out_dir / "scan.png").exists()
+    assert not (out_dir / "scan.gif").exists()
 
 
 def test_run_processing_invalid_save_as(tmp_path):

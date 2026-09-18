@@ -349,12 +349,14 @@ def fetcher_for(file: h5py.File) -> Fetcher | None:
     descriptor. Anything else (an in-memory file, a driver we do not recognise) has no
     fast path, and its datasets fall back to h5py.
     """
+    from huggingface_hub import get_token
+
     from zea.data.chunk_cache import cache_for
     from zea.internal.preset_utils import HF_PREFIX, _hf_stream_url
 
     source = getattr(file, "_source_name", None)
     if source is not None and str(source).startswith(HF_PREFIX):
-        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        token = get_token()
         url = _hf_stream_url(str(source), **getattr(file, "_hf_kwargs", {}))
         # The streamed file object already carries HF's metadata (fetched on open), so the
         # content hash that keys the cache costs no extra request.
