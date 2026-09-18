@@ -584,8 +584,7 @@ class TestFetchers:
             assert isinstance(fetcher_for(file), LocalFetcher)
 
     def test_hf_fetcher_uses_the_login_token(self, monkeypatch):
-        """A token from `hf auth login` must authorise the chunk reads too.
-        """
+        """A token from `hf auth login` must authorise the chunk reads too."""
         monkeypatch.delenv("HF_TOKEN", raising=False)
         monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
         monkeypatch.setattr("huggingface_hub.get_token", lambda: "from-the-login-file")
