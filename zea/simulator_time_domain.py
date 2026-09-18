@@ -41,15 +41,18 @@ from keras import ops
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 from zea.simulator import (
-    _apply_elevation_slab,
+    _element_angles,
+    _element_frame,
     _resolve_element_height,
     _resolve_element_width,
+    _snap_elevation,
+    _ndim,
     _validate_scatter_exponent,
-    _warn_if_elevation_extent,
-    attenuate,
-    spread,
+    _validate_two_dimensional,
     apply_receive_chain,
+    attenuate,
     min_distance,
+    spread,
     transmit_pulses,
 )
 
@@ -71,7 +74,7 @@ def simulate_rf_td(
     attenuation_coef,
     tx_apodizations,
     t_peak,
-    elevation_slab_2d=False,
+    two_dimensional=False,
     element_height=None,
     max_chunk_gb=10.0,
     noise_level_db=None,
@@ -84,9 +87,8 @@ def simulate_rf_td(
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
-    A faster alternative to :func:`zea.simulator.simulate_rf` that produces equivalent RF data
-    without a per-scatterer, per-frequency Fourier synthesis. Each scatterer
-    contribution is splatted, with linear sub-sample interpolation, into an
+    An approximation of :func:`zea.simulator.simulate_rf` without the per-frequency synthesis.
+    Each scatterer contribution is splatted, with linear sub-sample interpolation, into an
     ``(n_ax, n_el)`` spike map at its two-way sample delay; the spike map is then
     convolved once per receive channel with a real transmit pulse.
 
@@ -111,16 +113,13 @@ def simulate_rf_td(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_slab_2d (bool): Reduce the elevation dimension to a 2D slab: drop the
-            scatterers outside it, and spread the transmit cylindrically rather than
-            spherically, as an ideal elevation lens focusing to that slab would. This is a
-            cheap approximation, not a modelled lens; for the physical lens in 3D use
-            ``elevation_focus``, which is exclusive with it. For efficient pruning of the
-            scatterers outside the slab, use :class:`zea.ops.Simulate` rather than calling
-            `simulate_rf_td` directly.
+        two_dimensional (bool): Simulate in the imaging plane, as a 1D probe behind an ideal
+            elevation lens: the scatterers are moved to the probe's elevation centre, there is
+            no elevation directivity, and the transmit spreads cylindrically rather than
+            spherically. Rejects a probe with elevation extent.
         element_height (float): The elevation height of the elements [m], used for the
-            elevation directivity and the elevation slab. If None, an eighth of the width of a
-            1D probe (at least ``element_width``), or ``element_width`` for a 2D probe.
+            elevation directivity. If None, an eighth of the width of a 1D probe (at least
+            ``element_width``), or ``element_width`` for a 2D probe.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
@@ -137,6 +136,9 @@ def simulate_rf_td(
         scatter_exponent (float): Weigh the scattered waveform spectrum by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
+            One shared exponent only: the whole medium is splatted into a single spike map and
+            convolved with one pulse, so a per-scatterer vector is rejected. Use
+            :func:`zea.simulator.simulate_rf` for that.
         waveforms_two_way (array-like, optional): Two-way transmit waveforms of shape
             (n_tx, n_samples) or (n_samples,), as in :func:`zea.simulator.simulate_rf`; None is
             the default pulse of :func:`zea.simulator.transmit_pulse`. Must be static under jit.
@@ -146,6 +148,12 @@ def simulate_rf_td(
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
+    if _ndim(scatter_exponent) > 0:
+        raise ValueError(
+            "per-scatterer backscatter coefficients are only supported in the frequency "
+            "domain simulator"
+        )
+    _validate_two_dimensional(two_dimensional, None, probe_geometry)
     element_width = _resolve_element_width(probe_geometry, element_width)
     element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     n_ax = int(n_ax)
@@ -182,7 +190,7 @@ def simulate_rf_td(
             element_width,
             element_height,
             attenuation_coef,
-            elevation_slab_2d,
+            two_dimensional,
         )
         for tx in range(n_tx):
             spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
@@ -237,7 +245,7 @@ def _precompute_scatterer_response(
     element_width,
     element_height,
     attenuation_coef,
-    elevation_slab_2d=False,
+    two_dimensional=False,
 ):
     """Compute the transmit-independent gain and two-way travel time tensors.
 
@@ -247,20 +255,15 @@ def _precompute_scatterer_response(
         two_way_time (array-like): The (n_scat, n_tx_el, n_rx_el) round-trip travel
             time [s], excluding transmit delays and initial times.
     """
-    magnitudes = scatterer_magnitudes
-    if elevation_slab_2d:
-        _warn_if_elevation_extent(probe_geometry)
-        scatterer_positions, magnitudes = _apply_elevation_slab(
-            scatterer_positions, magnitudes, probe_geometry, element_height
-        )
-
     # See the matching cast in `simulate_rf`.
     scatterer_positions = ops.cast(scatterer_positions, "float32")
-    magnitudes = ops.cast(magnitudes, "float32")
+    magnitudes = ops.cast(scatterer_magnitudes, "float32")
+    if two_dimensional:
+        scatterer_positions = _snap_elevation(scatterer_positions, probe_geometry)
 
-    physical_distance = _one_way_distances(
-        probe_geometry,
+    physical_distance = _one_way_distance(
         scatterer_positions,
+        probe_geometry,
         apply_lens_correction,
         lens_thickness,
         lens_sound_speed,
@@ -280,10 +283,11 @@ def _precompute_scatterer_response(
         element_height,
         sound_speed,
         center_frequency,
+        two_dimensional,
     )
     directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
     spread_attenuation = (
-        spread(one_way_distance[:, :, None], 0.5 if elevation_slab_2d else 1.0, min_dist)
+        spread(one_way_distance[:, :, None], 0.5 if two_dimensional else 1.0, min_dist)
         * spread(one_way_distance[:, None, :], 1.0, min_dist)
         * attenuate(center_frequency, attenuation_coef, two_way_distance)
     )
@@ -293,20 +297,18 @@ def _precompute_scatterer_response(
     return base_gain, two_way_time
 
 
-def _one_way_distances(
-    probe_geometry,
-    scatterer_positions,
-    apply_lens_correction,
-    lens_thickness,
-    lens_sound_speed,
-    sound_speed,
+def _one_way_distance(
+    positions, geometry, apply_lens_correction, lens_thickness, lens_sound_speed, sound_speed
 ):
-    """Compute the one-way distance [m] from each scatterer to each element."""
+    """One-way path length [m] from each position to each element center, of shape [s, e].
+
+    Through a lens it is the medium distance with the travel time of the refracted path.
+    """
     if not apply_lens_correction:
-        return ops.linalg.norm(probe_geometry[None] - scatterer_positions[:, None], axis=-1)
+        return ops.linalg.norm(positions[:, None] - geometry[None], axis=-1)
     travel_times = compute_lens_corrected_travel_times(
-        probe_geometry,
-        scatterer_positions,
+        geometry,
+        positions,
         lens_thickness=lens_thickness,
         c_lens=lens_sound_speed,
         c_medium=sound_speed,
@@ -316,15 +318,23 @@ def _one_way_distances(
 
 
 def _element_directivity(
-    scatterer_positions, probe_geometry, element_width, element_height, sound_speed, frequency
+    scatterer_positions,
+    probe_geometry,
+    element_width,
+    element_height,
+    sound_speed,
+    frequency,
+    two_dimensional=False,
 ):
-    """3D directivity from each element to each scatterer."""
+    """Directivity from each element to each scatterer, at the direction cosines of the
+    frequency-domain simulator (:func:`zea.simulator._element_angles`); no elevation term in
+    2D."""
     relative = scatterer_positions[:, None] - probe_geometry[None]
-    theta = ops.arctan2(relative[..., 0], relative[..., 2])
-    phi = ops.arctan2(relative[..., 1], relative[..., 2])
-    return directivity(frequency, theta, element_width, sound_speed) * directivity(
-        frequency, phi, element_height, sound_speed
-    )
+    theta, phi, _ = _element_angles(relative, _element_frame(None, relative.dtype))
+    lateral = directivity(frequency, theta, element_width, sound_speed)
+    if two_dimensional:
+        return lateral
+    return lateral * directivity(frequency, phi, element_height, sound_speed)
 
 
 def _scatter_spike_map(sample_positions, weights, n_ax, n_el):

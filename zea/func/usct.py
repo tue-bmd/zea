@@ -17,6 +17,8 @@ All geometry is expressed in the **2-D imaging plane**: ``transmit_origins``,
 from keras import ops
 
 from zea.func.tensor import vmap
+from zea.func.ultrasound import straight_ray_slowness
+from zea.internal.utils import renamed_keywords
 
 __all__ = [
     "straight_ray_times",
@@ -44,27 +46,13 @@ def _pairwise_batched_direct(tx_pos, rx_batch):
     return ops.sqrt(ops.sum(ops.square(diff), axis=-1))
 
 
-def _sample_grid(grid, x_axis, z_axis, xq, zq):
-    """Bilinearly sample a ``(nz, nx)`` grid at world-frame query points.
-
-    Thin coordinate conversion around :func:`keras.ops.image.map_coordinates`;
-    ``fill_mode="nearest"`` clamps queries outside the footprint to the edge
-    values (the caller masks those out separately).
-    """
-    xit = (xq - x_axis[0]) / (x_axis[1] - x_axis[0])
-    zit = (zq - z_axis[0]) / (z_axis[1] - z_axis[0])
-    return ops.image.map_coordinates(
-        grid, ops.stack([zit, xit], axis=0), order=1, fill_mode="nearest"
-    )
-
-
 def straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, background_c, n_samples=16):
     """Straight-ray travel times through a heterogeneous sound-speed map.
 
+    An in-plane wrapper of :func:`zea.func.ultrasound.straight_ray_slowness`.
     For each source/element position the local slowness (``1 / c``) is integrated
     along the straight line to every pixel, sampling ``sos_map`` where the ray is
-    inside the map footprint and falling back to ``background_c`` outside it. The
-    loop over ``positions`` keeps peak memory at ``O(n_samples * n_pixels)``.
+    inside the map footprint and falling back to ``background_c`` outside it.
 
     Args:
         positions: ``(M, 2)`` source or element positions, in-plane.
@@ -79,21 +67,18 @@ def straight_ray_times(positions, pixels, sos_map, x_axis, z_axis, background_c,
         ``(M, P)`` travel times [s]. The map's two axes are taken to be the two
         in-plane coordinate components (columns 0 and 1 of ``positions``/``pixels``).
     """
-    t_mid = (ops.arange(n_samples, dtype="float32") + 0.5) / n_samples
-    x_lo, x_hi = x_axis[0], x_axis[-1]
-    z_lo, z_hi = z_axis[0], z_axis[-1]
-
+    slowness = straight_ray_slowness(
+        ops.stack([pixels[:, 0], ops.zeros_like(pixels[:, 0]), pixels[:, 1]], axis=-1),
+        ops.stack([positions[:, 0], ops.zeros_like(positions[:, 0]), positions[:, 1]], axis=-1),
+        sos_map,
+        x_axis,
+        z_axis,
+        background_c,
+        n_samples=n_samples,
+    )  # (P, M)
     seg = pixels[None, :, :] - positions[:, None, :]  # (M, P, 2)
     dist = ops.sqrt(ops.sum(ops.square(seg), axis=-1))  # (M, P)
-    pts = positions[:, None, None, :] + t_mid[None, :, None, None] * seg[:, None, :, :]  # (M,S,P,2)
-    xq, zq = pts[..., 0], pts[..., 1]  # (M, S, P)
-    c_samp = _sample_grid(sos_map, x_axis, z_axis, xq, zq)
-    inside = ops.logical_and(
-        ops.logical_and(xq >= x_lo, xq <= x_hi),
-        ops.logical_and(zq >= z_lo, zq <= z_hi),
-    )
-    c_eff = ops.where(inside, c_samp, background_c)
-    return dist * ops.mean(1.0 / c_eff, axis=1)  # (M, P)
+    return dist * ops.transpose(slowness)
 
 
 def _gather_time(trace, sample_pos, n_ax, interpolation):
@@ -118,6 +103,7 @@ def _gather_time(trace, sample_pos, n_ax, interpolation):
     raise ValueError(f"interpolation must be 'linear' or 'nearest', got {interpolation!r}.")
 
 
+@renamed_keywords(sos_grid_x="map_grid_x", sos_grid_z="map_grid_z")
 def usct_reflectivity_das(
     analytic,
     transmit_origins,
@@ -134,8 +120,8 @@ def usct_reflectivity_das(
     interpolation="linear",
     compounding="coherent",
     sos_map=None,
-    sos_grid_x=None,
-    sos_grid_z=None,
+    map_grid_x=None,
+    map_grid_z=None,
     n_sos_ray_samples=16,
 ):
     """Round-trip TOF DAS reflectivity for a single Ultrasound Computed Tomography frame.
@@ -173,7 +159,7 @@ def usct_reflectivity_das(
             some resolution for robustness to phase decorrelation between
             transmits caused by sound-speed mismatch or calibration error,
             which grows with the size of the aperture spanned by a full ring.
-        sos_map, sos_grid_x, sos_grid_z: optional SoS map and its in-plane axes,
+        sos_map, map_grid_x, map_grid_z: optional SoS map and its in-plane axes,
             enabling straight-ray SoS-corrected delays.
         n_sos_ray_samples: ray samples for the SoS integral.
 
@@ -191,10 +177,10 @@ def usct_reflectivity_das(
     fs = sampling_frequency
     per_tx_rx = len(receive_positions.shape) == 3
 
-    sos_args = (sos_map, sos_grid_x, sos_grid_z)
+    sos_args = (sos_map, map_grid_x, map_grid_z)
     if any(a is not None for a in sos_args) and not all(a is not None for a in sos_args):
         raise ValueError(
-            "sos_map, sos_grid_x, and sos_grid_z must all be provided together, or all omitted."
+            "sos_map, map_grid_x, and map_grid_z must all be provided together, or all omitted."
         )
     use_sos = sos_map is not None
     px = ops.convert_to_tensor(pixels)
@@ -208,8 +194,8 @@ def usct_reflectivity_das(
                 receive_positions,
                 px,
                 sos_map,
-                sos_grid_x,
-                sos_grid_z,
+                map_grid_x,
+                map_grid_z,
                 sound_speed,
                 n_sos_ray_samples,
             )
@@ -232,8 +218,8 @@ def usct_reflectivity_das(
                 tx_pos,
                 px,
                 sos_map,
-                sos_grid_x,
-                sos_grid_z,
+                map_grid_x,
+                map_grid_z,
                 sound_speed,
                 n_sos_ray_samples,
             )
@@ -248,7 +234,7 @@ def usct_reflectivity_das(
             def _rx_time_one(rx_one):
                 if use_sos:
                     return straight_ray_times(
-                        rx_one, px, sos_map, sos_grid_x, sos_grid_z, sound_speed, n_sos_ray_samples
+                        rx_one, px, sos_map, map_grid_x, map_grid_z, sound_speed, n_sos_ray_samples
                     )
                 rd, _ = distance_and_unit(rx_one, px)
                 return rd / sound_speed
@@ -266,8 +252,8 @@ def usct_reflectivity_das(
                         tx_one[None],
                         rx_one,
                         sos_map,
-                        sos_grid_x,
-                        sos_grid_z,
+                        map_grid_x,
+                        map_grid_z,
                         sound_speed,
                         n_sos_ray_samples,
                     )[0]
@@ -286,8 +272,8 @@ def usct_reflectivity_das(
                     tx_pos,
                     receive_positions,
                     sos_map,
-                    sos_grid_x,
-                    sos_grid_z,
+                    map_grid_x,
+                    map_grid_z,
                     sound_speed,
                     n_sos_ray_samples,
                 )[:, :, None]

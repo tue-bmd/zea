@@ -22,6 +22,8 @@ from keras import ops
 from zea.func.ultrasound import channels_to_analytic
 from zea.func.usct import usct_reflectivity_das
 
+from . import backend_equality_check
+
 
 def _small_scene(seed=0):
     """A tiny deterministic USCT scene: partial ring geometry + random analytic.
@@ -313,6 +315,35 @@ def test_usct_straight_ray_times_matches_constant_speed():
     np.testing.assert_allclose(times, dist / c, rtol=1e-5, atol=1e-8)
 
 
+@backend_equality_check(decimal=6)
+def test_straight_ray_slowness_is_the_same_on_every_backend():
+    """The straight-ray sampler behind ``straight_ray_times`` and the simulator's sound speed
+    map, on a 3D map with rays inside and outside its footprint."""
+    from zea.func.ultrasound import straight_ray_slowness
+
+    rng = np.random.default_rng(42)
+    x_axis = np.linspace(-0.01, 0.01, 11).astype(np.float32)
+    y_axis = np.linspace(-0.004, 0.004, 5).astype(np.float32)
+    z_axis = np.linspace(0.0, 0.03, 16).astype(np.float32)
+    sos_map = rng.uniform(1400.0, 1600.0, (16, 11, 5)).astype(np.float32)
+    elements = np.stack([np.linspace(-0.006, 0.006, 8), np.zeros(8), np.zeros(8)], -1)
+    positions = rng.uniform([-0.015, -0.005, 0.002], [0.015, 0.005, 0.035], (20, 3))
+    slowness = straight_ray_slowness(
+        positions.astype(np.float32),
+        elements.astype(np.float32),
+        sos_map,
+        x_axis,
+        z_axis,
+        1500.0,
+        map_grid_y=y_axis,
+        n_samples=32,
+    )
+    slowness = np.asarray(ops.convert_to_numpy(slowness))
+    assert slowness.shape == (20, 8)
+    assert (slowness >= 1 / 1600.0).all() and (slowness <= 1 / 1400.0).all()
+    return slowness
+
+
 def test_usct_das_sos_map_matches_constant_speed_when_uniform():
     """A uniform SoS map exactly matching the background speed must give the
     same image as the plain constant-speed path, validating the straight-ray
@@ -351,13 +382,57 @@ def test_usct_das_sos_map_matches_constant_speed_when_uniform():
         c,
         **common,
         sos_map=sos_map,
-        sos_grid_x=x_axis,
-        sos_grid_z=z_axis,
+        map_grid_x=x_axis,
+        map_grid_z=z_axis,
         n_sos_ray_samples=32,
     )
     no_sos = np.asarray(ops.convert_to_numpy(no_sos))
     with_sos = np.asarray(ops.convert_to_numpy(with_sos))
     np.testing.assert_allclose(no_sos, with_sos, rtol=1e-3, atol=1e-3)
+
+    old_names = usct_reflectivity_das(
+        s["analytic"],
+        s["tx"],
+        s["rx"],
+        s["pixels"],
+        s["fs"],
+        s["t0"],
+        c,
+        **common,
+        sos_map=sos_map,
+        sos_grid_x=x_axis,
+        sos_grid_z=z_axis,
+        n_sos_ray_samples=32,
+    )
+    np.testing.assert_array_equal(np.asarray(ops.convert_to_numpy(old_names)), with_sos)
+
+
+def test_usct_op_accepts_the_old_grid_names():
+    """The pipeline op renames ``sos_grid_*`` before it checks that the map trio is complete."""
+    from zea.ops.usct import USCTReflectivityDAS
+
+    s = _small_scene(seed=13)
+    x_axis = np.linspace(-0.01, 0.01, 33).astype(np.float32)
+    z_axis = np.linspace(-0.01, 0.01, 33).astype(np.float32)
+    sos_map = np.full((33, 33), s["c"], dtype=np.float32)
+    op = USCTReflectivityDAS(tx_chunk=2, jit_compile=False)
+
+    def in_plane(xz):  # the op images the (x, z) plane of (x, y, z) positions
+        return np.insert(xz, 1, 0.0, axis=-1)
+
+    kwargs = dict(
+        flatgrid=in_plane(s["pixels"]),
+        probe_geometry=in_plane(s["rx"]),
+        transmit_origins=in_plane(s["tx"]),
+        sampling_frequency=s["fs"],
+        initial_times=s["t0"],
+        sound_speed=s["c"],
+        sos_map=sos_map,
+    )
+    kwargs[op.key] = s["analytic"].real[..., None]
+    new = op(**kwargs, map_grid_x=x_axis, map_grid_z=z_axis)[op.output_key]
+    old = op(**kwargs, sos_grid_x=x_axis, sos_grid_z=z_axis)[op.output_key]
+    np.testing.assert_array_equal(ops.convert_to_numpy(old), ops.convert_to_numpy(new))
 
 
 def test_usct_das_point_scatterer_peaks_at_true_location():

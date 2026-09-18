@@ -68,6 +68,8 @@ from .ultrasound import (
     log_compress,
     make_tgc_curve,
     square_wave_apodization,
+    straight_ray_mean,
+    straight_ray_slowness,
     suppress_tissue,
     upmix,
 )
@@ -139,6 +141,8 @@ __all__ = [
     "log_compress",
     "make_tgc_curve",
     "square_wave_apodization",
+    "straight_ray_mean",
+    "straight_ray_slowness",
     "suppress_tissue",
     "decode_hadamard",
     "construct_acquisition_from_synthetic_aperture",

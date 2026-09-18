@@ -185,6 +185,42 @@ def deprecated(replacement=None):
     return decorator
 
 
+def renamed_items(items, renames, what="Parameter"):
+    """``items`` under their current names, ``renames`` mapping old names to new ones.
+
+    An old name given next to its new one is dropped, whatever the order: the value under the
+    new name is used, and a warning says so.
+    """
+    renamed = {}
+    for name, value in items.items():
+        new = renames.get(name)
+        if new is None:
+            renamed[name] = value
+            continue
+        log.warning_once(f"{what} {name} was renamed to {new}.", key=name)
+        if new in items:
+            log.warning(
+                f"Both {name} and {new} were given: {name} is the old name of {new}, "
+                f"so the value of {new} is used and the one of {name} is ignored."
+            )
+            continue
+        renamed[new] = value
+    return renamed
+
+
+def renamed_keywords(**renames):
+    """Decorator that keeps accepting the old keyword names in ``renames`` (``old="new"``)."""
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **renamed_items(kwargs, renames, what="Keyword argument"))
+
+        return wrapper
+
+    return decorator
+
+
 @contextlib.contextmanager
 def atomic_write(path, suffix=None):
     """Write to a temporary file and move it into place only once it is complete.
