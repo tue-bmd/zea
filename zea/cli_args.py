@@ -140,12 +140,13 @@ class ProcessArgs:
         ),
     ] = None
     save_as: Annotated[
-        Literal[tuple(SUPPORTED_FORMATS)],  # ty: ignore[invalid-type-form]
+        Literal[tuple(SUPPORTED_FORMATS)] | None,  # ty: ignore[invalid-type-form]
         tyro.conf.arg(
             help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}. "
-            "png writes one image per frame.",
+            "png writes one image per frame. Omitted, the format follows the data: "
+            "png for a single frame, gif for a sequence.",
         ),
-    ] = "gif"
+    ] = None
     keep_keys: Annotated[
         list[str],
         tyro.conf.arg(
