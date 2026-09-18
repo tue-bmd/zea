@@ -8,6 +8,10 @@ on:
       - 'docker/**'
     tags:
       - '*'
+      # The rolling tags are moved onto a commit whose images were already built
+      # by the release tag itself -- rebuilding them here is pure duplication.
+      - '!latest'
+      - '!openh-rf-latest'
 
 env:
   REGISTRY: docker.io
