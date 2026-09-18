@@ -356,7 +356,7 @@ def indexed_dimensions(key: str, num_dims: int, additional_axes_iter: Sequence[i
     return {
         dim_names[axis]
         for axis in additional_axes_iter
-        if dim_names[axis] in PROPAGATED_DIMENSIONS
+        if dim_names[axis] is not None and dim_names[axis] in PROPAGATED_DIMENSIONS
     }
 
 
@@ -519,7 +519,7 @@ def _leaf_axis_indices(
     return {
         axis: dim_indices[dim]
         for axis, dim in enumerate(dim_names)
-        if dim in dim_indices and dim_sizes.get(dim) == shape[axis]
+        if dim is not None and dim in dim_indices and dim_sizes.get(dim) == shape[axis]
     }
 
 

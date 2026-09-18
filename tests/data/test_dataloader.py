@@ -1496,6 +1496,161 @@ def test_axis_selections_on_a_private_dimension_warns(metadata_dataset, attach_c
     assert any("name no dimension shared" in record.message for record in caplog.records)
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# additional_axes_iter applied to return_metadata
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def test_additional_axes_iter_indexes_per_transmit_metadata(axis_selections_metadata_file):
+    """Int indexing on the transmit axis also indexes those transmits from the scan fields."""
+    path, scan, _ = axis_selections_metadata_file
+    tx_index = 2
+
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        additional_axes_iter=[1],
+        return_metadata=["scan.t0_delays", "scan.polar_angles", "scan.initial_times"],
+    )
+    # With additional_axes_iter=[1], each sample indexes one transmit.
+    # The first sample (index 0) gets transmit 0, second gets transmit 1, etc.
+    samples = list(loader)
+    sample, metadata = samples[tx_index]
+    sample = np.asarray(sample)
+
+    # Axis 1 (n_tx) is dropped from the sample.
+    assert sample.shape == (AXSEL_N_AX, AXSEL_N_EL, 1)
+    # Metadata fields carrying n_tx are indexed to that transmit.
+    np.testing.assert_array_equal(metadata["scan"]["t0_delays"], scan["t0_delays"][tx_index])
+    assert metadata["scan"]["polar_angles"] == scan["polar_angles"][tx_index]
+    assert metadata["scan"]["initial_times"] == scan["initial_times"][tx_index]
+
+
+def test_additional_axes_iter_indexes_metadata_on_a_later_axis(axis_selections_metadata_file):
+    """The indexed dimension is taken wherever it sits, not from axis 0."""
+    path, scan, probe_geometry = axis_selections_metadata_file
+    el_index = 3
+
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        additional_axes_iter=[3],
+        return_metadata=["scan.t0_delays", "probe.probe_geometry"],
+    )
+    # Axis 3 of raw_data is n_el, which is axis 1 of t0_delays and axis 0 of probe_geometry.
+    # With additional_axes_iter=[3], we iterate over elements.
+    samples = list(loader)
+    sample, metadata = samples[el_index]
+    sample = np.asarray(sample)
+
+    # Axis 3 (n_el) is dropped from the sample.
+    assert sample.shape == (6, AXSEL_N_AX, 1)
+    # t0_delays is (n_tx, n_el), so indexing n_el gives (n_tx,).
+    np.testing.assert_array_equal(metadata["scan"]["t0_delays"], scan["t0_delays"][:, el_index])
+    # probe_geometry is (n_el, 3), so indexing n_el gives (3,).
+    np.testing.assert_array_equal(metadata["probe"]["probe_geometry"], probe_geometry[el_index])
+
+
+def test_additional_axes_iter_and_frame_slicing_compose(axis_selections_metadata_file):
+    """A field carrying both n_frames and n_tx is cut on both axes."""
+    path, scan, _ = axis_selections_metadata_file
+    tx_index = 1
+
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=2,
+        validate=False,
+        additional_axes_iter=[1],
+        return_metadata="scan.time_to_next_transmit",
+    )
+    # With n_frames=2 and additional_axes_iter=[1], we get 2-frame samples, each with one transmit.
+    samples = list(loader)
+    _, metadata = samples[tx_index]
+
+    # First sample holds frames 0-1 with transmit 0, second holds frames 0-1 with transmit 1, etc.
+    # For the sample at tx_index, we get frames 0-1 of transmit tx_index.
+    expected = scan["time_to_next_transmit"][0:2, tx_index]
+    np.testing.assert_array_equal(metadata["scan"]["time_to_next_transmit"], expected)
+
+
+def test_additional_axes_iter_leaves_unrelated_metadata_whole(axis_selections_metadata_file):
+    """Fields that do not carry the indexed dimension are returned as stored."""
+    path, scan, _ = axis_selections_metadata_file
+
+    _, metadata = _load_one(
+        path,
+        additional_axes_iter=[1],
+        return_metadata=["scan.sound_speed", "probe.probe_geometry"],
+    )
+    assert metadata["scan"]["sound_speed"] == scan["sound_speed"]
+    # probe_geometry does not carry n_tx, so it's unchanged.
+    assert metadata["probe"]["probe_geometry"].shape == (AXSEL_N_EL, 3)
+
+
+def test_additional_axes_iter_batch_files_that_differ_on_indexed_axis(tmp_path):
+    """Files disagreeing on n_tx batch fine once the indexing drops that axis."""
+    _write_axsel_file(tmp_path / "axiter_a_0_0.hdf5", n_tx=6)
+    _write_axsel_file(tmp_path / "axiter_b_0_0.hdf5", n_tx=9)
+
+    loader = Dataloader(
+        tmp_path,
+        key="data/raw_data",
+        batch_size=2,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        additional_axes_iter=[1],
+        return_metadata="scan.t0_delays",
+    )
+    # Stored t0_delays are (6, 8) and (9, 8): a conflict before the indexing, not after.
+    assert loader.source.metadata_batch_conflicts == {}
+
+    _, metadata = next(iter(loader))
+    # After int-indexing n_tx, t0_delays is (n_el,) per sample.
+    assert np.asarray(metadata["scan"]["t0_delays"]).shape == (2, AXSEL_N_EL)
+
+
+def test_additional_axes_iter_and_axis_selections_compose(axis_selections_metadata_file):
+    """axis_selections and additional_axes_iter can be used together."""
+    path, scan, _ = axis_selections_metadata_file
+    selection = [0, 2, 5]
+    el_index = 3
+
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        axis_selections={1: selection},
+        additional_axes_iter=[3],
+        return_metadata="scan.t0_delays",
+    )
+    # First, axis_selections narrows n_tx to selection (3 transmits).
+    # Then, additional_axes_iter indexes n_el, dropping that axis.
+    samples = list(loader)
+    sample, metadata = samples[el_index]
+    sample = np.asarray(sample)
+
+    # Axis 1 is narrowed to 3 transmits, axis 3 is dropped.
+    assert sample.shape == (len(selection), AXSEL_N_AX, 1)
+    # t0_delays: first select transmits, then index element.
+    expected = scan["t0_delays"][selection, el_index]
+    np.testing.assert_array_equal(metadata["scan"]["t0_delays"], expected)
+
+
 class TestSelectedDimensions:
     """Unit tests for the axis -> named dimension resolution behind the propagation."""
 
