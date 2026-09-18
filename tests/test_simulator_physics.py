@@ -355,6 +355,15 @@ def test_measured_pulse_reproduces_its_source():
         _pulse("gaussian")
 
 
+def test_measured_pulse_band_stops_at_its_nyquist():
+    # The calibration grid extends past the waveform's Nyquist; its spectral images must not count.
+    fine = transmit_pulse(CENTER_FREQUENCY, 36e6, n_period=2.0)
+    for sampling_frequency in (36e6, 62.5e6):
+        measured = measured_pulse(fine.waveform(), sampling_frequency, 36e6)
+        assert np.allclose(measured.band, fine.band, rtol=0.02)
+        assert np.isclose(measured.time_to_peak, (fine.n_samples // 2) / 36e6, atol=1 / 36e6)
+
+
 def _stack_padded(*waveforms):
     """Waveforms of different lengths as one (n_tx, n_samples) array, zero-padded at the end."""
     n = max(len(w) for w in waveforms)

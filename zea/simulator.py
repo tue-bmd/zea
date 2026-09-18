@@ -1210,14 +1210,14 @@ def _validate_bandwidth(bandwidth_percent, geometric=False):
 def sampled_spectrum(f, samples, times):
     """Continuous-time spectrum of a uniformly sampled waveform at frequencies ``f`` [Hz]: its
     discrete-time Fourier transform times the sampling interval, by Horner's scheme so that no
-    (n_freqs, n_samples) table is formed."""
+    (n_freqs, n_samples) table is formed. Zero beyond the Nyquist frequency of the samples."""
     f = np.asarray(f, np.float64)
     dt = times[1] - times[0]
     z = np.exp(-2j * np.pi * f * dt)
     spectrum = np.zeros(f.shape, np.complex128)
     for sample in samples[::-1]:
         spectrum = spectrum * z + sample
-    return spectrum * dt * np.exp(-2j * np.pi * f * times[0])
+    return spectrum * dt * np.exp(-2j * np.pi * f * times[0]) * (np.abs(f) <= 0.5 / dt)
 
 
 def hann_burst_spectrum(f, fc, n_period, sweep=0.0):
