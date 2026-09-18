@@ -282,6 +282,16 @@ def test_pulse_models_have_a_unit_peak_on_the_middle_sample():
         assert abs(np.argmax(np.abs(hilbert(from_trigger))) - n_before) <= 1
 
 
+@pytest.mark.parametrize("model", ["hann", "simus"])
+def test_detuned_pulse_peaks_at_its_time_to_peak(model):
+    """The waveform from the trigger must peak at ``time_to_peak``, also when the excitation is
+    detuned from the probe band, where most of the pulse would fall before the excitation."""
+    for fc in (3e6, 5e6, 8e6):
+        pulse = transmit_pulse(fc, 250e6, model, bandwidth_percent=75.0, probe_center_frequency=3e6)
+        measured = measured_pulse(pulse.waveform(from_trigger=True), SAMPLING_FREQUENCY, 250e6)
+        assert abs(measured.time_to_peak - pulse.time_to_peak) * fc < 0.05
+
+
 def test_realistic_pulse_rings_down_within_the_band():
     pulse = _pulse("realistic", n_period=0.5)
     assert 0 < pulse.n_before < pulse.n_after  # fast rise, long ringdown

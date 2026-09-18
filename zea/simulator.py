@@ -73,7 +73,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
 
 import functools
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import keras
@@ -2044,8 +2044,8 @@ class Pulse:
     n_after: int
     """Support after the peak, in samples."""
     time_to_peak: float
-    """Time [s] from the transmit trigger (the start of the excitation, or of a measured
-    waveform) to the envelope peak: the ``t_peak`` of a real system."""
+    """Time [s] from the transmit trigger (the start of the pulse, or of a measured waveform)
+    to the envelope peak: the ``t_peak`` of a real system."""
     band: tuple
     """The -6 dB band [Hz] of the pulse, (low, high)."""
 
@@ -2065,9 +2065,7 @@ class Pulse:
         By default of length :attr:`n_samples`, odd, with the envelope peak on the middle sample.
         With ``from_trigger`` the waveform starts at the transmit trigger instead, like a
         Verasonics waveform: sample 0 is ``time_to_peak`` before the peak, so the ``t_peak``
-        that :class:`zea.Parameters` derives from it is :attr:`time_to_peak`. A model whose
-        transducer response is not causal (``"hann"``, ``"simus"``) then loses the part of its
-        response before the trigger, which is small.
+        that :class:`zea.Parameters` derives from it is :attr:`time_to_peak`.
         """
         if from_trigger:
             n_before = int(round(self.time_to_peak * self.sampling_frequency))
@@ -2186,7 +2184,12 @@ def transmit_pulse(
             one_way = butterworth_transfer(f, fc_probe, bandwidth_percent, transducer_order)
             return excitation * one_way**2
 
-    return _calibrate(spectrum, fs, duration, pulse_model == "realistic", trigger)
+    pulse = _calibrate(spectrum, fs, duration, pulse_model == "realistic", trigger)
+    if pulse_model != "realistic":
+        # A zero-phase transducer responds before the excitation window, the more so the further
+        # the excitation is detuned from the band; the trigger has to hold that response.
+        return replace(pulse, time_to_peak=max(pulse.time_to_peak, pulse.n_before / fs))
+    return pulse
 
 
 def measured_pulse(waveform_two_way, sampling_frequency, waveform_sampling_frequency=250e6):

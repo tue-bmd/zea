@@ -108,6 +108,46 @@ def load_image(filename, mode="L"):
         return _convert_image_mode(img, mode=mode)
 
 
+def save_image(image, filename):
+    """Saves a single image to an image file.
+
+    Supported file types: jpg, png.
+
+    Args:
+        image (ndarray): A single image of shape (height, width),
+            (height, width, channels) with 1 (grayscale), 3 (RGB) or 4 (RGBA)
+            channels. Image should be uint8. JPEG has no alpha channel, so an
+            RGBA image is written as RGB; PNG keeps the alpha channel.
+        filename (str or Path): Filename to which the image should be written.
+
+    Returns:
+        Path: The path the image was written to.
+
+    Raises:
+        ValueError: If the file extension is not supported.
+    """
+    filename = Path(filename)
+    ext = filename.suffix.lower()
+    if ext not in {suffix.lower() for suffix in _SUPPORTED_IMG_TYPES}:
+        raise ValueError(f"Unsupported file extension: {ext}")
+
+    image = np.asarray(image)
+    # ``_assert_uint8_images`` validates a sequence, so check the frame as a sequence of one.
+    _assert_uint8_images(image[np.newaxis])
+
+    # Drop the channel axis of a grayscale image so PIL writes a single-channel image
+    # rather than refusing the (height, width, 1) shape.
+    if image.ndim == 3 and image.shape[-1] == 1:
+        image = np.squeeze(image, axis=-1)
+    # JPEG has no alpha channel, and PIL raises rather than dropping it for us.
+    # ``preprocess_for_saving`` drops it the same way for videos.
+    elif ext in (".jpg", ".jpeg") and image.ndim == 3 and image.shape[-1] == 4:
+        image = image[..., :3]
+
+    Image.fromarray(image).save(filename)
+    return filename
+
+
 def save_video(images, filename, fps=20, **kwargs):
     """Saves a sequence of images to a video file.
 
