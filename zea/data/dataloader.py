@@ -1020,8 +1020,10 @@ class Dataloader:
                 }
 
             Fields whose leading dimension is ``n_frames`` in the spec are sliced to the
-            sample's frames so they stay aligned with the returned images, and fields sharing
-            a dimension with an ``axis_selections`` entry are narrowed the same way.
+            sample's frames so they stay aligned with the returned images, fields sharing
+            a dimension with an ``axis_selections`` entry are narrowed the same way, and
+            fields sharing a dimension with an ``additional_axes_iter`` entry are indexed
+            accordingly (dropping that axis).
             During construction, the loader checks that all files can supply the requested
             paths and that they have the same shapes, raising :exc:`KeyError` or
             :exc:`ValueError` naming the offending files. They can be dropped with
@@ -1070,7 +1072,10 @@ class Dataloader:
             samples, so caching will consume more memory.
         additional_axes_iter: Additional axes to iterate over, on top of the frame axis.
             Each becomes an integer index, so those axes are dropped from the sample.
-            Default is ``None``.
+            When used with ``return_metadata``, metadata fields carrying the same dimension
+            are indexed accordingly so they stay aligned with the data: e.g. indexing
+            transmits via ``additional_axes_iter=[1]`` on ``data/raw_data`` also indexes
+            ``scan.t0_delays`` at the transmit axis. Default is ``None``.
         sort_files: Sort files numerically before indexing. Default is ``True``.
         overlapping_blocks: If ``True``, frame blocks overlap by ``n_frames - 1``.
             Has no effect unless ``n_frames > 1``. Default is ``False``.
