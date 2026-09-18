@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
-from typing import Any, ClassVar, List, NoReturn, Sequence, Tuple, cast
+from typing import Any, ClassVar, Iterator, List, NoReturn, Sequence, Tuple, cast
 
 import h5py
 import hdf5plugin
@@ -73,6 +73,13 @@ MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 # compression ratio per chunk, and extra round trips.
 SINGLE_CHUNK_BYTES = 1 << 20  # 1 MiB
 
+# Memory budget for one slab: the unit in which an array that is *not* held in RAM is
+# copied or reduced (see :func:`iter_slabs`). It bounds the memory of a whole-file
+# operation such as ``zea data resave``, which is why it is well under a typical machine's
+# RAM, while staying large enough that each read and each write spans many chunks —
+# a slab is what gets decompressed, handed to HDF5 and recompressed in one go.
+MAX_SLAB_BYTES = 64 << 20  # 64 MiB
+
 # Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
 # metadata that a reader must walk on open (superblock, group and chunk B-trees) into
 # few, adjacent pages instead of scattering it through the file. Over HTTP this cuts a
@@ -129,10 +136,199 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     )
 
 
-def value_shape(value: Any) -> tuple:
-    """Return the shape tuple for numpy arrays and scalar values."""
+#: What an array has to provide to be stored by a spec: ``shape`` and ``dtype`` to
+#: validate it against the schema, ``ndim``/``size``/``nbytes`` to pick a chunk shape and
+#: a slab size, and indexing to read it. Everything downstream — :meth:`Spec.create_dataset`,
+#: :meth:`Spec._resolve_chunks`, :func:`iter_slabs` — uses only these, so an object with
+#: all of them can be saved, and one without them is not treated as an array at all rather
+#: than failing later with an ``AttributeError``.
+_ARRAY_ATTRIBUTES = ("shape", "dtype", "ndim", "size", "nbytes", "__getitem__")
+
+
+def is_array_like(value: Any) -> bool:
+    """Whether ``value`` is an n-dimensional array the spec can describe and store.
+
+    A :class:`numpy.ndarray`, but also any object providing :data:`_ARRAY_ATTRIBUTES`
+    without holding its contents in memory — an :class:`h5py.Dataset`, a
+    :class:`zea.data.file.ChunkedDataset`, and anything else that reads like one.  Such a
+    *lazy* array is validated from its metadata and copied slab by slab (see
+    :func:`iter_slabs`), so a file can be rewritten without ever fitting in RAM.
+
+    Strings and numpy scalars are excluded: they carry a ``dtype`` and a ``shape`` of
+    their own but are values, not arrays.
+    """
     if isinstance(value, np.ndarray):
-        return value.shape
+        return True
+    if isinstance(value, (str, bytes, np.generic)):
+        return False
+    return all(hasattr(value, attribute) for attribute in _ARRAY_ATTRIBUTES)
+
+
+def is_lazy_array(value: Any) -> bool:
+    """Whether ``value`` is an array whose contents are not (yet) in memory.
+
+    See :func:`is_array_like`.  Reading one costs IO, so the spec only ever touches
+    a lazy array's metadata, and writing one goes through :func:`iter_slabs`.
+    """
+    return is_array_like(value) and not isinstance(value, np.ndarray)
+
+
+def _contents_in_memory(value: Any) -> bool:
+    """Whether a value's contents can be inspected without reading a file.
+
+    The sanity checks on data *contents* — an image in dB, a plausible speed of sound,
+    coordinates in metres — visit every element, so they are skipped for an array that is
+    still backed by a file: it was checked when that file was written, and reading it back
+    whole is precisely what the lazy path exists to avoid. Dtypes and shapes are validated
+    either way; those come from the file's metadata and cost nothing.
+    """
+    return not is_lazy_array(value)
+
+
+def _slab_selections(
+    shape: tuple[int, ...],
+    itemsize: int,
+    max_bytes: int,
+    chunks: tuple[int, ...] | None = None,
+    split_axes: bool = True,
+    axis: int = 0,
+    prefix: tuple = (),
+) -> "Iterator[tuple[slice, ...]]":
+    """Yield hyperslab selections tiling ``shape``, each at most ``max_bytes`` of data.
+
+    The array is cut along ``axis`` (the outermost, which is ``n_frames`` for every data
+    product), so each slab is a contiguous run of whole frames. Where ``chunks`` is given
+    the run is a whole number of chunks, so writing a slab never has to read back a
+    partially filled chunk to recompress it.
+
+    If a single index along ``axis`` is already over budget — one frame of a 149-transmit
+    acquisition is 166 MB — the next axis in is split as well, unless ``split_axes`` is
+    False, in which case the slab is left oversized (a reduction over an axis needs whole
+    frames to accumulate).
+    """
+    if axis >= len(shape):
+        yield prefix
+        return
+
+    inner = math.prod(shape[axis + 1 :]) * itemsize
+    step = min(max_bytes // inner, shape[axis])
+    if step < 1 and (not split_axes or axis == len(shape) - 1):
+        step = 1
+    if step >= 1:
+        if chunks is not None and step > chunks[axis]:
+            step -= step % chunks[axis]
+        for start in range(0, shape[axis], step):
+            yield prefix + (slice(start, min(start + step, shape[axis])),)
+        return
+
+    # One index along this axis does not fit the budget: keep it whole and split deeper.
+    for index in range(shape[axis]):
+        yield from _slab_selections(
+            shape,
+            itemsize,
+            max_bytes,
+            chunks,
+            split_axes,
+            axis + 1,
+            prefix + (slice(index, index + 1),),
+        )
+
+
+def iter_slabs(
+    array: Any,
+    max_bytes: int | None = None,
+    chunks: tuple[int, ...] | None = None,
+    split_axes: bool = True,
+) -> "Iterator[tuple[tuple, np.ndarray]]":
+    """Iterate over ``array`` in slabs of at most ``max_bytes``, as ``(selection, values)``.
+
+    The selections tile the array, so writing every ``values`` to ``dataset[selection]``
+    reproduces it exactly, and reducing them one by one reduces the whole array — all with
+    only one slab in memory at a time. Works the same for a lazy array (each slab is a
+    read) and for a :class:`numpy.ndarray` (each slab is a view), so callers do not need
+    to branch on where the data lives.
+
+    Args:
+        array: Any array-like (see :func:`is_array_like`).
+        max_bytes (int, optional): Memory budget for one slab, uncompressed, covering
+            everything a slab holds at once — including the source buffer where the array
+            converts on read (see :func:`_read_itemsize`). Read from :data:`MAX_SLAB_BYTES`
+            when not given, so that setting the module constant takes effect everywhere.
+        chunks (tuple, optional): The *destination* chunk shape, when copying into an HDF5
+            dataset; slab boundaries are aligned to it.
+        split_axes (bool): Whether a slab may cover only part of an outer index when a
+            single index exceeds ``max_bytes``. Pass False when the slabs are reduced
+            along an inner axis, which needs each outer index whole.
+
+    Yields:
+        tuple: ``(selection, values)``, where ``selection`` indexes ``array`` and
+        ``values`` is the :class:`numpy.ndarray` it selects.
+    """
+    if array.size == 0:
+        return
+    if array.ndim == 0:
+        yield (), np.asarray(array[()])
+        return
+    if max_bytes is None:
+        max_bytes = MAX_SLAB_BYTES
+    for selection in _slab_selections(
+        tuple(array.shape), _read_itemsize(array), max_bytes, chunks, split_axes
+    ):
+        yield selection, np.asarray(array[selection])
+
+
+class _CastArray:
+    """A lazy array read through a dtype conversion.
+
+    Reports ``dtype`` while its contents stay where they are: they are converted only as
+    (part of) the array is read.  A field an older file stored as float64 where the schema
+    says float32 is therefore still written out slab by slab, instead of being loaded whole
+    to be recast — which is exactly what the lazy path exists to avoid.
+
+    Provides :data:`_ARRAY_ATTRIBUTES`, so it is an array everywhere a spec looks.
+    """
+
+    __slots__ = ("_source", "dtype", "shape", "ndim", "size", "nbytes", "source_itemsize")
+
+    def __init__(self, source: Any, dtype: Any):
+        self._source = source
+        self.dtype = np.dtype(dtype)
+        # Fixed for the life of the wrapper (the source is a stored array), so they are
+        # resolved once here rather than on every slab.
+        self.shape = tuple(source.shape)
+        self.ndim = len(self.shape)
+        self.size = int(math.prod(self.shape))
+        self.nbytes = self.size * self.dtype.itemsize
+        self.source_itemsize = np.dtype(source.dtype).itemsize
+
+    def __getitem__(self, selection) -> np.ndarray:
+        """Read a selection from the source and convert just that much."""
+        return np.asarray(self._source[selection]).astype(self.dtype, copy=False)
+
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        """Materialise the whole array, for the callers that insist on one."""
+        values = self[...]
+        return values if dtype is None else values.astype(dtype)
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} shape={self.shape} dtype={self.dtype}>"
+
+
+def _read_itemsize(array: Any) -> int:
+    """Bytes one element of ``array`` costs to read, which is not always its dtype's.
+
+    Reading a slab of a :class:`_CastArray` holds the source element and the converted one
+    at the same time, so budgeting by the destination dtype alone would let a float64
+    source read twice :data:`MAX_SLAB_BYTES`. Any array that does not convert on read
+    reports ``source_itemsize`` of 0 by omission, and costs just its own dtype.
+    """
+    return array.dtype.itemsize + getattr(array, "source_itemsize", 0)
+
+
+def value_shape(value: Any) -> tuple:
+    """Return the shape tuple for arrays (lazy ones included) and scalar values."""
+    if is_array_like(value):
+        return tuple(value.shape)
     return ()
 
 
@@ -347,6 +543,10 @@ class Spec:
                 and np.issubdtype(value_dtype, np.floating)
                 and value_dtype != expected_float_dtype
             ):
+                # A lazy array is recast as it is read, one slab at a time, rather than
+                # being loaded whole just to change dtype.
+                if is_lazy_array(value):
+                    return _CastArray(value, expected_float_dtype)
                 return value.astype(expected_float_dtype, copy=False)
 
             return value
@@ -538,7 +738,7 @@ class Spec:
         if isinstance(value, (str, np.str_, bytes, np.bytes_)):
             return True
 
-        if isinstance(value, np.ndarray):
+        if is_array_like(value):
             return value.dtype.kind in {"U", "S", "O"}
 
         return False
@@ -607,7 +807,7 @@ class Spec:
         or ``None``, the value is not an array, it is empty, or every resolved axis is a
         chunk axis — the latter would mean scalar-sized chunks, so h5py decides instead.
         """
-        if not chunk_axes or not isinstance(value, np.ndarray) or value.size == 0:
+        if not chunk_axes or not is_array_like(value) or value.size == 0:
             return None
         if value.nbytes <= SINGLE_CHUNK_BYTES:
             return cast(Tuple[int, ...], value.shape)
@@ -656,6 +856,13 @@ class Spec:
         dimension names or several alternatives) is provided, the chunk shape is
         derived from ``chunk_axes`` to match common subsampling patterns; see
         :meth:`_resolve_chunks`.
+
+        A lazy value — an ``h5py.Dataset`` or any other array-like whose contents are
+        still on disk (see :func:`is_lazy_array`) — is copied slab by slab rather than
+        materialised, so the peak memory is one slab instead of the whole array. A lazy
+        *string* array is the exception and is read whole: zea never defers strings (they
+        are channel labels and names, see :func:`zea.data.file._load_group_dict`), so the
+        read is bounded by construction.
         """
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
         chunks = None if dataset_is_scalar else Spec._resolve_chunks(value, dim_names, chunk_axes)
@@ -683,6 +890,16 @@ class Spec:
                 dtype=string_dtype,
                 **string_comp,
             )
+        elif is_lazy_array(value):
+            dataset = group.create_dataset(
+                field_name,
+                shape=value.shape,
+                dtype=value.dtype,
+                chunks=chunks,
+                **comp_kwargs,
+            )
+            for selection, slab in iter_slabs(value, chunks=chunks):
+                dataset[selection] = slab
         else:
             group.create_dataset(field_name, data=value, chunks=chunks, **comp_kwargs)
 
@@ -928,7 +1145,11 @@ class Map(Spec):
             # Sanity-check units: clinical ultrasound scan regions are at most a few tens of
             # centimetres across, so any finite coordinate magnitude above 1 m almost certainly
             # indicates the array was supplied in millimetres rather than metres.
-            max_abs = np.max(np.abs(self.coordinates[np.isfinite(self.coordinates)]), initial=0.0)
+            max_abs = (
+                np.max(np.abs(self.coordinates[np.isfinite(self.coordinates)]), initial=0.0)
+                if _contents_in_memory(self.coordinates)
+                else 0.0
+            )
             if max_abs > 1.0:
                 log.warning(
                     f"{type(self).__name__}: coordinates have a maximum absolute value of "
@@ -1062,7 +1283,7 @@ class Image(Map):
         super().__post_init__()
 
         # Check that image values are in dB scale (finite or -inf, and <= 0)
-        if self.values.dtype == np.float32:
+        if self.values.dtype == np.float32 and _contents_in_memory(self.values):
             if not np.all(np.isfinite(self.values) | np.isneginf(self.values)):
                 raise ValueError("Image values must be finite or -inf (dB scale).")
             if not np.all(self.values <= 0):
@@ -1200,7 +1421,7 @@ class SosMap(FloatMap):
             raise ValueError(f"Speed-of-sound map unit should be 'm/s', got '{self.unit}'")
 
         # Check sensible values for speed of sound
-        if np.any(self.values < 300):
+        if _contents_in_memory(self.values) and np.any(self.values < 300):
             log.warning(
                 "Speed-of-sound map contains values below 300 m/s, which is unusually low. "
                 "Please verify that the speed-of-sound values are correct and in m/s."
@@ -1274,7 +1495,7 @@ class AttenuationMap(FloatMap):
             raise ValueError(f"Attenuation map unit should be 'dB/m/Hz', got '{self.unit}'")
 
         # Attenuation coefficients describe energy loss and are therefore non-negative.
-        if np.any(self.values < 0):
+        if _contents_in_memory(self.values) and np.any(self.values < 0):
             log.warning(
                 "Attenuation map contains negative values, which is physically unexpected "
                 "for an attenuation coefficient. Please verify the values are in dB/m/Hz."
@@ -1283,7 +1504,11 @@ class AttenuationMap(FloatMap):
         # Guard against the coefficient being supplied in the common clinical unit
         # dB/cm/MHz (= 1e-4 dB/m/Hz) instead of the spec's dB/m/Hz base unit: even
         # highly attenuating media stay well below 1e-2 dB/m/Hz.
-        max_abs = float(np.max(np.abs(self.values), initial=0.0))
+        max_abs = (
+            float(np.max(np.abs(self.values), initial=0.0))
+            if _contents_in_memory(self.values)
+            else 0.0
+        )
         if max_abs > 1e-2:
             log.warning(
                 f"Attenuation map has a maximum absolute value of {max_abs:.4g} dB/m/Hz, which "
@@ -1484,7 +1709,7 @@ class DataSpec(Spec):
         for key, value in extra_maps.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom data key '{key}': reserved name")
-            if isinstance(value, np.ndarray):
+            if is_array_like(value):
                 raise TypeError(
                     f"Custom data key '{key}' must be a spatial map "
                     f"(a dict with at least a 'values' key), not a flat array. "
@@ -1517,7 +1742,7 @@ class DataSpec(Spec):
 
         # n_ch must be 1 (RF) or 2 (IQ) for raw_data (checked for aligned_data by AlignedData).
         arr = getattr(self, "raw_data", None)
-        if arr is not None and isinstance(arr, np.ndarray):
+        if arr is not None and is_array_like(arr):
             n_ch = arr.shape[-1]
             if n_ch not in (1, 2):
                 raise ValueError(
@@ -2916,7 +3141,13 @@ class FileSpec(Spec):
         chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
-        """Save the dataset to the specified path."""
+        """Save the dataset to the specified path.
+
+        Fields that are lazy arrays — still backed by an open file rather than held in
+        memory (see :func:`is_lazy_array`) — are copied across slab by slab, so a file
+        far larger than RAM can be written. The source file has to stay open for the
+        duration of the call; this is what ``zea data resave`` does.
+        """
         try:
             _zea_version = _get_pkg_version("zea")
         except PackageNotFoundError:
@@ -3027,9 +3258,9 @@ class FileSpec(Spec):
                         if element.group_name
                         else custom_group
                     )
-                    self.create_dataset(
-                        group, element.name, np.asarray(element.data), compression=compression
-                    )
+                    # Lazy custom data is passed through untouched so it, too, streams.
+                    data = element.data if is_array_like(element.data) else np.asarray(element.data)
+                    self.create_dataset(group, element.name, data, compression=compression)
                     group[element.name].attrs["description"] = element.description
                     group[element.name].attrs["unit"] = element.unit
 
