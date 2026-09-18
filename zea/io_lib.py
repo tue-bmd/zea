@@ -116,7 +116,8 @@ def save_image(image, filename):
     Args:
         image (ndarray): A single image of shape (height, width),
             (height, width, channels) with 1 (grayscale), 3 (RGB) or 4 (RGBA)
-            channels. Image should be uint8.
+            channels. Image should be uint8. JPEG has no alpha channel, so an
+            RGBA image is written as RGB; PNG keeps the alpha channel.
         filename (str or Path): Filename to which the image should be written.
 
     Returns:
@@ -138,6 +139,10 @@ def save_image(image, filename):
     # rather than refusing the (height, width, 1) shape.
     if image.ndim == 3 and image.shape[-1] == 1:
         image = np.squeeze(image, axis=-1)
+    # JPEG has no alpha channel, and PIL raises rather than dropping it for us.
+    # ``preprocess_for_saving`` drops it the same way for videos.
+    elif ext in (".jpg", ".jpeg") and image.ndim == 3 and image.shape[-1] == 4:
+        image = image[..., :3]
 
     Image.fromarray(image).save(filename)
     return filename

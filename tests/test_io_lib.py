@@ -77,7 +77,34 @@ def test_save_image_grayscale(tmp_path, shape):
     assert np.array_equal(load_image(path, mode="L"), image.reshape(16, 24))
 
 
+def test_save_image_rgba_png_keeps_alpha(tmp_path):
+    """PNG can hold an alpha channel, so RGBA is written through unchanged."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 4), dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    with Image.open(path) as saved:
+        assert saved.mode == "RGBA"
+        assert np.array_equal(np.array(saved), image)
+
+
+def test_save_image_rgba_jpeg_drops_alpha(tmp_path):
+    """JPEG has no alpha channel; PIL raises on RGBA, so the alpha is dropped first."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 4), dtype=np.uint8)
+    path = tmp_path / "frame.jpg"
+
+    save_image(image, path)
+
+    with Image.open(path) as saved:
+        assert saved.mode == "RGB"
+        assert saved.size == (24, 16)
+
+
 def test_save_image_unsupported_extension_raises(tmp_path):
+    """An extension that is not an image type is refused up front."""
     image = np.zeros((4, 4), dtype=np.uint8)
     with pytest.raises(ValueError, match="Unsupported file extension"):
         save_image(image, tmp_path / "frame.gif")
