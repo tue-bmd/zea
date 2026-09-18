@@ -440,7 +440,7 @@ def hilbert(x, N: int | None = None, axis=-1):
     return x
 
 
-def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
+def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad=False):
     """Demodulates the input data to baseband. The function computes the analytical
     signal (the signal with negative frequencies removed) and then shifts the spectrum
     of the signal to baseband by multiplying with a complex exponential. Where the
@@ -453,12 +453,20 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
         demodulation_frequency (float): The center frequency of the signal.
         sampling_frequency (float): The sampling frequency of the signal.
         axis (int, optional): The axis along which to demodulate. Defaults to -3.
+        pad (bool, optional): Zero-pad the fast-time axis to ``2 * n_ax`` before the
+            Hilbert transform and crop back, so the FFT-based :func:`hilbert` cannot
+            wrap a near-field echo onto the end of the record. Defaults to ``False``.
 
     Returns:
         ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.
     """
     # Compute the analytical signal
-    analytical_signal = hilbert(data, axis=axis)
+    if pad:
+        n_ax = data.shape[axis]
+        analytical_signal = hilbert(data, N=2 * n_ax, axis=axis)
+        analytical_signal = ops.take(analytical_signal, ops.arange(n_ax), axis=axis)
+    else:
+        analytical_signal = hilbert(data, axis=axis)
 
     # Define frequency indices
     frequency_indices = ops.arange(analytical_signal.shape[axis])

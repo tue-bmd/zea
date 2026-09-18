@@ -515,7 +515,7 @@ class Demodulate(Operation):
 
     ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
 
-    def __init__(self, axis=-3, **kwargs):
+    def __init__(self, axis=-3, pad=False, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -523,6 +523,7 @@ class Demodulate(Operation):
             **kwargs,
         )
         self.axis = axis
+        self.pad = pad
 
     def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
@@ -535,6 +536,7 @@ class Demodulate(Operation):
             demodulation_frequency=demodulation_frequency,
             sampling_frequency=sampling_frequency,
             axis=self.axis,
+            pad=self.pad,
         )
 
         return {
