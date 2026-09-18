@@ -1,5 +1,5 @@
-# Keeps the Read the Docs versions that track our moving tags (`latest` and
-# `openh-rf-latest`) pointing at the commit the tag was just moved to.
+# Rebuilds the Read the Docs version that tracks one of our rolling tags
+# (`latest`, `openh-rf-latest`) after that tag has been moved.
 #
 # Read the Docs' own webhook races the force-push: it starts a build while its
 # cached git ref still resolves to the previous release, so the build succeeds
@@ -19,6 +19,9 @@ on:
         description: "Read the Docs version slug to rebuild"
         required: true
         type: string
+    secrets:
+      RTD_TOKEN:
+        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -30,78 +33,105 @@ on:
           - latest
           - openh-rf-latest
 
+permissions:
+  contents: read
+
 jobs:
   rebuild:
     name: Rebuild ${{ inputs.version || github.ref_name }} on Read the Docs
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Sync Read the Docs versions and rebuild
+      - name: Resolve tag
+        id: tag
+        env:
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Resolve the tag ourselves rather than trusting github.sha, so that a
+          # manual re-run targets the tag and not the branch head.
+          sha=$(git ls-remote "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "refs/tags/${VERSION}" | cut -f1)
+          if [ -z "${sha}" ]; then
+            echo "::error::tag ${VERSION} does not exist on origin"
+            exit 1
+          fi
+          echo "${VERSION} points at ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync Read the Docs and rebuild
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
           RTD_PROJECT: zea
           VERSION: ${{ inputs.version || github.ref_name }}
+          EXPECTED: ${{ steps.tag.outputs.sha }}
         run: |
-          set -euo pipefail
-          API="https://app.readthedocs.org/api/v3/projects/${RTD_PROJECT}"
-          AUTH="Authorization: Token ${RTD_TOKEN}"
+          python3 - <<'PY'
+          import json, os, time, urllib.request
 
-          # Resolve the tag ourselves rather than trusting github.sha, so that a
-          # manual workflow_dispatch re-run targets the tag and not the branch head.
-          EXPECTED=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${VERSION}" | cut -f1)
-          if [ -z "${EXPECTED}" ]; then
-            echo "::error::tag ${VERSION} does not exist on origin"
-            exit 1
-          fi
-          echo "Tag ${VERSION} points at ${EXPECTED}"
+          PROJECT = os.environ["RTD_PROJECT"]
+          VERSION = os.environ["VERSION"]
+          EXPECTED = os.environ["EXPECTED"]
+          API = f"https://app.readthedocs.org/api/v3/projects/{PROJECT}"
 
-          # 1. Force Read the Docs to re-read the git refs. Without this its
+          def fail(message):
+              print(f"::error::{message}")
+              raise SystemExit(1)
+
+          def api(path, method="GET", attempts=3):
+              """Call the Read the Docs API, retrying transport and server hiccups."""
+              request = urllib.request.Request(
+                  API + path,
+                  method=method,
+                  data=b"" if method == "POST" else None,
+                  headers={"Authorization": f"Token {os.environ['RTD_TOKEN']}"},
+              )
+              for attempt in range(1, attempts + 1):
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          body = response.read()
+                      return json.loads(body) if body else {}
+                  except Exception as error:
+                      print(f"  {method} {path} failed: {error}")
+                      if attempt == attempts:
+                          fail(f"Read the Docs API kept failing for {method} {path}")
+                      time.sleep(10)
+
+          # 1. Force Read the Docs to re-read the git refs. Without this, its
           #    cached ref for a force-moved tag still points at the old release.
-          curl -sS -X POST -H "${AUTH}" -H "Content-Length: 0" -o /dev/null -w 'sync-versions: HTTP %{http_code}\n' "${API}/sync-versions/"
+          api("/sync-versions/", "POST")
 
           # 2. Wait for the sync to land before asking for a build, otherwise we
           #    just reproduce the race we are trying to avoid.
-          ident=""
-          for attempt in $(seq 1 40); do
-            ident=$(curl -sS -H "${AUTH}" "${API}/versions/${VERSION}/" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("identifier") or "")')
-            echo "  sync attempt ${attempt}: identifier=${ident:-<none>}"
-            [ "${ident}" = "${EXPECTED}" ] && break
-            sleep 15
-          done
-          if [ "${ident}" != "${EXPECTED}" ]; then
-            echo "::error::Read the Docs still resolves ${VERSION} to ${ident:-<none>}, expected ${EXPECTED}"
-            exit 1
-          fi
+          for attempt in range(40):
+              identifier = api(f"/versions/{VERSION}/").get("identifier")
+              print(f"  sync {attempt + 1}: {VERSION} -> {identifier}")
+              if identifier == EXPECTED:
+                  break
+              time.sleep(15)
+          else:
+              fail(f"Read the Docs still resolves {VERSION} to {identifier}, expected {EXPECTED}")
 
           # 3. Build, then confirm the build really used the commit we expect --
           #    a green build on the wrong commit is exactly the failure mode here.
-          build_id=$(curl -sS -X POST -H "${AUTH}" -H "Content-Length: 0" "${API}/versions/${VERSION}/builds/" | python3 -c 'import sys,json;print((json.load(sys.stdin).get("build") or {}).get("id") or "")')
-          if [ -z "${build_id}" ]; then
-            echo "::error::Read the Docs did not accept the build request"
-            exit 1
-          fi
-          echo "Triggered build: https://app.readthedocs.org/projects/${RTD_PROJECT}/builds/${build_id}/"
+          build_id = (api(f"/versions/{VERSION}/builds/", "POST").get("build") or {}).get("id")
+          if not build_id:
+              fail("Read the Docs did not accept the build request")
+          print(f"Triggered build: https://app.readthedocs.org/projects/{PROJECT}/builds/{build_id}/")
 
-          state=""
-          success=""
-          commit=""
-          for attempt in $(seq 1 80); do
-            read -r state success commit <<<"$(curl -sS -H "${AUTH}" "${API}/builds/${build_id}/" | python3 -c 'import sys,json;b=json.load(sys.stdin);print((b.get("state") or {}).get("code"), b.get("success"), b.get("commit"))')"
-            echo "  build ${build_id}: state=${state} success=${success} commit=${commit}"
-            [ "${state}" = "finished" ] && break
-            sleep 15
-          done
+          for attempt in range(80):
+              build = api(f"/builds/{build_id}/")
+              state = (build.get("state") or {}).get("code")
+              print(f"  build {build_id}: state={state} success={build.get('success')} commit={build.get('commit')}")
+              if state == "finished":
+                  break
+              time.sleep(15)
+          else:
+              fail(f"build {build_id} did not finish within the timeout")
 
-          if [ "${state}" != "finished" ]; then
-            echo "::error::build ${build_id} did not finish within the timeout"
-            exit 1
-          fi
-          if [ "${success}" != "True" ]; then
-            echo "::error::build ${build_id} failed"
-            exit 1
-          fi
-          if [ "${commit}" != "${EXPECTED}" ]; then
-            echo "::error::build ${build_id} published ${commit}, expected ${EXPECTED}"
-            exit 1
-          fi
-          echo "${VERSION} rebuilt from ${EXPECTED}"
+          if not build.get("success"):
+              fail(f"build {build_id} failed")
+          if build.get("commit") != EXPECTED:
+              fail(f"build {build_id} published {build.get('commit')}, expected {EXPECTED}")
+
+          print(f"{VERSION} rebuilt from {EXPECTED}")
+          PY

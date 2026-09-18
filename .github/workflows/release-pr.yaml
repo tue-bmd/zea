@@ -7,7 +7,8 @@
 # `publish.yaml` (PyPI), `docker.yaml` (images) and `release-tags.yaml`
 # (moves `latest` / `openh-rf-latest` and rebuilds the docs).
 #
-# Requires a `RELEASE_PAT` secret -- see the comment on the checkout step.
+# Requires a `RELEASE_PAT` secret: a personal access token with write access to
+# this repository's contents and pull requests.
 name: Release PR
 
 on:
@@ -27,29 +28,47 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: false
+
 jobs:
   release-pr:
     name: Open release PR
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
+      # Pushes made with GITHUB_TOKEN do not trigger other workflows, so a release
+      # PR opened with it would get none of the status checks `main` requires and
+      # could never be merged. Fail here rather than opening an unmergeable PR.
+      - name: Require RELEASE_PAT
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if [ -z "${RELEASE_PAT}" ]; then
+            echo "::error::RELEASE_PAT is not set; without it the release PR would never run its required checks"
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          # RELEASE_PAT is required, not optional. Pushes made with GITHUB_TOKEN do
-          # not trigger other workflows, so a PR opened with it gets none of the
-          # status checks `main`'s ruleset requires and can never be merged. The
-          # fallback only exists so a missing secret still produces a visible PR.
-          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          # Kept in the git config on purpose: the bump commit has to be pushed
+          # as this token's user for the release PR to run its checks.
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7.6.0
         with:
           enable-cache: false
+          # Same uv as the `uv-lock` pre-commit hook in .pre-commit-config.yaml:
+          # a different one can churn uv.lock, which would then fail the release
+          # PR's own precommithooks check.
+          version: "0.12.13"
 
       - name: Determine next version
         id: version
@@ -60,16 +79,29 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import os, pathlib, re, tomllib
 
-          current = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
-          explicit = os.environ["INPUT_VERSION"].strip().lstrip("v")
+          # The release shapes this project uses: 1.2.3, optionally followed by
+          # a1 / b1 / rc1. The third rank orders a final release after its
+          # pre-releases, so 0.2.0rc1 < 0.2.0.
+          PRE = {"a": 0, "b": 1, "rc": 2, None: 3}
 
-          if explicit:
-              new = explicit
-          else:
-              match = re.match(r"^(\d+)\.(\d+)\.(\d+)", current)
-              if not match:
-                  raise SystemExit(f"cannot bump {current!r} automatically; pass an explicit `version`")
-              major, minor, patch = (int(part) for part in match.groups())
+          def key(version):
+              """Comparable key for a version, or None if we do not allow its shape."""
+              match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?", version)
+              if match is None:
+                  return None
+              major, minor, patch, pre, pre_number = match.groups()
+              return (int(major), int(minor), int(patch), PRE[pre], int(pre_number or 0))
+
+          current = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
+          current_key = key(current)
+          if current_key is None:
+              raise SystemExit(f"current version {current!r} has an unexpected shape")
+
+          new = os.environ["INPUT_VERSION"].strip().lstrip("v")
+          if not new:
+              if current_key[3] != PRE[None]:
+                  raise SystemExit(f"cannot bump pre-release {current!r} automatically; pass an explicit `version`")
+              major, minor, patch = current_key[:3]
               bump = os.environ["INPUT_BUMP"]
               if bump == "major":
                   major, minor, patch = major + 1, 0, 0
@@ -79,12 +111,13 @@ jobs:
                   patch += 1
               new = f"{major}.{minor}.{patch}"
 
-          # Keep releases to the shapes this project has actually used, so a typo
-          # in the manual `version` input cannot mint a nonsense tag.
-          if not re.fullmatch(r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?", new):
-              raise SystemExit(f"refusing to release invalid version {new!r}")
-          if new == current:
-              raise SystemExit(f"version {new!r} is already the current version")
+          # A typo in the manual `version` input should not mint a nonsense tag,
+          # and PyPI will not accept a version that goes backwards.
+          new_key = key(new)
+          if new_key is None:
+              raise SystemExit(f"refusing to release {new!r}: expected X.Y.Z, optionally followed by aN, bN or rcN")
+          if new_key <= current_key:
+              raise SystemExit(f"refusing to release {new!r}: not newer than the current {current}")
 
           print(f"current={current}")
           print(f"new={new}")
@@ -94,23 +127,12 @@ jobs:
 
       - name: Bump version and relock
         env:
-          CURRENT: ${{ steps.version.outputs.current }}
           NEW: ${{ steps.version.outputs.new }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import os, pathlib, re
-
-          current, new = os.environ["CURRENT"], os.environ["NEW"]
-          path = pathlib.Path("pyproject.toml")
-          text, count = re.subn(
-              rf'(?m)^version = "{re.escape(current)}"$', f'version = "{new}"', path.read_text(), count=1
-          )
-          if count != 1:
-              raise SystemExit(f'could not find `version = "{current}"` in pyproject.toml')
-          path.write_text(text)
-          PY
-          uv lock
+          # `--no-sync` keeps this to the two files we want changed: it rewrites
+          # `pyproject.toml` and re-locks, without building an environment.
+          uv version --no-sync "${NEW}"
           git diff --stat
 
       - name: Commit and push release branch
@@ -130,7 +152,7 @@ jobs:
 
       - name: Open pull request
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
           BRANCH: ${{ steps.version.outputs.branch }}
           TAG: ${{ steps.version.outputs.tag }}
           CURRENT: ${{ steps.version.outputs.current }}
@@ -149,7 +171,7 @@ jobs:
           Prepared by the [Release PR](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/release-pr.yaml) workflow: \`${CURRENT}\` → \`${NEW}\`.
 
           - \`pyproject.toml\`: \`version = "${NEW}"\`
-          - \`uv.lock\`: refreshed with \`uv lock\`
+          - \`uv.lock\`: refreshed
 
           After merging, publish a GitHub release tagged \`${TAG}\` off \`main\`. That is what actually ships: it triggers \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`latest\` and \`openh-rf-latest\`, then rebuilds the docs).
           EOF

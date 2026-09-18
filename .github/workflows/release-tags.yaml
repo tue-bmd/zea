@@ -20,6 +20,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 concurrency:
   group: release-tags
   cancel-in-progress: false
@@ -58,11 +61,10 @@ jobs:
           for rolling in latest openh-rf-latest; do
             git tag --force "${rolling}" "${sha}"
           done
-          git push --force origin refs/tags/latest refs/tags/openh-rf-latest
+          # Atomic so the two rolling tags can never end up on different commits.
+          git push --atomic --force origin refs/tags/latest refs/tags/openh-rf-latest
 
-          {
-            echo "Moved \`latest\` and \`openh-rf-latest\` to \`${TAG}\` ([\`${sha:0:7}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${sha}))."
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Moved \`latest\` and \`openh-rf-latest\` to \`${TAG}\` ([\`${sha:0:7}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${sha}))." >> "$GITHUB_STEP_SUMMARY"
 
   rebuild-docs:
     name: Rebuild docs
@@ -77,4 +79,5 @@ jobs:
     uses: ./.github/workflows/docs.yaml
     with:
       version: ${{ matrix.version }}
-    secrets: inherit
+    secrets:
+      RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
