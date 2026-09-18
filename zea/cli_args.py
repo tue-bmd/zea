@@ -19,7 +19,7 @@ from typing import Annotated, Literal, Union
 import numpy as np
 import tyro
 
-SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
+SUPPORTED_FORMATS = ["gif", "mp4", "png", "hdf5"]
 sitk = importlib.util.find_spec("SimpleITK")
 if sitk is not None:
     SUPPORTED_FORMATS += ["nii.gz"]
@@ -142,7 +142,8 @@ class ProcessArgs:
     save_as: Annotated[
         Literal[tuple(SUPPORTED_FORMATS)],  # ty: ignore[invalid-type-form]
         tyro.conf.arg(
-            help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}.",
+            help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}. "
+            "png writes one image per frame.",
         ),
     ] = "gif"
     keep_keys: Annotated[

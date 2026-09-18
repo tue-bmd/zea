@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from zea.io_lib import load_image, load_video, save_video
+from zea.io_lib import load_image, load_video, save_image, save_video
 
 from . import DEFAULT_TEST_SEED
 
@@ -52,6 +52,35 @@ def test_load_image_basic(temp_image):
     assert arr.shape == (32, 32)
     arr_rgb = load_image(temp_image, mode="RGB")
     assert arr_rgb.shape == (32, 32, 3)
+
+
+def test_save_image_roundtrip(tmp_path):
+    """save_image writes an RGB image that load_image reads back unchanged."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 3), dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    assert np.array_equal(load_image(path, mode="RGB"), image)
+
+
+@pytest.mark.parametrize("shape", [(16, 24), (16, 24, 1)])
+def test_save_image_grayscale(tmp_path, shape):
+    """A grayscale image saves with or without a trailing channel axis."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, shape, dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    assert np.array_equal(load_image(path, mode="L"), image.reshape(16, 24))
+
+
+def test_save_image_unsupported_extension_raises(tmp_path):
+    image = np.zeros((4, 4), dtype=np.uint8)
+    with pytest.raises(ValueError, match="Unsupported file extension"):
+        save_image(image, tmp_path / "frame.gif")
 
 
 def test_load_video_gif(temp_gif):

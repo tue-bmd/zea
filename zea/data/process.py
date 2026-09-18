@@ -119,6 +119,27 @@ def _check_track_consistency(file: File, track_index: int | None, track_label: s
         )
 
 
+def _save_frames_as_png(frames: np.ndarray, save_path: Path, overwrite: bool) -> None:
+    """Write every frame of ``frames`` as its own PNG.
+
+    A single frame is written to ``save_path`` unchanged, which is what makes
+    ``--save-as png --n-frames 1`` produce ``<filestem>.png``. Several frames are
+    numbered ``<filestem>_0000.png``, ``…_0001.png``, … so that the frames of one
+    file do not overwrite each other.
+    """
+    paths = (
+        [save_path]
+        if len(frames) == 1
+        else [save_path.with_name(f"{save_path.stem}_{i:04d}.png") for i in range(len(frames))]
+    )
+    for frame, path in zip(frames, paths):
+        if output_blocked(path, overwrite):
+            log.warning(f"File {path} already exists. Use --overwrite to replace it.")
+            continue
+        io_lib.save_image(frame, path)
+        log.info(f"Saved {log.yellow(path)}")
+
+
 def _run_passthrough(
     dataset_path: str,
     key: str,
@@ -131,8 +152,8 @@ def _run_passthrough(
     **hf_kwargs,
 ) -> None:
     """Save data frames directly without a beamforming pipeline."""
-    if save_as not in ("gif", "mp4", "hdf5"):
-        raise ValueError(f"Passthrough mode only supports gif/mp4/hdf5, got {save_as!r}")
+    if save_as not in ("gif", "mp4", "png", "hdf5"):
+        raise ValueError(f"Passthrough mode only supports gif/mp4/png/hdf5, got {save_as!r}")
     save_dir.mkdir(parents=True, exist_ok=True)
 
     with Dataset(dataset_path, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
@@ -166,7 +187,10 @@ def _run_passthrough(
                 )
 
             save_path = save_dir / f"{filestem}.{save_as}"
-            if output_blocked(save_path, overwrite):
+            if save_as == "png":
+                # One path per frame, so the overwrite guard lives in the helper.
+                _save_frames_as_png(arr, save_path, overwrite)
+            elif output_blocked(save_path, overwrite):
                 log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             else:
                 if save_as in ("gif", "mp4"):
@@ -305,6 +329,10 @@ def run_processing(
         parameters,
         fps: int,
     ):
+        if save_as == "png":
+            # One path per frame, so the overwrite guard lives in the helper.
+            _save_frames_as_png(video, save_path, overwrite)
+            return
         if output_blocked(save_path, overwrite):
             log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             return
