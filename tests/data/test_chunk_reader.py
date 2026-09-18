@@ -583,6 +583,22 @@ class TestFetchers:
         with File(structured_file) as file:
             assert isinstance(fetcher_for(file), LocalFetcher)
 
+    def test_hf_fetcher_uses_the_login_token(self, monkeypatch):
+        """A token from `hf auth login` must authorise the chunk reads too.
+        """
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+        monkeypatch.setattr("huggingface_hub.get_token", lambda: "from-the-login-file")
+
+        class _StreamedFile:
+            _source_name = "hf://org/repo/data/file.hdf5"
+
+        fetcher = fetcher_for(_StreamedFile())
+        assert fetcher.url.endswith("/datasets/org/repo/resolve/main/data/file.hdf5")
+        assert fetcher._fs.client_kwargs["headers"] == {
+            "Authorization": "Bearer from-the-login-file"
+        }
+
     def test_fetcher_closed_with_file(self, structured_file):
         file = File(structured_file)
         assert file._chunk_fetcher is not None
