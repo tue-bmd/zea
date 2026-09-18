@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+import functools
+from collections.abc import Callable, Iterable
 
 import keras
 import numpy as np
@@ -27,15 +28,21 @@ from zea.func.ultrasound import (
 from zea.internal.core import (
     DEFAULT_DYNAMIC_RANGE,
     DataTypes,
+    python_constant,
 )
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
+from zea.simulator import (
+    apply_receive_chain,
+    elevation_slab_bucket,
+    simulate_rf,
+)
 from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
 
-simulator_settings = {
+# The simulators take different options, so the type checker cannot resolve the union.
+simulator_settings: dict[str, Callable] = {
     "exact": simulate_rf,
     "frequency_approximation": simulate_rf,
     "time_approximation": simulate_rf_td,
@@ -51,7 +58,12 @@ class Simulate(Operation):
     speed for accuracy or accuracy for speed will use these two paths respectively.
     ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
     evaluated at the center frequency, making it less accurate than the others but much faster in
-    some settings.
+    some settings. The element options (``baffle_impedance_ratio``, ``element_normals``,
+    ``n_sub_elements``, ``elevation_focus``, ``lens_attenuation_coef``) reach the
+    frequency-domain methods only; ``"time_approximation"`` does not model them. The transmit
+    pulse is ``waveforms_two_way`` (the one of a :class:`zea.Parameters` or zea file, or built
+    with :func:`zea.simulator.transmit_pulse`), and the default pulse of that function without.
+    ``element_height`` (all methods) defaults to an eighth of the width of a 1D probe.
     """
 
     # Define operation-specific static parameters
@@ -59,14 +71,19 @@ class Simulate(Operation):
         "n_ax",
         "apply_lens_correction",
         "method",
-        "elevation_lens",
+        "elevation_slab_2d",
         "max_chunk_gb",
         "center_frequency",
         "sampling_frequency",
         "scatter_exponent",
+        "baffle_impedance_ratio",
+        "waveforms_two_way",
+        "waveform_sampling_frequency",
         "noise_level_db",
         "tgc_max_db",
         "noise_seed",
+        "n_sub_elements",
+        "elevation_focus",
     ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
@@ -77,8 +94,20 @@ class Simulate(Operation):
         )
 
     def __call__(self, **kwargs):
-        # Drop out-of-slab scatterers here, because `call` is traced.
         merged = {**self._input_cache, **kwargs}
+        if "elevation_lens" in merged:
+            # `call` takes **kwargs, so the removed keyword would otherwise be silently ignored.
+            raise TypeError(
+                "`elevation_lens` was removed. Use `elevation_slab_2d` for the old 2D slab "
+                "approximation, or `elevation_focus` for a physical cylindrical elevation lens."
+            )
+        if not self._inside_outer_jit:
+            # Static scalars as Python numbers: tf.function would otherwise trace them as
+            # tensors, and the simulators size the FFT from the concrete pulse length.
+            merged.update(
+                {key: python_constant(merged[key]) for key in self.static_params if key in merged}
+            )
+        # Drop out-of-slab scatterers here, because `call` is traced.
         pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
         outputs = super().__call__(**{**merged, **pruned})
         return {**outputs, **{key: merged[key] for key in pruned}}
@@ -102,7 +131,7 @@ class Simulate(Operation):
         tx_apodizations,
         t_peak,
         method="exact",
-        elevation_lens=False,
+        elevation_slab_2d=False,
         element_height=None,
         max_chunk_gb=10.0,
         noise_level_db=None,
@@ -110,12 +139,30 @@ class Simulate(Operation):
         noise_seed=0,
         noise_reference=None,
         scatter_exponent=2.0,
+        baffle_impedance_ratio=0.0,
+        element_normals=None,
+        waveforms_two_way=None,
+        waveform_sampling_frequency=250e6,
+        n_sub_elements=None,
+        elevation_focus=None,
+        lens_attenuation_coef=0.0,
         **kwargs,
     ):
         if method not in simulator_settings:
             raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
         simulate = simulator_settings[method]
+        if method in ("exact", "frequency_approximation"):
+            simulate = functools.partial(
+                simulate,
+                baffle_impedance_ratio=baffle_impedance_ratio,
+                element_normals=element_normals,
+                n_sub_elements=n_sub_elements,
+                elevation_focus=elevation_focus,
+                lens_attenuation_coef=lens_attenuation_coef,
+            )
         simulate_kwargs = {
+            "waveforms_two_way": waveforms_two_way,
+            "waveform_sampling_frequency": waveform_sampling_frequency,
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
             "lens_thickness": lens_thickness,
@@ -130,7 +177,7 @@ class Simulate(Operation):
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
             "t_peak": t_peak,
-            "elevation_lens": elevation_lens,
+            "elevation_slab_2d": elevation_slab_2d,
             "element_height": element_height,
             "scatter_exponent": scatter_exponent,
             "max_chunk_gb": max_chunk_gb,
