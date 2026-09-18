@@ -528,6 +528,13 @@ def test_simulate_op_takes_a_map():
     with pytest.raises(ValueError, match="frequency-domain"):
         op(**tensors({**kwargs, **planar}), method="time_domain")
 
+    # Inside an outer jit the op would otherwise drop the map and simulate without it.
+    inner = Simulate()
+    inner.set_input_cache({"method": "time_domain"})
+    pipeline = Pipeline([inner], with_batch_dim=False, jit_options="pipeline")
+    with pytest.raises(Exception, match="frequency-domain"):
+        pipeline(**tensors({**kwargs, **planar}))
+
 
 def test_n_sos_ray_samples_converges():
     kwargs = case(linear_probe(), **_layered_map(1540.0, 1450.0, 0.015), n_fft=2048)

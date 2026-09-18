@@ -160,8 +160,7 @@ def usct_reflectivity_das(
             transmits caused by sound-speed mismatch or calibration error,
             which grows with the size of the aperture spanned by a full ring.
         sos_map, map_grid_x, map_grid_z: optional SoS map and its in-plane axes,
-            enabling straight-ray SoS-corrected delays. The old names ``sos_grid_x`` and
-            ``sos_grid_z`` are still accepted, with a warning.
+            enabling straight-ray SoS-corrected delays.
         n_sos_ray_samples: ray samples for the SoS integral.
 
     Returns:

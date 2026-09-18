@@ -31,7 +31,7 @@ from zea.internal.core import (
     python_constant,
 )
 from zea.internal.registry import ops_registry
-from zea.internal.utils import deprecated
+from zea.internal.utils import deprecated, renamed_keywords
 from zea.ops.base import Filter, Operation
 from zea.simulator import (
     _concrete,
@@ -232,7 +232,18 @@ class Simulate(Operation):
                 "`elevation_lens` was removed. Use `two_dimensional` for a 2D simulation, or "
                 "`elevation_focus` for a physical cylindrical elevation lens."
             )
+        if "elevation_slab_2d" in merged:
+            raise TypeError("`elevation_slab_2d` was renamed to `two_dimensional`.")
         self._track_scatter_exponent(merged.get("scatter_exponent", 2.0))
+        method = _resolve_method(merged.get("method", "frequency_domain"))
+        if method == "time_domain":
+            # Also under an outer jit, where `call` would drop the maps.
+            for name in ("sos_map", "attenuation_map"):
+                if merged.get(name) is not None:
+                    raise ValueError(
+                        f"{name} is only supported by the frequency-domain simulator "
+                        "(method='frequency_domain')."
+                    )
         if not self._inside_outer_jit:
             # Static scalars as Python numbers: tf.function would otherwise trace them as
             # tensors, and the simulators size the FFT from the concrete pulse length.
@@ -241,14 +252,7 @@ class Simulate(Operation):
             )
             # The FFT length and the exponent band are static and need concrete inputs, so
             # they are derived here, before the exponents are traced into the jitted call.
-            method = _resolve_method(merged.get("method", "frequency_domain"))
             if method == "time_domain":
-                for name in ("sos_map", "attenuation_map"):
-                    if merged.get(name) is not None:
-                        raise ValueError(
-                            f"{name} is only supported by the frequency-domain simulator "
-                            "(method='frequency_domain')."
-                        )
                 ignored = _ignored_by_time_domain(merged)
                 if ignored:
                     log.warning_once(
@@ -407,6 +411,7 @@ class TOFCorrection(Operation):
             **kwargs,
         )
 
+    @renamed_keywords(sos_grid_x="map_grid_x", sos_grid_z="map_grid_z")
     def call(
         self,
         flatgrid,

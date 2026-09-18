@@ -444,6 +444,15 @@ def test_simulate_op_methods():
         op(**kwargs, method="exact_slab")
 
 
+def test_simulate_op_rejects_the_removed_elevation_keywords():
+    """``call`` takes ``**kwargs``, which would swallow the removed names."""
+    kwargs = tensors(CASES["linear"])
+    op = Simulate(jit_compile=False, with_batch_dim=False)
+    for name in ("elevation_lens", "elevation_slab_2d"):
+        with pytest.raises(TypeError, match=name):
+            op(**kwargs, **{name: True})
+
+
 def test_simulate_op_accepts_the_old_method_names(caplog, reset_warning_once):
     """The names from before the rename still select their simulator, with a deprecation
     warning naming the new one."""

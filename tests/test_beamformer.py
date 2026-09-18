@@ -886,6 +886,26 @@ def test_tof_correction_accepts_the_old_grid_names(probe_geometry, flatgrid, cap
     assert any("sos_grid_x was renamed to map_grid_x" in r.getMessage() for r in caplog.records)
 
 
+def test_tof_correction_op_accepts_the_old_grid_names(probe_geometry, flatgrid):
+    """The op renames them too; its ``call`` takes ``**kwargs`` and would drop them."""
+    from zea import ops
+
+    inputs = _make_tof_inputs(probe_geometry, flatgrid)
+    nx_sos, nz_sos = 16, 16
+    grids = {
+        "map_grid_x": np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32),
+        "map_grid_z": np.linspace(0.0, 25e-3, nz_sos).astype(np.float32),
+    }
+    inputs["sos_map"] = np.full((nz_sos, nx_sos), SOUND_SPEED, dtype=np.float32)
+    inputs["apply_lens_correction"] = False
+    op = ops.TOFCorrection(jit_compile=False, with_batch_dim=False)
+    new = op(**inputs, **grids)[op.output_key]
+    old = op(**inputs, sos_grid_x=grids["map_grid_x"], sos_grid_z=grids["map_grid_z"])[
+        op.output_key
+    ]
+    np.testing.assert_array_equal(keras.ops.convert_to_numpy(old), keras.ops.convert_to_numpy(new))
+
+
 # Delays reach ~650 samples; float32 round-off across backends is up to ~7e-4 samples.
 @backend_equality_check(decimal=3, backends=["tensorflow", "jax"])
 def test_heterogeneous_delays_multistatic_matches_general_path(probe_geometry, flatgrid):

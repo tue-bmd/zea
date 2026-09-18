@@ -197,8 +197,7 @@ def tof_correction(
             ``(Nz, Nx)`` in m/s.  When provided, delays are computed
             numerically (heterogeneous mode). Defaults to ``None``.
         map_grid_x (Tensor, optional): x-coordinates of ``sos_map`` columns.
-        map_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows. The old names
-            ``sos_grid_x`` and ``sos_grid_z`` are still accepted, with a warning.
+        map_grid_z (Tensor, optional): z-coordinates of ``sos_map`` rows.
         focal_region_length (float, optional): Full length in meters of the
             region around the focal plane of focused transmits where
             first-arrival and last-arrival delays are linearly blended. This
