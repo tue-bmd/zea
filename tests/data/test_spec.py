@@ -2196,3 +2196,90 @@ class TestCastNativeToNumpy:
         result = self.cast([1.0, 2.0], ["not-a-dtype", np.float32])
         assert isinstance(result, np.ndarray)
         assert result.dtype == np.float32
+
+
+# --- receive sub-aperture (n_rx != n_el) ------------------------------------
+
+
+def _track_with_subaperture(n_rx: int, n_el: int = 8, n_tx: int = 2, **scan_extra):
+    scan = _scan_minimal(n_frames=1, n_tx=n_tx, n_el=n_el)
+    scan.update(scan_extra)
+    return {
+        "scan": scan,
+        "data": {"raw_data": np.zeros((1, n_tx, 6, n_rx, 1), dtype=np.float32)},
+    }
+
+
+def test_receive_subaperture_is_accepted():
+    """A receive aperture smaller than the probe is legal: n_rx and n_el are distinct."""
+    track = TrackSpec(**_track_with_subaperture(n_rx=4, n_el=8))
+    assert track.data.raw_data.shape[3] == 4
+    assert track.scan.n_el == 8
+
+
+def test_receive_subaperture_warns_when_mapping_is_absent():
+    with patch.object(spec_module.log, "warning") as mock_warning:
+        TrackSpec(**_track_with_subaperture(n_rx=4, n_el=8))
+    assert any("rx_aperture_indices" in str(c) for c in mock_warning.call_args_list)
+
+
+def test_receive_subaperture_no_warning_with_mapping():
+    indices = np.tile(np.arange(4, dtype=np.int32), (2, 1))
+    with patch.object(spec_module.log, "warning") as mock_warning:
+        track = TrackSpec(**_track_with_subaperture(n_rx=4, n_el=8, rx_aperture_indices=indices))
+    assert not any("rx_aperture_indices" in str(c) for c in mock_warning.call_args_list)
+    assert track.scan.rx_aperture_indices.shape == (2, 4)
+
+
+def test_more_receive_channels_than_elements_is_rejected():
+    # Only a *smaller* receive aperture is a legal sub-aperture, so this still trips
+    # the ordinary n_el consistency check.
+    with pytest.raises(ValueError, match="Dimension 'n_el' has inconsistent sizes"):
+        TrackSpec(**_track_with_subaperture(n_rx=16, n_el=8))
+
+
+def test_rx_aperture_indices_out_of_range_is_rejected():
+    indices = np.tile(np.array([0, 1, 2, 99], dtype=np.int32), (2, 1))
+    with pytest.raises(ValueError, match="must index the 8 probe elements"):
+        TrackSpec(**_track_with_subaperture(n_rx=4, n_el=8, rx_aperture_indices=indices))
+
+
+def test_full_aperture_needs_no_mapping_and_does_not_warn():
+    """The ordinary case is untouched: n_el on channel data is the element count."""
+    with patch.object(spec_module.log, "warning") as mock_warning:
+        track = TrackSpec(**_track_with_subaperture(n_rx=8, n_el=8))
+    assert not any("rx_aperture_indices" in str(c) for c in mock_warning.call_args_list)
+    assert track.data.raw_data.shape[3] == track.scan.n_el == 8
+
+
+def _track_with_aligned_subaperture(n_rx: int, n_el: int = 8, n_tx: int = 2, **scan_extra):
+    scan = _scan_minimal(n_frames=1, n_tx=n_tx, n_el=n_el)
+    scan.update(scan_extra)
+    return {
+        "scan": scan,
+        "data": {
+            "aligned_data": {"values": np.zeros((1, n_tx, 6, n_rx, 1), dtype=np.float32)},
+        },
+    }
+
+
+def test_aligned_data_receive_subaperture_is_accepted():
+    track = TrackSpec(**_track_with_aligned_subaperture(n_rx=4, n_el=8))
+    assert track.data.aligned_data.values.shape[3] == 4
+
+
+def test_aligned_data_receive_subaperture_warns_when_mapping_is_absent():
+    with patch.object(spec_module.log, "warning") as mock_warning:
+        TrackSpec(**_track_with_aligned_subaperture(n_rx=4, n_el=8))
+    assert any("rx_aperture_indices" in str(c) for c in mock_warning.call_args_list)
+
+
+def test_aligned_data_with_more_receive_channels_than_elements_is_rejected():
+    with pytest.raises(ValueError, match="Dimension 'n_el' has inconsistent sizes"):
+        TrackSpec(**_track_with_aligned_subaperture(n_rx=16, n_el=8))
+
+
+def test_rx_aperture_indices_must_match_receive_channel_count():
+    indices = np.tile(np.arange(5, dtype=np.int32), (2, 1))
+    with pytest.raises(ValueError, match="maps 5 receive channels per transmit"):
+        TrackSpec(**_track_with_subaperture(n_rx=4, n_el=8, rx_aperture_indices=indices))

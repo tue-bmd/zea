@@ -929,6 +929,41 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def rx_aperture_indices(self):
+        """Probe element index of each receive channel of shape (n_tx, n_rx).
+
+        ``None`` for the usual case where every element receives on every transmit,
+        in which case the mapping is the identity and :attr:`n_rx` equals
+        :attr:`n_el`. Only acquisitions with a receive sub-aperture (a sliding
+        receive window, or a multiplexed front-end with fewer channels than
+        elements) carry it, since the mapping is then not recoverable from the
+        channel data alone. Sliced by :attr:`selected_transmits`, so it stays
+        aligned with :attr:`t0_delays` and :attr:`tx_apodizations`.
+
+        The transmit counterpart needs no such field: the transmit aperture is
+        recorded per element in :attr:`tx_apodizations`, whose zeros mark the
+        elements that did not fire.
+        """
+        value = self._params.get("rx_aperture_indices")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
+    @cache_with_dependencies("rx_aperture_indices", "n_el")
+    def n_rx(self):
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture,
+        which :attr:`rx_aperture_indices` then maps onto the probe's elements.
+        """
+        indices = self.rx_aperture_indices
+        if indices is None:
+            return self.n_el
+
+        return int(indices.shape[1])
+
     @cache_with_dependencies("selected_transmits", "n_tx")
     def focus_distances(self):
         """Focus distances in meters for each event of shape (n_tx,).
