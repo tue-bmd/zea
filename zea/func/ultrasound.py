@@ -440,7 +440,7 @@ def hilbert(x, N: int | None = None, axis=-1):
     return x
 
 
-def _analytic_no_wrap(x, axis):
+def _padded_analytic(x, axis):
     """Analytic signal of ``x`` along ``axis`` without circular wraparound.
 
     :func:`hilbert` is FFT-based, so it treats the record as periodic: a strong
@@ -468,7 +468,7 @@ def _analytic_no_wrap(x, axis):
     return ops.take(analytic, ops.arange(n_ax), axis=axis)
 
 
-def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad=False):
+def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad_fast_time=False):
     """Demodulates the input data to baseband. The function computes the analytical
     signal (the signal with negative frequencies removed) and then shifts the spectrum
     of the signal to baseband by multiplying with a complex exponential. Where the
@@ -481,10 +481,10 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad=Fa
         demodulation_frequency (float): The center frequency of the signal.
         sampling_frequency (float): The sampling frequency of the signal.
         axis (int, optional): The axis along which to demodulate. Defaults to -3.
-        pad (bool, optional): Bound the circular wraparound of the FFT-based
+        pad_fast_time (bool, optional): Bound the circular wraparound of the FFT-based
             :func:`hilbert` by transforming at ``2 * n_ax`` and cropping back, so a
             strong near-field echo does not leak onto the end of the record. See
-            :func:`_analytic_no_wrap` for the residual this leaves. Costs roughly
+            :func:`_padded_analytic` for the residual this leaves. Costs roughly
             twice the transform work. Off by default because perturbing the record
             edges breaks the exact commutation between :class:`~zea.ops.Refocus` IQ
             decoding and RF decoding. Defaults to ``False``.
@@ -493,8 +493,8 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad=Fa
         ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.
     """
     # Compute the analytical signal
-    if pad:
-        analytical_signal = _analytic_no_wrap(data, axis)
+    if pad_fast_time:
+        analytical_signal = _padded_analytic(data, axis)
     else:
         analytical_signal = hilbert(data, axis=axis)
 
@@ -590,7 +590,7 @@ def channels_to_analytic(data, axis):
     if n_ch == 2:
         return ops.view_as_complex(data)
     if n_ch == 1:
-        return ops.squeeze(_analytic_no_wrap(data, axis), axis=-1)
+        return ops.squeeze(_padded_analytic(data, axis), axis=-1)
     raise ValueError(f"Expected data with n_ch in {{1, 2}} (last axis), got n_ch={n_ch}.")
 
 

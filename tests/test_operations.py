@@ -603,7 +603,7 @@ def _wrap_ratio(envelope):
     return envelope[n_ax // 2 :].max() / envelope.max()
 
 
-def _demodulated_envelope(rf, pad, sampling_frequency=20e6, center_frequency=5e6):
+def _demodulated_envelope(rf, pad_fast_time, sampling_frequency=20e6, center_frequency=5e6):
     """Envelope of ``rf`` demodulated with and without the anti-wrap padding."""
     import keras
 
@@ -615,28 +615,28 @@ def _demodulated_envelope(rf, pad, sampling_frequency=20e6, center_frequency=5e6
             center_frequency,
             sampling_frequency,
             axis=-3,
-            pad=pad,
+            pad_fast_time=pad_fast_time,
         )
     )
     return np.abs(iq[0, :, 0, 0] + 1j * iq[0, :, 0, 1])
 
 
 @pytest.mark.parametrize("n_ax", [256, 512, 1000, 1024])
-def test_demodulate_pad_bounds_wraparound(n_ax):
-    """pad=True keeps a near-field echo from wrapping onto the end of the record."""
+def test_demodulate_pad_fast_time_bounds_wraparound(n_ax):
+    """pad_fast_time=True keeps a near-field echo from wrapping onto the end of the record."""
     rf = _near_field_burst(n_ax)
 
-    unpadded = _wrap_ratio(_demodulated_envelope(rf, pad=False))
-    padded = _wrap_ratio(_demodulated_envelope(rf, pad=True))
+    unpadded = _wrap_ratio(_demodulated_envelope(rf, pad_fast_time=False))
+    padded = _wrap_ratio(_demodulated_envelope(rf, pad_fast_time=True))
 
     # Unpadded, the ghost sits at ~10% of the peak, which is what makes it visible
     # as a smooth brightness at depth once beamforming sums it across channels.
     assert unpadded > 1e-2, (
         f"n_ax={n_ax}: expected a wraparound ghost without padding, got {unpadded:.3e} of peak"
     )
-    # 0.64 / n_ax is the residual bound documented on _analytic_no_wrap.
+    # 0.64 / n_ax is the residual bound documented on _padded_analytic.
     assert padded < 0.64 / n_ax, (
-        f"n_ax={n_ax}: pad=True leaves {padded:.3e} of peak at depth, over the "
+        f"n_ax={n_ax}: pad_fast_time=True leaves {padded:.3e} of peak at depth, over the "
         f"documented bound {0.64 / n_ax:.3e}"
     )
 
@@ -645,8 +645,8 @@ def test_demodulate_pad_bounds_wraparound(n_ax):
 # wins can differ slightly between backends. The assertions below are the real
 # check and run inside every backend worker.
 @backend_equality_check(decimal=3)
-def test_demodulate_pad_matches_linear_hilbert():
-    """pad=True converges to the aperiodic analytic signal, gain included.
+def test_demodulate_pad_fast_time_matches_linear_hilbert():
+    """pad_fast_time=True converges to the aperiodic analytic signal, gain included.
 
     Padding 32x further makes scipy's circular transform effectively aperiodic,
     giving a reference the padded path should land on. A gain or normalization
@@ -663,10 +663,10 @@ def test_demodulate_pad_matches_linear_hilbert():
     )
 
     errors = {}
-    for pad in (False, True):
-        envelope = _demodulated_envelope(rf, pad, sampling_frequency, center_frequency)
+    for pad_fast_time in (False, True):
+        envelope = _demodulated_envelope(rf, pad_fast_time, sampling_frequency, center_frequency)
         # Compare the envelope, which is invariant to the phase convention.
-        errors[pad] = np.abs(envelope - np.abs(reference)).max() / np.abs(reference).max()
+        errors[pad_fast_time] = np.abs(envelope - np.abs(reference)).max() / np.abs(reference).max()
 
     assert errors[True] < 1e-3, (
         f"padded demodulation is {errors[True]:.3e} from the aperiodic analytic signal"
@@ -678,7 +678,7 @@ def test_demodulate_pad_matches_linear_hilbert():
 
 
 @pytest.mark.parametrize("n_ax", [7, 100, 511, 512, 1000])
-def test_demodulate_pad_preserves_shape(n_ax):
+def test_demodulate_pad_fast_time_preserves_shape(n_ax):
     """Cropping restores the input length, for odd and non-power-of-two records."""
     import keras
 
@@ -687,13 +687,13 @@ def test_demodulate_pad_preserves_shape(n_ax):
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     rf = rng.standard_normal((2, n_ax, 4, 1)).astype("float32")
 
-    iq = demodulate(keras.ops.convert_to_tensor(rf), 5e6, 20e6, axis=-3, pad=True)
+    iq = demodulate(keras.ops.convert_to_tensor(rf), 5e6, 20e6, axis=-3, pad_fast_time=True)
 
     assert tuple(keras.ops.shape(iq)) == (2, n_ax, 4, 2)
 
 
 @pytest.mark.parametrize("jit_options", [None, "ops", "pipeline"])
-def test_demodulate_pad_stays_jittable(jit_options):
+def test_demodulate_pad_fast_time_stays_jittable(jit_options):
     """The padded path must stay traceable; Demodulate advertises jittable=True."""
     import keras
 
@@ -703,7 +703,7 @@ def test_demodulate_pad_stays_jittable(jit_options):
     n_ax, n_el = 128, 4
     rf = rng.standard_normal((1, n_ax, n_el, 1)).astype("float32")
 
-    pipeline = ops.Pipeline([ops.Demodulate(pad=True)], jit_options=jit_options)
+    pipeline = ops.Pipeline([ops.Demodulate(pad_fast_time=True)], jit_options=jit_options)
     output = pipeline(
         data=keras.ops.convert_to_tensor(rf),
         sampling_frequency=20e6,
@@ -713,7 +713,7 @@ def test_demodulate_pad_stays_jittable(jit_options):
     assert tuple(keras.ops.shape(output)) == (1, n_ax, n_el, 2)
 
 
-def test_demodulate_pad_gradient():
+def test_demodulate_pad_fast_time_gradient():
     """Gradients flow through the pad-and-crop, leaving no sample detached."""
     import keras
 
@@ -727,7 +727,7 @@ def test_demodulate_pad_gradient():
     rf = rng.standard_normal((1, 64, 2, 1)).astype("float32")
 
     def loss(x):
-        iq = demodulate(x, 5e6, 20e6, axis=-3, pad=True)
+        iq = demodulate(x, 5e6, 20e6, axis=-3, pad_fast_time=True)
         return keras.ops.sum(keras.ops.square(iq))
 
     wrapper = AutoGrad()
@@ -739,17 +739,17 @@ def test_demodulate_pad_gradient():
     assert np.count_nonzero(grad) == grad.size, "the crop detached input samples from the loss"
 
 
-def test_demodulate_pad_survives_serialization():
-    """pad must round-trip, or a saved pipeline config reproduces other numerics."""
+def test_demodulate_pad_fast_time_survives_serialization():
+    """pad_fast_time must round-trip, or a saved pipeline config reproduces other numerics."""
     from zea.ops import Demodulate, Pipeline
 
-    assert Demodulate().pad is False
-    assert Demodulate(pad=True).get_config()["pad"] is True
+    assert Demodulate().pad_fast_time is False
+    assert Demodulate(pad_fast_time=True).get_config()["pad_fast_time"] is True
 
-    pipeline = Pipeline([Demodulate(pad=True)])
+    pipeline = Pipeline([Demodulate(pad_fast_time=True)])
     restored = Pipeline.from_config(pipeline.to_config())
 
-    assert restored.operations[0].pad is True
+    assert restored.operations[0].pad_fast_time is True
 
 
 @pytest.mark.parametrize("n_ax", [512, 700, 1024])
