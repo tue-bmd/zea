@@ -97,7 +97,8 @@ jobs:
           if current_key is None:
               raise SystemExit(f"current version {current!r} has an unexpected shape")
 
-          new = os.environ["INPUT_VERSION"].strip().lstrip("v")
+          # `removeprefix`, not `lstrip`: the latter would also accept "vv1.2.3".
+          new = os.environ["INPUT_VERSION"].strip().removeprefix("v")
           if not new:
               if current_key[3] != PRE[None]:
                   raise SystemExit(f"cannot bump pre-release {current!r} automatically; pass an explicit `version`")
