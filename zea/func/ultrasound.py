@@ -441,34 +441,31 @@ def hilbert(x, N: int | None = None, axis=-1):
 
 
 def _padded_analytic(x, axis):
-    """Analytic signal of ``x`` along ``axis`` without circular wraparound.
+    """Analytic signal of ``x`` along ``axis``, without circular wraparound.
 
-    :func:`hilbert` is FFT-based, so it treats the record as periodic: a strong
-    near-field echo (a saturated transmit, probe ringdown) wraps onto the end of
-    the record, where beamforming then sums it coherently into a smooth,
-    unphysical brightness at depth. See
+    :func:`hilbert` is FFT-based and so treats the record as periodic: a strong
+    near-field echo wraps onto the end of the record, where beamforming sums it into
+    an unphysical brightness at depth. See
     https://github.com/tue-bmd/zea/discussions/147.
 
-    Transforming at ``2 * n_ax`` -- the linear-convolution length, and therefore
-    correct for any record length -- and cropping back keeps the wrapped copy out
-    of the returned samples. The ideal Hilbert kernel decays as ``1 / t`` rather
-    than terminating, so this bounds the leakage instead of removing it: the
-    residual stays under ``0.64 / n_ax`` of the peak and shrinks as the record
-    grows.
+    Transforming at ``2 * n_ax``, the linear-convolution length, and cropping back
+    keeps that wrapped copy out of the returned samples. The ideal Hilbert kernel
+    decays as ``1 / t`` rather than terminating, so this bounds the leakage rather
+    than removing it: the residual stays below ``0.64 / n_ax`` of the peak.
 
     Args:
         x (Tensor): Real-valued input.
         axis (int): Fast-time (axial) axis to transform along.
 
     Returns:
-        Tensor: Complex analytic signal, of the same shape as ``x``.
+        Tensor: Complex analytic signal, with the same shape as ``x``.
     """
     n_ax = x.shape[axis]
     analytic = hilbert(x, N=2 * n_ax, axis=axis)
     return ops.take(analytic, ops.arange(n_ax), axis=axis)
 
 
-def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad_fast_time=False):
+def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad_fast_time=True):
     """Demodulates the input data to baseband. The function computes the analytical
     signal (the signal with negative frequencies removed) and then shifts the spectrum
     of the signal to baseband by multiplying with a complex exponential. Where the
@@ -481,13 +478,11 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad_fa
         demodulation_frequency (float): The center frequency of the signal.
         sampling_frequency (float): The sampling frequency of the signal.
         axis (int, optional): The axis along which to demodulate. Defaults to -3.
-        pad_fast_time (bool, optional): Bound the circular wraparound of the FFT-based
-            :func:`hilbert` by transforming at ``2 * n_ax`` and cropping back, so a
-            strong near-field echo does not leak onto the end of the record. See
-            :func:`_padded_analytic` for the residual this leaves. Costs roughly
-            twice the transform work. Off by default because perturbing the record
-            edges breaks the exact commutation between :class:`~zea.ops.Refocus` IQ
-            decoding and RF decoding. Defaults to ``False``.
+        pad_fast_time (bool, optional): If True, transform at ``2 * n_ax`` and crop
+            back, so a strong near-field echo cannot wrap onto the end of the record.
+            See :func:`_padded_analytic` for the residual this leaves. Defaults to
+            ``True``. Set it to False to keep the transform exactly circular, which
+            round-trips against other FFT-based fast-time operations.
 
     Returns:
         ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.

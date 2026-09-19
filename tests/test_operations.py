@@ -579,17 +579,16 @@ def test_hilbert_transform_invalid_N():
         func.hilbert(data, N=50, axis=-1)
 
 
-# --- bounding the circular wraparound of the FFT-based hilbert ---------------
-# hilbert() is FFT-based, so it treats the record as periodic and a strong
-# near-field echo wraps onto the end of the record. See
-# https://github.com/tue-bmd/zea/discussions/147.
+# Bounding the circular wraparound of the FFT-based hilbert: it treats the record
+# as periodic, so a strong near-field echo wraps onto the end of the record.
+# See https://github.com/tue-bmd/zea/discussions/147.
 
 
 def _near_field_burst(n_ax, sampling_frequency=20e6, center_frequency=5e6, n_burst=12):
     """A saturated near-field echo confined to the first ``n_burst`` samples.
 
-    Every sample after ``n_burst`` is exactly zero, so any energy a transform puts
-    into the far half of the record is wraparound and nothing else.
+    Every later sample is exactly zero, so any energy a transform puts into the far
+    half of the record is wraparound.
     """
     t = np.arange(n_ax) / sampling_frequency
     rf = np.zeros((1, n_ax, 1, 1), dtype="float32")
@@ -649,8 +648,8 @@ def test_demodulate_pad_fast_time_matches_linear_hilbert():
     """pad_fast_time=True converges to the aperiodic analytic signal, gain included.
 
     Padding 32x further makes scipy's circular transform effectively aperiodic,
-    giving a reference the padded path should land on. A gain or normalization
-    error in the pad-and-crop would show up here rather than as a wrap ratio.
+    giving a reference the padded path should land on. This catches a gain or
+    normalization error in the pad-and-crop, which a wrap ratio would not.
     """
     n_ax = 512
     sampling_frequency, center_frequency = 20e6, 5e6
@@ -743,22 +742,21 @@ def test_demodulate_pad_fast_time_survives_serialization():
     """pad_fast_time must round-trip, or a saved pipeline config reproduces other numerics."""
     from zea.ops import Demodulate, Pipeline
 
-    assert Demodulate().pad_fast_time is False
-    assert Demodulate(pad_fast_time=True).get_config()["pad_fast_time"] is True
+    assert Demodulate().pad_fast_time is True
+    assert Demodulate(pad_fast_time=False).get_config()["pad_fast_time"] is False
 
-    pipeline = Pipeline([Demodulate(pad_fast_time=True)])
+    pipeline = Pipeline([Demodulate(pad_fast_time=False)])
     restored = Pipeline.from_config(pipeline.to_config())
 
-    assert restored.operations[0].pad_fast_time is True
+    assert restored.operations[0].pad_fast_time is False
 
 
 @pytest.mark.parametrize("n_ax", [512, 700, 1024])
 def test_envelope_detect_bounds_wraparound(n_ax):
     """envelope_detect must not leak a near-field echo to depth.
 
-    Regression test for padding to the next power of two, which added zero extra
-    samples -- and so mitigated nothing -- whenever n_ax was already a power of
-    two. 512 and 1024 are the lengths that used to slip through.
+    Regression test for padding to the next power of two, which added no samples at
+    all when n_ax was already a power of two. 512 and 1024 used to slip through.
     """
     import keras
 
