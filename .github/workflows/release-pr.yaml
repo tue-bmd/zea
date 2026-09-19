@@ -56,6 +56,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          # Always cut the release from `main`, whatever branch the workflow was
+          # dispatched from -- otherwise the release branch carries that branch's
+          # commits into a PR that is supposed to hold only the version bump.
+          ref: main
           fetch-depth: 0
           # Kept in the git config on purpose: the bump commit has to be pushed
           # as this token's user for the release PR to run its checks.
