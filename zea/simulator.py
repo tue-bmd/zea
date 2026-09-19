@@ -121,6 +121,7 @@ def simulate_rf(
     n_sub_elements=None,
     elevation_focus=None,
     lens_attenuation_coef=0.0,
+    simplified_directivity=False,
     band_db=-100.0,
     n_fft=None,
     scatter_exponent_range=None,
@@ -254,6 +255,8 @@ def simulate_rf(
         lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
             sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
             the aperture where the lens is thick and lowers the center frequency.
+        simplified_directivity (bool): Approximate directivity with only the center frequency.
+            Less accurate, but slightly faster. Must be static under jit.
         band_db (float, optional): Bins where the pulse spectrum and the scattering gain
             together are below this many dB of their peak are not synthesised. None disables
             filtering. With per-transmit waveforms the band is the union over the pulses, and
@@ -329,6 +332,7 @@ def simulate_rf(
         elevation_focus=elevation_focus,
         lens_attenuation_coef=lens_attenuation_coef,
         attenuation_power=attenuation_power,
+        simplified_directivity=simplified_directivity,
     )
     positions = _scene_positions(scatterer_positions, model)
     magnitudes = ops.cast(scatterer_magnitudes, "float32")
@@ -572,6 +576,7 @@ def pressure_field(
     waveform_sampling_frequency=250e6,
     n_sub_elements=None,
     elevation_focus=None,
+    simplified_directivity=False,
     band_db=-100.0,
     n_ax=None,
     n_fft=None,
@@ -642,6 +647,7 @@ def pressure_field(
         elevation_focus=elevation_focus,
         lens_attenuation_coef=lens_attenuation_coef,
         attenuation_power=attenuation_power,
+        simplified_directivity=simplified_directivity,
     )
     grid_shape = tuple(int(d) for d in ops.shape(grid)[:-1])
     positions = _scene_positions(ops.reshape(grid, (-1, 3)), model)
@@ -1035,6 +1041,8 @@ class _ElementModel:
         element_normals: Unit normals (n_el, 3) float32, or None for +z.
         n_sub_elements: Static (n_lateral, n_elevation), see :func:`_resolve_sub_elements`.
         elevation_focus: Static focal distance [m], or None.
+        directivity_frequency: Frequency [Hz] to evaluate the directivity at, or None for every
+            bin of the block.
     """
 
     geometry: Any
@@ -1053,6 +1061,7 @@ class _ElementModel:
     elevation_focus: float | None
     lens_attenuation_coef: Any
     min_dist: Any
+    directivity_frequency: Any = None
 
 
 def _element_model(
@@ -1074,6 +1083,7 @@ def _element_model(
     elevation_focus,
     lens_attenuation_coef,
     attenuation_power=1.0,
+    simplified_directivity=False,
 ):
     """The :class:`_ElementModel` of the element arguments of :func:`simulate_rf`, validated
     and with the defaults resolved: the element width from the pitch, the height from the
@@ -1117,6 +1127,7 @@ def _element_model(
         elevation_focus=None if elevation_focus is None else float(elevation_focus),
         lens_attenuation_coef=_as_f32(lens_attenuation_coef),
         min_dist=min_distance(_as_f32(sound_speed), float(center_frequency)),
+        directivity_frequency=_as_f32(center_frequency) if simplified_directivity else None,
     )
 
 
@@ -1186,6 +1197,7 @@ def _element_responses(positions, model, freqs, slowness=None, attenuation=None)
     sub_height = model.element_height / n_elevation
     attenuation_coef = model.attenuation_coef if attenuation is None else attenuation[None]
     f3 = freqs[:, None, None]
+    f_dir = f3 if model.directivity_frequency is None else model.directivity_frequency
 
     def fx(x):
         """A [s, e] array broadcast against the frequency axis, [1, s, e]."""
@@ -1199,9 +1211,9 @@ def _element_responses(positions, model, freqs, slowness=None, attenuation=None)
         offset = u[j] * lateral_axis + v[j] * elevation_axis
         relative = relative_center - offset[None]
         theta, phi, obliquity = _element_angles(relative, frame)
-        amplitude = directivity(f3, fx(theta), sub_width, sound_speed)
+        amplitude = directivity(f_dir, fx(theta), sub_width, sound_speed)
         if not two_dimensional:
-            amplitude = amplitude * directivity(f3, fx(phi), sub_height, sound_speed)
+            amplitude = amplitude * directivity(f_dir, fx(phi), sub_height, sound_speed)
         if apply_lens_correction:
             lens_len, medium_len = compute_lens_path_lengths(
                 geometry + offset,
