@@ -173,12 +173,14 @@ jobs:
           fi
 
           body=$(cat <<EOF
+          Bump zea version to \`${NEW}\`.
+
           Prepared by the [Release PR](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/release-pr.yaml) workflow: \`${CURRENT}\` → \`${NEW}\`.
 
           - \`pyproject.toml\`: \`version = "${NEW}"\`
           - \`uv.lock\`: refreshed
 
-          After merging, publish a GitHub release tagged \`${TAG}\` off \`main\`. That is what actually ships: it triggers \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`latest\` and \`openh-rf-latest\`, then rebuilds the docs).
+          After merging, publish a GitHub release tagged \`${TAG}\` off \`main\`. This will trigger the following workflows: \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`latest\` and \`openh-rf-latest\`, then rebuilds the docs).
           EOF
           )
 
