@@ -1,4 +1,5 @@
 import math
+import mmap
 import os
 import re
 from collections import defaultdict
@@ -164,13 +165,30 @@ def is_array_like(value: Any) -> bool:
     return all(hasattr(value, attribute) for attribute in _ARRAY_ATTRIBUTES)
 
 
+def _maps_a_file(value: Any) -> bool:
+    """Whether an ndarray's buffer is a file mapping rather than memory it owns.
+
+    A :class:`numpy.memmap`, and any view of one, reaches an :class:`mmap.mmap` through
+    its ``base`` chain. Testing the buffer rather than the type is what tells those apart
+    from an array that merely came from a memmap — ``memmap.astype(...)`` returns a copy
+    in RAM that is still of type :class:`numpy.memmap` — and catches a view that numpy
+    handed back as a plain ndarray.
+    """
+    while isinstance(value, np.ndarray):
+        value = value.base
+    return isinstance(value, mmap.mmap)
+
+
 def is_lazy_array(value: Any) -> bool:
     """Whether ``value`` is an array whose contents are not (yet) in memory.
 
     See :func:`is_array_like`.  Reading one costs IO, so the spec only ever touches
     a lazy array's metadata, and writing one goes through :func:`iter_slabs`.
+
+    Anything that is not a :class:`numpy.ndarray` keeps its contents elsewhere by
+    definition; an ndarray does so only when it maps a file (see :func:`_maps_a_file`).
     """
-    return is_array_like(value) and not isinstance(value, np.ndarray)
+    return is_array_like(value) and (not isinstance(value, np.ndarray) or _maps_a_file(value))
 
 
 def _contents_in_memory(value: Any) -> bool:

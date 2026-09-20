@@ -2369,6 +2369,21 @@ class TestLazyArrays:
         for file in files:
             file.close()
 
+    @pytest.fixture
+    def mapped(self, tmp_path):
+        """Factory writing values to a plain file and handing back a memmap of them."""
+        paths: list = []
+
+        def _write(values):
+            path = tmp_path / f"mapped_{len(paths)}.dat"
+            paths.append(path)
+            memmap = np.memmap(path, dtype=values.dtype, mode="w+", shape=values.shape)
+            memmap[:] = values
+            memmap.flush()
+            return np.memmap(path, dtype=values.dtype, mode="r", shape=values.shape)
+
+        return _write
+
     def test_is_array_like_excludes_values_that_merely_have_a_dtype(self):
         """Numpy scalars and strings carry a dtype and a shape, but are values."""
         assert is_array_like(np.zeros(3))
@@ -2451,3 +2466,25 @@ class TestLazyArrays:
             Spec.create_dataset(out, "values", source, compression=None, chunk_axes=None)
             assert np.array_equal(out["values"][()], values)
             assert out["values"].dtype == values.dtype
+
+    def test_an_array_is_lazy_when_it_maps_a_file_whatever_its_type(self, mapped):
+        """A memmap subclasses ndarray, and what ``astype`` returns is one without a file."""
+        values = mapped(np.zeros((2, 4, 4), dtype=np.float64))
+
+        assert is_lazy_array(values), "a memmap keeps its contents in a file"
+        assert is_lazy_array(values[0:1]), "so does a view of one"
+        assert is_lazy_array(np.asarray(values)), "even where numpy drops the memmap type"
+        assert not is_lazy_array(values.astype(np.float32)), "a converted copy is in memory"
+
+    def test_a_mapped_value_is_recast_and_written_without_being_read(self, tmp_path, mapped):
+        """A float64 memmap for a float32 schema converts per slab, like any lazy array."""
+        values = -np.arange(2 * 4 * 4, dtype=np.float64).reshape(2, 4, 4)
+        image = Image(values=mapped(values))
+
+        assert image.values.dtype == np.float32
+        assert is_lazy_array(image.values), "recasting must not materialise the mapping"
+
+        with h5py.File(tmp_path / "out.hdf5", "w") as out:
+            image.store_in_group(out, warn_missing_optional_fields=False)
+            assert out["values"].dtype == np.float32
+            np.testing.assert_array_equal(out["values"][()], values.astype(np.float32))
