@@ -519,9 +519,8 @@ class Demodulate(Operation):
         """
         Args:
             axis (int): Fast-time (axial) axis to demodulate along. Defaults to -3.
-            pad_fast_time (bool): Pad the analytic-signal transform so a strong
-                near-field echo cannot wrap onto the end of the record. See
-                :func:`~zea.func.ultrasound.demodulate`. Defaults to True.
+            pad_fast_time (bool): Avoid circular wraparound in the analytic-signal
+                transform. See :func:`~zea.func.ultrasound.demodulate`. Defaults to True.
         """
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,

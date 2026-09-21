@@ -478,11 +478,8 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad_fa
         demodulation_frequency (float): The center frequency of the signal.
         sampling_frequency (float): The sampling frequency of the signal.
         axis (int, optional): The axis along which to demodulate. Defaults to -3.
-        pad_fast_time (bool, optional): If True, transform at ``2 * n_ax`` and crop
-            back, so a strong near-field echo cannot wrap onto the end of the record.
-            See :func:`_padded_analytic` for the residual this leaves. Defaults to
-            ``True``. Set it to False to keep the transform exactly circular, which
-            round-trips against other FFT-based fast-time operations.
+        pad_fast_time (bool, optional): Avoid circular wraparound in the analytic-signal
+            transform. See :func:`_padded_analytic`. Defaults to ``True``.
 
     Returns:
         ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.
