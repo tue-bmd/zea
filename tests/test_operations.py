@@ -579,6 +579,215 @@ def test_hilbert_transform_invalid_N():
         func.hilbert(data, N=50, axis=-1)
 
 
+# Bounding the circular wraparound of the FFT-based hilbert: it treats the record
+# as periodic, so a strong near-field echo wraps onto the end of the record.
+# See https://github.com/tue-bmd/zea/discussions/147.
+
+
+def _near_field_burst(n_ax, sampling_frequency=20e6, center_frequency=5e6, n_burst=12):
+    """A saturated near-field echo confined to the first ``n_burst`` samples.
+
+    Every later sample is exactly zero, so any energy a transform puts into the far
+    half of the record is wraparound.
+    """
+    t = np.arange(n_ax) / sampling_frequency
+    rf = np.zeros((1, n_ax, 1, 1), dtype="float32")
+    rf[0, :n_burst, 0, 0] = 100.0 * np.sin(2 * np.pi * center_frequency * t[:n_burst])
+    return rf
+
+
+def _wrap_ratio(envelope):
+    """Peak envelope in the far half of the record, relative to the global peak."""
+    n_ax = envelope.shape[0]
+    return envelope[n_ax // 2 :].max() / envelope.max()
+
+
+def _demodulated_envelope(rf, pad_fast_time, sampling_frequency=20e6, center_frequency=5e6):
+    """Envelope of ``rf`` demodulated with and without the anti-wrap padding."""
+    import keras
+
+    from zea.func.ultrasound import demodulate
+
+    iq = keras.ops.convert_to_numpy(
+        demodulate(
+            keras.ops.convert_to_tensor(rf),
+            center_frequency,
+            sampling_frequency,
+            axis=-3,
+            pad_fast_time=pad_fast_time,
+        )
+    )
+    return np.abs(iq[0, :, 0, 0] + 1j * iq[0, :, 0, 1])
+
+
+@pytest.mark.parametrize("n_ax", [256, 512, 1000, 1024])
+def test_demodulate_pad_fast_time_bounds_wraparound(n_ax):
+    """pad_fast_time=True keeps a near-field echo from wrapping onto the end of the record."""
+    rf = _near_field_burst(n_ax)
+
+    unpadded = _wrap_ratio(_demodulated_envelope(rf, pad_fast_time=False))
+    padded = _wrap_ratio(_demodulated_envelope(rf, pad_fast_time=True))
+
+    # Unpadded, the ghost sits at ~10% of the peak, which is what makes it visible
+    # as a smooth brightness at depth once beamforming sums it across channels.
+    assert unpadded > 1e-2, (
+        f"n_ax={n_ax}: expected a wraparound ghost without padding, got {unpadded:.3e} of peak"
+    )
+    # 0.64 / n_ax is the residual bound documented on _padded_analytic.
+    assert padded < 0.64 / n_ax, (
+        f"n_ax={n_ax}: pad_fast_time=True leaves {padded:.3e} of peak at depth, over the "
+        f"documented bound {0.64 / n_ax:.3e}"
+    )
+
+
+# decimal=3: the returned value is a float32 max-abs-difference, so which sample
+# wins can differ slightly between backends. The assertions below are the real
+# check and run inside every backend worker.
+@backend_equality_check(decimal=3)
+def test_demodulate_pad_fast_time_matches_linear_hilbert():
+    """pad_fast_time=True converges to the aperiodic analytic signal, gain included.
+
+    Padding 32x further makes scipy's circular transform effectively aperiodic,
+    giving a reference the padded path should land on. This catches a gain or
+    normalization error in the pad-and-crop, which a wrap ratio would not.
+    """
+    n_ax = 512
+    sampling_frequency, center_frequency = 20e6, 5e6
+    rf = _near_field_burst(n_ax, sampling_frequency, center_frequency)
+
+    x = rf[0, :, 0, 0].astype("float64")
+    reference = hilbert_scipy(np.concatenate([x, np.zeros(31 * n_ax)]))[:n_ax]
+    reference = reference * np.exp(
+        -2j * np.pi * center_frequency * np.arange(n_ax) / sampling_frequency
+    )
+
+    errors = {}
+    for pad_fast_time in (False, True):
+        envelope = _demodulated_envelope(rf, pad_fast_time, sampling_frequency, center_frequency)
+        # Compare the envelope, which is invariant to the phase convention.
+        errors[pad_fast_time] = np.abs(envelope - np.abs(reference)).max() / np.abs(reference).max()
+
+    assert errors[True] < 1e-3, (
+        f"padded demodulation is {errors[True]:.3e} from the aperiodic analytic signal"
+    )
+    assert errors[False] > 1e-2, (
+        f"unpadded demodulation should differ from the aperiodic reference, got {errors[False]:.3e}"
+    )
+    return np.array([errors[False], errors[True]])
+
+
+@pytest.mark.parametrize("n_ax", [7, 100, 511, 512, 1000])
+def test_demodulate_pad_fast_time_preserves_shape(n_ax):
+    """Cropping restores the input length, for odd and non-power-of-two records."""
+    import keras
+
+    from zea.func.ultrasound import demodulate
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    rf = rng.standard_normal((2, n_ax, 4, 1)).astype("float32")
+
+    iq = demodulate(keras.ops.convert_to_tensor(rf), 5e6, 20e6, axis=-3, pad_fast_time=True)
+
+    assert tuple(keras.ops.shape(iq)) == (2, n_ax, 4, 2)
+
+
+@pytest.mark.parametrize("jit_options", [None, "ops", "pipeline"])
+def test_demodulate_pad_fast_time_stays_jittable(jit_options):
+    """The padded path must stay traceable; Demodulate advertises jittable=True."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_ax, n_el = 128, 4
+    rf = rng.standard_normal((1, n_ax, n_el, 1)).astype("float32")
+
+    pipeline = ops.Pipeline([ops.Demodulate(pad_fast_time=True)], jit_options=jit_options)
+    output = pipeline(
+        data=keras.ops.convert_to_tensor(rf),
+        sampling_frequency=20e6,
+        demodulation_frequency=5e6,
+    )["data"]
+
+    assert tuple(keras.ops.shape(output)) == (1, n_ax, n_el, 2)
+
+
+def test_demodulate_pad_fast_time_gradient():
+    """Gradients flow through the pad-and-crop, leaving no sample detached."""
+    import keras
+
+    if keras.backend.backend() == "numpy":
+        pytest.skip("numpy backend has no autograd")
+
+    from zea.backend.autograd import AutoGrad
+    from zea.func.ultrasound import demodulate
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    rf = rng.standard_normal((1, 64, 2, 1)).astype("float32")
+
+    def loss(x):
+        iq = demodulate(x, 5e6, 20e6, axis=-3, pad_fast_time=True)
+        return keras.ops.sum(keras.ops.square(iq))
+
+    wrapper = AutoGrad()
+    wrapper.set_function(loss)
+    grad = keras.ops.convert_to_numpy(wrapper.gradient(rf))
+
+    assert grad.shape == rf.shape
+    assert np.isfinite(grad).all(), "padding introduced a non-finite gradient"
+    assert np.count_nonzero(grad) == grad.size, "the crop detached input samples from the loss"
+
+
+def test_demodulate_pad_fast_time_survives_serialization():
+    """pad_fast_time must round-trip, or a saved pipeline config reproduces other numerics."""
+    from zea.ops import Demodulate, Pipeline
+
+    assert Demodulate().pad_fast_time is True
+    assert Demodulate(pad_fast_time=False).get_config()["pad_fast_time"] is False
+
+    pipeline = Pipeline([Demodulate(pad_fast_time=False)])
+    restored = Pipeline.from_config(pipeline.to_config())
+
+    assert restored.operations[0].pad_fast_time is False
+
+
+@pytest.mark.parametrize("n_ax", [512, 700, 1024])
+def test_envelope_detect_bounds_wraparound(n_ax):
+    """envelope_detect must not leak a near-field echo to depth.
+
+    Regression test for padding to the next power of two, which added no samples at
+    all when n_ax was already a power of two. 512 and 1024 used to slip through.
+    """
+    import keras
+
+    from zea.func.ultrasound import envelope_detect
+
+    rf = _near_field_burst(n_ax)
+    envelope = keras.ops.convert_to_numpy(
+        envelope_detect(keras.ops.convert_to_tensor(rf), axis=-3)
+    )[0, :, 0]
+
+    ratio = _wrap_ratio(envelope)
+    assert ratio < 0.64 / n_ax, (
+        f"n_ax={n_ax}: envelope_detect leaves {ratio:.3e} of the peak at depth, "
+        f"over the documented bound {0.64 / n_ax:.3e}"
+    )
+
+
+def test_envelope_detect_iq_path_is_not_padded():
+    """Two-channel input takes the magnitude directly, with no transform involved."""
+    import keras
+
+    from zea.func.ultrasound import envelope_detect
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    iq = rng.standard_normal((1, 64, 4, 2)).astype("float32")
+
+    got = keras.ops.convert_to_numpy(envelope_detect(keras.ops.convert_to_tensor(iq), axis=-3))
+
+    np.testing.assert_allclose(got, np.abs(iq[..., 0] + 1j * iq[..., 1]), rtol=1e-5, atol=1e-6)
+
+
 @pytest.fixture(scope="module")
 def spiral_image():
     """
