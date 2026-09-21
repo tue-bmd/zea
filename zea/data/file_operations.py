@@ -26,6 +26,8 @@ from zea.data.spec import (
     ScanSpec,
     Spec,
     find_matched_shape,
+    is_lazy_array,
+    iter_slabs,
 )
 from zea.func.ultrasound import construct_acquisition_from_synthetic_aperture, decode_hadamard
 from zea.internal.checks import _IMAGE_DATA_TYPES, _NON_IMAGE_DATA_TYPES
@@ -154,21 +156,52 @@ def _dim_axis(array: np.ndarray, shape_spec, dim_name: str) -> int | None:
     return axes[0] if axes else None
 
 
-def _mean_over_axis(array: np.ndarray, axis: int, log_domain: bool = False) -> np.ndarray:
+def _mean_over_axis(array, axis: int, log_domain: bool = False) -> np.ndarray:
     """Average ``array`` along ``axis``, keeping the axis, in the domain the data lives in.
 
     float32 images are log-compressed (dB), so they are averaged in the linear domain;
     uint8 images are averaged in float and clipped back into range.
+
+    The input is consumed slab by slab (see :func:`zea.data.spec.iter_slabs`), so a lazy
+    array is never read whole: only one slab and the (reduced) result are in memory. Slabs
+    are cut along the frame axis, so a reduction over frames accumulates across them while
+    any other reduction is done per slab and concatenated. Partial sums are accumulated in
+    float64 regardless of the input dtype, which keeps the result independent of how the
+    array happened to be split.
     """
-    if log_domain and array.dtype == np.float32:
-        # Undo the dB compression (10**(dB/20)), average in the linear domain, re-compress.
-        linear = np.power(10.0, array / _DB_FACTOR)
-        mean = np.mean(linear, axis=axis, keepdims=True)
+    dtype = np.dtype(array.dtype)
+    linear = log_domain and dtype == np.float32
+    # Widest accumulator the input can be cast to (IQ data products are complex64).
+    accumulate_as = np.complex128 if np.issubdtype(dtype, np.complexfloating) else np.float64
+    # Slabs tile the frame axis: reducing over it accumulates them into a single sum, any
+    # other axis reduces each slab on its own and keeps the results side by side.
+    total = None
+    partial_sums = []
+    for _, slab in iter_slabs(array, split_axes=False):
+        if linear:
+            # Undo the dB compression (10**(dB/20)) to average in the linear domain.
+            slab = np.power(10.0, slab / _DB_FACTOR)
+        # asarray: keepdims=True always gives an array, which the numpy stubs cannot say.
+        partial = np.asarray(np.sum(slab, axis=axis, keepdims=True, dtype=accumulate_as))
+        if axis != 0:
+            partial_sums.append(partial)
+        elif total is None:
+            total = partial
+        else:
+            total += partial
+
+    if total is None and not partial_sums:
+        # No slabs at all: the array is empty, which np.mean answers with an empty mean.
+        return np.mean(np.asarray(array), axis=axis, keepdims=True).astype(dtype)
+    if axis != 0:
+        total = np.concatenate(partial_sums, axis=0)
+    mean = total / array.shape[axis]
+
+    if linear:
         return (_DB_FACTOR * np.log10(mean)).astype(np.float32)
-    if array.dtype == np.uint8:
-        mean = np.mean(array.astype(np.float32), axis=axis, keepdims=True)
+    if dtype == np.uint8:
         return np.clip(mean, 0, 255).astype(np.uint8)
-    return np.mean(array, axis=axis, keepdims=True).astype(array.dtype)
+    return mean.astype(dtype)
 
 
 def _compound_named_dim(file_spec: FileSpec, dim_name: str) -> FileSpec:
@@ -353,14 +386,13 @@ def compound_frames(input_path: str | Path, output_path: str | Path, overwrite=F
             Defaults to False.
     """
 
-    _prepare_output_path(str(output_path), overwrite)
+    _prepare_output_path(str(output_path), overwrite, input_path)
 
+    # Lazy: the average is accumulated slab by slab, so only the compounded frame (and one
+    # slab at a time) is ever in memory. The file stays open until the result is written.
     with File(input_path) as f:
-        file_spec = f._to_file_spec()
-
-    file_spec = _compound_named_dim(file_spec, "n_frames")
-
-    file_spec.save(str(output_path))
+        file_spec = _compound_named_dim(f._to_file_spec(lazy=True), "n_frames")
+        file_spec.save(str(output_path))
 
 
 @_supports_folders
@@ -381,21 +413,21 @@ def compound_transmits(input_path: str | Path, output_path: str | Path, overwrit
             Defaults to False.
     """
 
-    _prepare_output_path(str(output_path), overwrite)
+    _prepare_output_path(str(output_path), overwrite, input_path)
 
+    # Lazy, as in compound_frames: the data is reduced one slab at a time.
     with File(input_path) as f:
-        file_spec = f._to_file_spec()
+        file_spec = f._to_file_spec(lazy=True)
 
-    for i, track in enumerate(file_spec.tracks):
-        if track.scan is not None and not _all_tx_are_identical(track.scan):
-            log.warning(
-                f"Not all transmits in track {i} are identical. Compounding transmits may "
-                "lead to unexpected results."
-            )
+        for i, track in enumerate(file_spec.tracks):
+            if track.scan is not None and not _all_tx_are_identical(track.scan):
+                log.warning(
+                    f"Not all transmits in track {i} are identical. Compounding transmits may "
+                    "lead to unexpected results."
+                )
 
-    file_spec = _compound_named_dim(file_spec, "n_tx")
-
-    file_spec.save(str(output_path))
+        file_spec = _compound_named_dim(file_spec, "n_tx")
+        file_spec.save(str(output_path))
 
 
 def _all_tx_are_identical(scan: ScanSpec):
@@ -432,6 +464,11 @@ def resave(
     """
     Resaves a zea data file to a new location.
 
+    The data is never held in memory: every array is copied from the input to the output
+    one slab at a time (see :func:`zea.data.spec.iter_slabs`), so a file far larger than
+    RAM can be rewritten — to pick up a new zea version, a different chunking, or another
+    compression codec.
+
     Args:
         input_path (str, Path): Path to the input zea data file, or a folder of files.
             Also accepts an ``hf://`` path (file or folder).
@@ -443,17 +480,19 @@ def resave(
             reads fetch only the requested frames; other axes stay at full extent. Use
             ``None``/``()`` for contiguous storage. See
             :meth:`zea.data.spec.Spec._resolve_chunks`.
+        **kwargs: Passed to :meth:`zea.data.spec.FileSpec.save` (e.g. ``compression``).
     """
 
-    _prepare_output_path(str(output_path), overwrite)
+    _prepare_output_path(str(output_path), overwrite, input_path)
 
     if not Path(input_path).exists():
         raise FileNotFoundError(f"Input path {input_path} does not exist.")
 
+    # The spec's arrays stay backed by the input file, so it has to stay open until the
+    # last slab has been copied across.
     with File(input_path) as f:
-        file_spec = f._to_file_spec()
-
-    file_spec.save(str(output_path), **kwargs)
+        file_spec = f._to_file_spec(lazy=True)
+        file_spec.save(str(output_path), **kwargs)
 
 
 def _is_select_all(index) -> bool:
@@ -486,6 +525,26 @@ def _as_indices(index, size: int) -> np.ndarray:
     return np.atleast_1d(np.arange(size)[index])
 
 
+def _take(value, indices: np.ndarray, axis: int) -> np.ndarray:
+    """``np.take``, reading only the selected entries when ``value`` is still on disk.
+
+    This is what makes extracting a few frames from a large file cost a few frames of IO
+    and memory rather than the whole array. HDF5 only accepts a strictly increasing
+    selection, so the unique indices are read and then reordered (or repeated) in memory,
+    which is bounded by the size of the result.
+    """
+    if not is_lazy_array(value):
+        return np.take(value, indices, axis=axis)
+
+    unique = np.unique(indices)
+    selection: list = [slice(None)] * value.ndim
+    selection[axis] = unique.tolist()
+    selected = value[tuple(selection)]
+    if unique.size == indices.size and np.array_equal(unique, indices):
+        return selected
+    return np.take(selected, np.searchsorted(unique, indices), axis=axis)
+
+
 def _slice_map_coordinates(spec: Spec, sliced: Spec, index) -> None:
     """Slice a :class:`~zea.data.spec.Map`'s coordinates along its frame axis, if it has one.
 
@@ -500,7 +559,7 @@ def _slice_map_coordinates(spec: Spec, sliced: Spec, index) -> None:
 
     if coordinates.shape[:-1] in (values.shape, values.shape[:-1]):
         indices = _as_indices(index, coordinates.shape[0])
-        setattr(sliced, "coordinates", np.take(coordinates, indices, axis=0))
+        setattr(sliced, "coordinates", _take(coordinates, indices, axis=0))
 
 
 def _slice_spec_dims(spec: SpecT, dim_indices: dict) -> SpecT:
@@ -527,7 +586,7 @@ def _slice_spec_dims(spec: SpecT, dim_indices: dict) -> SpecT:
             for axis in _named_axes(matched_shape, np.ndim(value), dim_name):
                 # One axis at a time, so multiple index *lists* do not broadcast
                 # against each other the way they would in a single fancy-index.
-                value = np.take(value, _as_indices(index, value.shape[axis]), axis=axis)
+                value = _take(value, _as_indices(index, value.shape[axis]), axis=axis)
                 sliced_timestamps |= field_name == "timestamps"
 
         setattr(sliced, field_name, value)
@@ -618,6 +677,10 @@ def extract_frames_transmits(
     determined by the spec schema (see :func:`slice_spec_dims`), so scan parameters,
     annotations and metrics stay in sync with the extracted data.
 
+    Only the requested frames and transmits are read, and anything the selection does not
+    touch is copied across slab by slab, so extracting from a file much larger than RAM
+    costs the size of the extraction rather than that of the input.
+
     Args:
         input_path (str, Path): Path to the input raw data file, or a folder of files.
             Also accepts an ``hf://`` path (file or folder).
@@ -631,36 +694,38 @@ def extract_frames_transmits(
             ``chunk_axes``).
     """
 
-    # TODO: can be more efficient by only loading the requested frames and transmits
-    # instead of loading all data and then slicing.
+    # Lazy: only the requested frames and transmits are read (see :func:`_take`), so the
+    # cost is the size of the extraction rather than that of the input file. Whatever the
+    # selection does not touch stays on disk and is copied across on save, which is why
+    # the input file has to stay open for the whole operation.
     with File(input_path) as f:
-        file_spec = f._to_file_spec()
+        file_spec = f._to_file_spec(lazy=True)
 
-    if len(file_spec.tracks) > 1 and not (
-        _is_select_all(frame_indices) and _is_select_all(transmit_indices)
-    ):
-        raise NotImplementedError(
-            f"{input_path} has {len(file_spec.tracks)} tracks. Extracting frames or transmits "
-            "from a multi-track file would require rebuilding 'track_schedule', which is "
-            "ambiguous, so it is not supported."
-        )
+        if len(file_spec.tracks) > 1 and not (
+            _is_select_all(frame_indices) and _is_select_all(transmit_indices)
+        ):
+            raise NotImplementedError(
+                f"{input_path} has {len(file_spec.tracks)} tracks. Extracting frames or "
+                "transmits from a multi-track file would require rebuilding "
+                "'track_schedule', which is ambiguous, so it is not supported."
+            )
 
-    file_spec = slice_spec_dims(file_spec, n_frames=frame_indices, n_tx=transmit_indices)
+        file_spec = slice_spec_dims(file_spec, n_frames=frame_indices, n_tx=transmit_indices)
 
-    # track_schedule is indexed by global transmit event ('n_total_tx'), not by 'n_tx',
-    # so the schema-driven slicing above leaves it alone. A single-track schedule is all
-    # zeros with one entry per transmit event, so it can simply be rebuilt. Multi-track
-    # files only reach here on a no-op (select-all) extraction — see the guard above — so
-    # their schedule encodes the genuine cross-track ordering and must be preserved as-is.
-    if len(file_spec.tracks) == 1:
-        data = file_spec.tracks[0].data
-        raw_data = data.raw_data if data is not None else None
-        if file_spec.track_schedule is not None and raw_data is not None:
-            n_events = int(np.prod(raw_data.shape[:2]))
-            file_spec.track_schedule = np.zeros(n_events, dtype=np.int32)
+        # track_schedule is indexed by global transmit event ('n_total_tx'), not by 'n_tx',
+        # so the schema-driven slicing above leaves it alone. A single-track schedule is all
+        # zeros with one entry per transmit event, so it can simply be rebuilt. Multi-track
+        # files only reach here on a no-op (select-all) extraction — see the guard above — so
+        # their schedule encodes the genuine cross-track ordering and must be preserved as-is.
+        if len(file_spec.tracks) == 1:
+            data = file_spec.tracks[0].data
+            raw_data = data.raw_data if data is not None else None
+            if file_spec.track_schedule is not None and raw_data is not None:
+                n_events = int(np.prod(raw_data.shape[:2]))
+                file_spec.track_schedule = np.zeros(n_events, dtype=np.int32)
 
-    _prepare_output_path(str(output_path), overwrite)
-    file_spec.save(str(output_path), **kwargs)
+        _prepare_output_path(str(output_path), overwrite, input_path)
+        file_spec.save(str(output_path), **kwargs)
 
 
 def summary(input_path: str | Path):
@@ -700,7 +765,7 @@ def decode_hadamard_file_operation(input_path: Path, output_path: Path, overwrit
             data will be saved.
         overwrite: Whether to overwrite the output file if it exists.
     """
-    _prepare_output_path(str(output_path), overwrite)
+    _prepare_output_path(str(output_path), overwrite, input_path)
 
     with File(input_path) as f:
         file_spec = f._to_file_spec()
@@ -746,7 +811,7 @@ def sa_to_virtual_focus(
     angles, focus distance, and transmit origin.
     """
 
-    _prepare_output_path(str(output_path), overwrite)
+    _prepare_output_path(str(output_path), overwrite, input_path)
 
     with File(input_path) as f:
         file_spec = f._to_file_spec()
@@ -814,19 +879,28 @@ def output_blocked(output_path: str | Path, overwrite: bool) -> bool:
     return Path(output_path).exists() and not overwrite
 
 
-def _prepare_output_path(output_path: str, overwrite: bool):
+def _prepare_output_path(output_path: str, overwrite: bool, input_path: "str | Path | None" = None):
     """Guard the save target, matching :func:`resave`: refuse to clobber unless asked.
 
     ``FileSpec.save`` overwrites atomically and has no ``overwrite`` flag of its own, so
     callers must enforce it here or an existing file is silently replaced.
 
-    Also refuses to save to an ``hf://`` path, which is read-only.
+    Also refuses to save to an ``hf://`` path, which is read-only, and — when the caller
+    names its ``input_path`` — to write back over the file being read: an operation reads
+    its input while it writes the output, so rewriting in place would delete the data
+    before it has been copied.
     """
 
     if output_path.startswith(HF_PREFIX):
         raise ValueError(
             f"Cannot save to an 'hf://' path: {output_path}. 'hf://' paths are read-only; "
             "save to a local path instead."
+        )
+    if input_path is not None and Path(output_path).resolve() == Path(input_path).resolve():
+        raise ValueError(
+            f"Output path {output_path} is the input file. The input is read while the "
+            "output is written, so it cannot be rewritten in place: write to a new path "
+            "and replace the original afterwards."
         )
     if output_blocked(output_path, overwrite):
         raise FileExistsError(
