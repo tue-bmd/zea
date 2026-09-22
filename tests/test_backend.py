@@ -172,6 +172,67 @@ class TestJit:
 
         assert jit(func, torch=False) is func
 
+    @staticmethod
+    @run_in_backend("jax")
+    def test_default_compiler_options_on_jax():
+        """Supported defaults reach ``jax.jit``, unsupported ones are dropped, and an
+        explicit ``compiler_options`` entry overrides a default."""
+        import unittest.mock
+
+        import jax
+        import numpy as np
+
+        import zea.backend
+        from zea.backend import jit
+
+        flag = "xla_gpu_experimental_enable_fusion_autotuner"
+        with unittest.mock.patch.object(zea.backend.jax_mod, "jit", wraps=jax.jit) as jax_jit:
+            compiled = jit(
+                lambda x: x * 2,
+                default_compiler_options={flag: False, "xla_no_such_option": 1},
+            )
+            jax_jit.assert_not_called()  # the support check waits for the first call
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+            assert jax_jit.call_args.kwargs["compiler_options"] == {flag: False}
+
+            compiled = jit(
+                lambda x: x * 2,
+                default_compiler_options={flag: False},
+                compiler_options={flag: True},
+            )
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+            assert jax_jit.call_args.kwargs["compiler_options"] == {flag: True}
+
+    @staticmethod
+    def _check_default_compiler_options_ignored():
+        import keras
+        import numpy as np
+
+        from zea.backend import jit
+
+        compiled = jit(
+            lambda x: keras.ops.sum(x),
+            default_compiler_options={"xla_gpu_experimental_enable_fusion_autotuner": False},
+        )
+        x = keras.ops.convert_to_tensor(np.ones(3, dtype="float32"))
+        np.testing.assert_allclose(keras.ops.convert_to_numpy(compiled(x)), 3.0)
+
+    @staticmethod
+    @run_in_backend("tensorflow")
+    def test_default_compiler_options_ignored_on_tensorflow():
+        """``default_compiler_options`` is JAX-only and never reaches ``tf.function``."""
+        from tests.test_backend import TestJit
+
+        TestJit._check_default_compiler_options_ignored()
+
+    @staticmethod
+    @run_in_backend("torch")
+    def test_default_compiler_options_ignored_on_torch():
+        """``default_compiler_options`` is JAX-only and never reaches ``torch.compile``."""
+        from tests.test_backend import TestJit
+
+        TestJit._check_default_compiler_options_ignored()
+
 
 class TestAdam:
     """Tests for the backend-agnostic Adam optimizer in ``zea.backend.optimizer``."""

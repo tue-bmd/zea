@@ -19,6 +19,21 @@ from zea.utils import (
 )
 
 
+def merge_jit_kwargs(inherited: dict, own: dict) -> dict:
+    """Merge JIT keyword arguments, with ``own`` taking precedence over ``inherited``.
+
+    ``compiler_options`` are merged key by key instead of replaced, so a child that
+    sets one option keeps the others it inherited.
+    """
+    merged = {**inherited, **own}
+    if "compiler_options" in inherited and "compiler_options" in own:
+        merged["compiler_options"] = {
+            **(inherited["compiler_options"] or {}),
+            **(own["compiler_options"] or {}),
+        }
+    return merged
+
+
 def get_ops(ops_name: str):
     """Retrieve an :class:`Operation` subclass from the registry by name.
 
@@ -220,6 +235,9 @@ class Operation(keras.Operation):
         # (jit_options="pipeline"), so this op runs inside that trace even though
         # it does not wrap itself in jit. Set by the parent pipeline.
         self._inside_outer_jit = False
+        # jit_kwargs the enclosing pipelines were given, applied when this op compiles
+        # itself. Set by the parent pipeline.
+        self._inherited_jit_kwargs = {}
 
         # Set the jit compilation flag and compile the `call` method
         self.set_jit(jit_compile)
@@ -233,6 +251,16 @@ class Operation(keras.Operation):
     def static_params(self):
         """Get the static parameters of the operation."""
         return getattr(self.__class__, "STATIC_PARAMS", [])
+
+    @property
+    def compiler_options(self) -> dict:
+        """XLA options this operation needs in any JIT-compiled function that contains it.
+
+        Declared per class through ``COMPILER_OPTIONS``. They only apply on the JAX
+        backend, and an explicit ``compiler_options`` entry in ``jit_kwargs`` overrides
+        them.
+        """
+        return dict(getattr(self.__class__, "COMPILER_OPTIONS", {}))
 
     @property
     def jit_compile(self):
@@ -252,7 +280,10 @@ class Operation(keras.Operation):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile
         if self._jit_compile and self.jittable:
-            self._call = jit(self.call, **self.jit_kwargs)
+            jit_kwargs = merge_jit_kwargs(self._inherited_jit_kwargs, self.jit_kwargs)
+            self._call = jit(
+                self.call, **jit_kwargs, default_compiler_options=self.compiler_options
+            )
         else:
             self._call = self.call
 

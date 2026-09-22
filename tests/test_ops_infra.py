@@ -533,6 +533,77 @@ def test_map_configures_jit_on_nested_pipeline():
     assert inner._inside_outer_jit is True
 
 
+@pytest.fixture
+def jit_kwargs_of(monkeypatch):
+    """Record the kwargs ops and pipelines pass to ``jit``; returns a lookup by owner."""
+    import zea.ops.base
+    import zea.ops.pipeline
+
+    recorded = {}
+
+    def record(func, **kwargs):
+        recorded[id(func.__self__)] = kwargs  # operations are unhashable
+        return func
+
+    monkeypatch.setattr(zea.ops.base, "jit", record)
+    monkeypatch.setattr(zea.ops.pipeline, "jit", record)
+    return lambda owner: recorded[id(owner)]
+
+
+def test_parent_jit_kwargs_reach_self_jitting_children(jit_kwargs_of):
+    """jit_kwargs of a pipeline apply to the operations that compile themselves in it,
+    at any depth, with the closest ones taking precedence."""
+    leaf = MultiplyOperation(jit_kwargs={"compiler_options": {"b": 3, "c": 4}})
+    mapped = AddOperation()
+    inner = ops.Pipeline(
+        [leaf, Map([mapped], argnames="x", chunks=2)],
+        jit_kwargs={"compiler_options": {"a": 2, "b": 2}},
+    )
+    ops.Pipeline(
+        [inner, AddOperation()],
+        jit_options="ops",
+        jit_kwargs={"donate_argnums": (), "compiler_options": {"a": 1}},
+    )
+
+    assert jit_kwargs_of(leaf)["donate_argnums"] == ()
+    assert jit_kwargs_of(leaf)["compiler_options"] == {"a": 2, "b": 3, "c": 4}
+
+    # The Map compiles itself as a whole and passes its inherited kwargs on.
+    map_kwargs = jit_kwargs_of(inner.operations[1])
+    assert map_kwargs["compiler_options"] == {"a": 2, "b": 2}
+    assert mapped._inherited_jit_kwargs["compiler_options"] == {"a": 2, "b": 2}
+
+
+def test_parent_static_argnames_do_not_reach_children(jit_kwargs_of):
+    """Each operation derives its own static_argnames; a parent's never leak into it."""
+    leaf = MultiplyOperation()
+    ops.Pipeline([leaf], jit_options="ops", jit_kwargs={"static_argnames": ["y"]})
+    assert "static_argnames" not in jit_kwargs_of(leaf)
+
+
+def test_tof_correction_compiler_options_reach_enclosing_jit(jit_kwargs_of):
+    """TOFCorrection's compiler options apply to every function compiled around it,
+    and to nothing else."""
+    flag = "xla_gpu_experimental_enable_fusion_autotuner"
+
+    pipeline = ops.Pipeline.from_default(jit_options="ops")
+    patched_grid = pipeline["beamform"].operations[0]
+    assert isinstance(patched_grid, PatchedGrid)
+    assert jit_kwargs_of(patched_grid)["default_compiler_options"] == {flag: False}
+    assert jit_kwargs_of(pipeline["envelope_detect"])["default_compiler_options"] == {}
+    assert pipeline.compiler_options == {flag: False}
+
+    whole = ops.Pipeline.from_default(jit_options="pipeline")
+    assert jit_kwargs_of(whole)["default_compiler_options"] == {flag: False}
+
+    unpatched = ops.Pipeline.from_default(num_patches=1, jit_options="ops")
+    tof = unpatched["beamform"].operations[0]
+    assert isinstance(tof, ops.TOFCorrection)
+    assert jit_kwargs_of(tof)["default_compiler_options"] == {flag: False}
+
+    assert ops.Pipeline([AddOperation()]).compiler_options == {}
+
+
 def test_prepare_parameters_rejects_non_parameters():
     """prepare_parameters must reject anything that is not a zea.Parameters instance."""
     pipeline = ops.Pipeline([AddOperation()], jit_options=None)

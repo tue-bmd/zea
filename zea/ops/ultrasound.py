@@ -181,6 +181,11 @@ class TOFCorrection(Operation):
     # Define operation-specific static parameters
     STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
 
+    # Compiled together with the beamformer that sums its output, XLA's GPU fusion
+    # autotuner can take minutes on large inputs without making the result any faster
+    # (see #599). Only functions that contain this operation are affected.
+    COMPILER_OPTIONS = {"xla_gpu_experimental_enable_fusion_autotuner": False}
+
     def __init__(self, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,

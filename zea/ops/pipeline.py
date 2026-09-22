@@ -18,7 +18,7 @@ from zea.internal.ops_list import OperationList
 from zea.internal.precision import LOW_PRECISION_DTYPES
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
-from zea.ops.base import Operation, get_ops
+from zea.ops.base import Operation, get_ops, merge_jit_kwargs
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     AlignedApodization,
@@ -139,6 +139,11 @@ class Pipeline:
                 Defaults to "ops".
 
             jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
+                Operations and nested pipelines that compile themselves (for example with
+                ``jit_options="ops"``) inherit them, except ``static_argnames``, with
+                their own ``jit_kwargs`` taking precedence. ``compiler_options`` are
+                merged per option, and also override the XLA options that operations
+                declare themselves (see :attr:`compiler_options`).
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
             validate (bool, optional): Whether to validate the pipeline. Defaults to True.
             timed (bool, optional): Whether to time each operation. Defaults to False.
@@ -201,6 +206,9 @@ class Pipeline:
         # pipeline already runs inside that trace. Updated by the parent via
         # _configure_jit; defaults to False for a standalone/root pipeline.
         self._inside_outer_jit = False
+        # jit_kwargs the enclosing pipelines were given. Updated by the parent via
+        # _configure_jit; empty for a standalone/root pipeline.
+        self._inherited_jit_kwargs = {}
         self.jit_options = jit_options  # will handle the jit compilation
         self.device = device
 
@@ -244,6 +252,31 @@ class Pipeline:
         for operation in self.operations:
             static_params.extend(operation.static_params)
         return list(set(static_params))
+
+    @property
+    def compiler_options(self) -> dict:
+        """XLA options needed by the operations of the pipeline, at any depth.
+
+        Applied to every JIT-compiled function that contains those operations. See
+        :attr:`zea.ops.Operation.compiler_options`.
+        """
+        compiler_options = {}
+        for operation in self.operations:
+            compiler_options.update(operation.compiler_options)
+        return compiler_options
+
+    def _jit_kwargs_for_children(self) -> dict:
+        """jit_kwargs that operations compiling themselves inside this pipeline inherit.
+
+        ``static_argnames`` is left out: every operation derives its own.
+        """
+        own = {k: v for k, v in self._user_jit_kwargs.items() if k != "static_argnames"}
+        return merge_jit_kwargs(self._inherited_jit_kwargs, own)
+
+    def _compile(self, func):
+        """JIT compile ``func`` with this pipeline's (and its parents') jit_kwargs."""
+        jit_kwargs = merge_jit_kwargs(self._inherited_jit_kwargs, self.jit_kwargs)
+        return jit(func, **jit_kwargs, default_compiler_options=self.compiler_options)
 
     @property
     def needs_keys(self) -> set:
@@ -584,19 +617,28 @@ class Pipeline:
         """Set the jit_options property of the pipeline."""
         self._configure_jit(value, inside_outer_jit=self._inside_outer_jit)
 
-    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+    def _configure_jit(
+        self,
+        value: Union[str, None],
+        inside_outer_jit: bool,
+        inherited_jit_kwargs: dict | None = None,
+    ):
         """Recursively configure JIT for this pipeline and all descendants.
 
         Args:
             value: jit_options for this pipeline ("pipeline", "ops", or None).
             inside_outer_jit: True if an enclosing pipeline is JIT-compiled as a
                 whole, so this pipeline already runs inside a trace.
+            inherited_jit_kwargs: jit_kwargs of the enclosing pipelines. None keeps
+                the ones this pipeline already inherited.
         """
         if value not in ("pipeline", "ops", None):
             raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
         self._inside_outer_jit = inside_outer_jit
+        if inherited_jit_kwargs is not None:
+            self._inherited_jit_kwargs = inherited_jit_kwargs
         self.set_jit(value == "pipeline")
 
         # Children run inside a trace if we compile ourselves as a whole, or we
@@ -604,10 +646,16 @@ class Pipeline:
         # jit_options is forced to None.
         child_inside_outer_jit = inside_outer_jit or value == "pipeline"
         child_value = None if child_inside_outer_jit else value
+        child_jit_kwargs = self._jit_kwargs_for_children()
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation._configure_jit(child_value, inside_outer_jit=child_inside_outer_jit)
+                operation._configure_jit(
+                    child_value,
+                    inside_outer_jit=child_inside_outer_jit,
+                    inherited_jit_kwargs=child_jit_kwargs,
+                )
             else:
+                operation._inherited_jit_kwargs = child_jit_kwargs
                 operation.set_jit(child_value == "ops")
                 operation._inside_outer_jit = child_inside_outer_jit
 
@@ -619,7 +667,7 @@ class Pipeline:
                 f"The following operations are not jittable: {self.unjitable_ops}"
                 "Try setting jit_options to 'ops' or None."
             )
-        self._call_pipeline = jit(self.call, **self.jit_kwargs)
+        self._call_pipeline = self._compile(self.call)
 
     def _unjit(self):
         """Un-JIT compile the pipeline."""
@@ -1123,7 +1171,12 @@ class Map(Pipeline):
 
         return out
 
-    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
+    def _configure_jit(
+        self,
+        value: Union[str, None],
+        inside_outer_jit: bool,
+        inherited_jit_kwargs: dict | None = None,
+    ):
         """Configure JIT for this Map and its inner operations.
 
         Map compiles its entire mapped call as a single unit whenever it self-jits
@@ -1135,20 +1188,28 @@ class Map(Pipeline):
 
         self._jit_options = value
         self._inside_outer_jit = inside_outer_jit
+        if inherited_jit_kwargs is not None:
+            self._inherited_jit_kwargs = inherited_jit_kwargs
         self.set_jit(value is not None)
 
         # Inner ops run inside a trace if Map self-jits or an outer pipeline does.
         child_inside_outer_jit = value is not None or inside_outer_jit
+        child_jit_kwargs = self._jit_kwargs_for_children()
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation._configure_jit(None, inside_outer_jit=child_inside_outer_jit)
+                operation._configure_jit(
+                    None,
+                    inside_outer_jit=child_inside_outer_jit,
+                    inherited_jit_kwargs=child_jit_kwargs,
+                )
             else:
+                operation._inherited_jit_kwargs = child_jit_kwargs
                 operation.set_jit(False)
                 operation._inside_outer_jit = child_inside_outer_jit
 
     def _jit(self):
         """JIT compile the pipeline."""
-        self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
+        self._jittable_call = self._compile(self.jittable_call)
 
     def _unjit(self):
         """Un-JIT compile the pipeline."""
