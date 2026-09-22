@@ -1,6 +1,9 @@
-"""The transducer element as the simulators see it: its resolved geometry, the one-way transmit
-and receive responses of every element to every scatterer, and the elevation slab of a 1D
-probe."""
+"""Transducer elements definitions for the simulators. Includes the resolved geometry and physics
+(:class:`ElementModel`), the one-way transmit and receive responses of every element to every
+scatterer (:func:`element_responses`), and the elevation slab of a 1D probe."""
+
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from keras import ops
@@ -11,13 +14,12 @@ from zea.beamform.lens_correction import (
     compute_lens_path_lengths,
 )
 from zea.func.ultrasound import directivity
-from zea.simulator.pulse import _concrete
+from zea.internal.core import concrete
 
 
 def min_distance(sound_speed, center_frequency):
-    """Half a wavelength: the distance the simulators clamp the element-scatterer distance to
-    for the phase and the spreading, as SIMUS does, so that the 1 / r of a scatterer on an
-    element stays finite. The angles keep the true geometry."""
+    """The distance the simulator clamps the element-scatterer distance to for the phase and spread,
+    so that the 1 / r of a scatterer on an element stays finite."""
     return sound_speed / (2.0 * center_frequency)
 
 
@@ -41,11 +43,8 @@ def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):
 
     Args:
         dist (array-like): The distance the wave has traveled.
-        exponent (float): 1 for spherical, 0.5 for cylindrical. An elevation lens focuses the
-            transmitted energy to a slab, resulting in a cylindrical transmit and a spherical
-            receive path.
-        mindist (float): Distances below it are clamped to it. The simulators pass half a
-            wavelength, :func:`min_distance`.
+        exponent (float): 1 for spherical, 0.5 for cylindrical.
+        mindist (float): Distance to clamp to; typically half a wavelength (:func:`min_distance`).
         reference (float): Distance of unit gain.
 
     Returns:
@@ -82,6 +81,102 @@ def _validate_scatter_exponent(scatter_exponent):
         )
 
 
+@dataclass(frozen=True)
+class ElementModel:
+    """The transducer as :func:`element_responses` sees it: the element positions and the
+    physics of one element, with the defaults of :func:`simulate_rf` resolved. Built by
+    :func:`element_model` once per simulator call.
+
+    Attributes:
+        geometry: Element positions [m], (n_el, 3) float32.
+        sound_speed, element_width, element_height, attenuation_coef, lens_thickness,
+            lens_sound_speed, lens_attenuation_coef, min_dist: The scalars of
+            :func:`simulate_rf`, resolved.
+        apply_lens_correction, elevation_slab_2d: Static switches.
+        baffle_impedance_ratio: Static float, see :func:`obliquity_factor`.
+        element_normals: Unit normals (n_el, 3), or None for +z.
+        n_sub_elements: Static (n_width, n_height), see :func:`_resolve_sub_elements`.
+        elevation_focus: Static focal distance [m], or None.
+    """
+
+    geometry: Any
+    sound_speed: Any
+    element_width: Any
+    element_height: Any
+    attenuation_coef: Any
+    lens_thickness: Any
+    lens_sound_speed: Any
+    apply_lens_correction: bool
+    elevation_slab_2d: bool
+    baffle_impedance_ratio: float
+    element_normals: Any
+    n_sub_elements: tuple
+    elevation_focus: float | None
+    lens_attenuation_coef: Any
+    min_dist: Any
+
+
+def element_model(
+    probe_geometry,
+    sound_speed,
+    center_frequency,
+    pulses,
+    *,
+    element_width,
+    element_height,
+    attenuation_coef,
+    apply_lens_correction,
+    lens_thickness,
+    lens_sound_speed,
+    elevation_slab_2d=False,
+    baffle_impedance_ratio=0.0,
+    element_normals=None,
+    n_sub_elements=None,
+    elevation_focus=None,
+    lens_attenuation_coef=0.0,
+):
+    """The :class:`ElementModel` of the element arguments of :func:`simulate_rf`, validated and
+    with the defaults resolved: the element width from the pitch, the height from the width,
+    and the sub-element counts from the top of the band of ``pulses``."""
+    _validate_elevation(elevation_slab_2d, elevation_focus)
+    _validate_baffle(baffle_impedance_ratio)
+    element_width = _resolve_element_width(probe_geometry, element_width)
+    element_height = _resolve_element_height(probe_geometry, element_width, element_height)
+    _validate_lens(
+        apply_lens_correction,
+        lens_thickness,
+        lens_sound_speed,
+        sound_speed,
+        elevation_focus,
+        element_height,
+    )
+    n_sub_elements = _resolve_sub_elements(
+        n_sub_elements,
+        elevation_focus,
+        element_width,
+        element_height,
+        sound_speed,
+        max(pulse.band[1] for pulse in pulses),
+    )
+    return ElementModel(
+        geometry=ops.cast(probe_geometry, "float32"),
+        sound_speed=sound_speed,
+        element_width=element_width,
+        element_height=element_height,
+        attenuation_coef=attenuation_coef,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
+        apply_lens_correction=bool(apply_lens_correction),
+        elevation_slab_2d=bool(elevation_slab_2d),
+        baffle_impedance_ratio=float(baffle_impedance_ratio),
+        element_normals=element_normals,
+        n_sub_elements=n_sub_elements,
+        elevation_focus=None if elevation_focus is None else float(elevation_focus),
+        lens_attenuation_coef=lens_attenuation_coef,
+        min_dist=min_distance(sound_speed, center_frequency),
+    )
+
+
 def _validate_baffle(baffle_impedance_ratio):
     if not baffle_impedance_ratio >= 0:
         raise ValueError(
@@ -114,7 +209,7 @@ def _validate_lens(
         raise ValueError("apply_lens_correction=True requires lens_sound_speed.")
     if elevation_focus is None:
         return
-    values = [_concrete(x) for x in (lens_thickness, lens_sound_speed, sound_speed, element_height)]
+    values = [concrete(x) for x in (lens_thickness, lens_sound_speed, sound_speed, element_height)]
     if any(v is None for v in values):
         return
     thickness, c_lens, c, height = (float(v) for v in values)
@@ -172,8 +267,8 @@ def _resolve_element_height(probe_geometry, element_width, element_height, tol=1
     probe_width = (ops.max(x) - ops.min(x)) * (n_el / (n_el - 1))
     one_dimensional = ops.max(y) - ops.min(y) <= tol
     height = ops.where(one_dimensional, ops.maximum(probe_width / 8, element_width), element_width)
-    concrete = _concrete(height)
-    return height if concrete is None else float(concrete)
+    value = concrete(height)
+    return height if value is None else float(value)
 
 
 def _resolve_sub_elements(
@@ -184,36 +279,41 @@ def _resolve_sub_elements(
     sound_speed,
     max_frequency,
 ):
-    """Sub-elements per element as (n_lateral, n_elevation).
+    """Sub-elements per element as (n_width, n_height).
 
     "auto" is the SIMUS rule ceil(size / lambda_min), lambda_min at ``max_frequency`` [Hz], the
-    top of the band. None and an int keep one elevation sub-element unless there is an elevation
-    focus, which needs the elevation subdivision to act at all.
+    top of the band. None and an int keep one sub-element over the height unless there is an
+    elevation focus, which needs the subdivision over the height to act at all.
     """
     if isinstance(n_sub_elements, (tuple, list)):
-        n_lateral, n_elevation = (int(n) for n in n_sub_elements)
-        return max(n_lateral, 1), max(n_elevation, 1)
+        n_width, n_height = (int(n) for n in n_sub_elements)
+        return max(n_width, 1), max(n_height, 1)
     focused = elevation_focus is not None
     if n_sub_elements != "auto" and not focused:
         return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), 1
-    values = [_concrete(x) for x in (sound_speed, element_width, element_height)]
+    values = [concrete(x) for x in (sound_speed, element_width, element_height)]
     if any(v is None for v in values):
         raise ValueError(
             "The sub-element count cannot be derived from a traced sound speed or element "
-            "size; pass n_sub_elements=(n_lateral, n_elevation) explicitly."
+            "size; pass n_sub_elements=(n_width, n_height) explicitly."
         )
     c, width, height = (float(v) for v in values)
     lambda_min = c / float(max_frequency)
-    n_elevation = max(int(np.ceil(height / lambda_min)), 1)
+    n_height = max(int(np.ceil(height / lambda_min)), 1)
     if n_sub_elements == "auto":
-        return max(int(np.ceil(width / lambda_min)), 1), n_elevation
-    return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), n_elevation
+        return max(int(np.ceil(width / lambda_min)), 1), n_height
+    return (1 if n_sub_elements is None else max(int(n_sub_elements), 1)), n_height
+
+
+# ---------------------------------------------------------------------------------------------
+# Element responses
+# ---------------------------------------------------------------------------------------------
 
 
 def _element_frame(element_normals, dtype="float32"):
-    """Lateral, elevation and normal unit vectors of the elements, each (n_el, 3) or (1, 3).
+    """Width, height and normal unit vectors of the elements, each (n_el, 3) or (1, 3).
 
-    The elevation axis is +y projected onto the element plane, lateral completes the frame.
+    The height axis is +y projected onto the element plane, the width axis completes the frame.
     """
     if element_normals is None:
         eye = ops.cast(ops.convert_to_tensor(np.eye(3, dtype=np.float32)), dtype)
@@ -221,18 +321,18 @@ def _element_frame(element_normals, dtype="float32"):
     normal = ops.cast(element_normals, dtype)
     normal = normal / ops.linalg.norm(normal, axis=-1, keepdims=True)
     y = ops.cast(ops.convert_to_tensor(np.array([0.0, 1.0, 0.0], np.float32)), dtype)
-    elevation_axis = y - normal[:, 1:2] * normal
-    elevation_axis = elevation_axis / ops.linalg.norm(elevation_axis, axis=-1, keepdims=True)
-    lateral_axis = ops.cross(elevation_axis, normal)
-    return lateral_axis, elevation_axis, normal
+    height_axis = y - normal[:, 1:2] * normal
+    height_axis = height_axis / ops.linalg.norm(height_axis, axis=-1, keepdims=True)
+    width_axis = ops.cross(height_axis, normal)
+    return width_axis, height_axis, normal
 
 
 def _element_angles(relative, frame):
-    """Lateral and elevation angles and cos of the angle to the element normal.
+    """Angles in the width and height directions and cos of the angle to the element normal.
 
-    The sines of theta and phi are the direction cosines lateral / r and elevation / r, as in
-    the Fraunhofer pattern of a rectangular aperture (and SIMUS). Projected angles
-    arctan2(lateral, axial) would narrow the elevation pattern for laterally offset scatterers.
+    The sines of theta and phi are the direction cosines along the width and the height over
+    r, as in the Fraunhofer pattern of a rectangular aperture (and SIMUS). Projected angles
+    arctan2(width, axial) would narrow the height pattern for scatterers off the width axis.
 
     Args:
         relative (array-like): Scatterer positions relative to the elements, (n_scat, n_el, 3).
@@ -241,30 +341,30 @@ def _element_angles(relative, frame):
     Returns:
         theta, phi, obliquity: arrays of shape (n_scat, n_el).
     """
-    lateral_axis, elevation_axis, normal = frame
-    lateral = ops.sum(relative * lateral_axis[None], axis=-1)
-    elevation = ops.sum(relative * elevation_axis[None], axis=-1)
+    width_axis, height_axis, normal = frame
+    along_width = ops.sum(relative * width_axis[None], axis=-1)
+    along_height = ops.sum(relative * height_axis[None], axis=-1)
     axial = ops.sum(relative * normal[None], axis=-1)
     dist = ops.maximum(ops.linalg.norm(relative, axis=-1), 1e-12)
-    theta = ops.arcsin(ops.clip(lateral / dist, -1.0, 1.0))
-    phi = ops.arcsin(ops.clip(elevation / dist, -1.0, 1.0))
+    theta = ops.arcsin(ops.clip(along_width / dist, -1.0, 1.0))
+    phi = ops.arcsin(ops.clip(along_height / dist, -1.0, 1.0))
     obliquity = axial / dist
     return theta, phi, obliquity
 
 
-def _sub_element_offsets(n_lateral, n_elevation, element_width, element_height):
+def _sub_element_offsets(n_width, n_height, element_width, element_height):
     """Centroid offsets (u, v) of the sub-elements in the element frame, each (n_sub,)."""
-    u = (ops.arange(n_lateral, dtype="float32") - (n_lateral - 1) / 2) * (
-        ops.cast(element_width, "float32") / n_lateral
+    u = (ops.arange(n_width, dtype="float32") - (n_width - 1) / 2) * (
+        ops.cast(element_width, "float32") / n_width
     )
-    v = (ops.arange(n_elevation, dtype="float32") - (n_elevation - 1) / 2) * (
-        ops.cast(element_height, "float32") / n_elevation
+    v = (ops.arange(n_height, dtype="float32") - (n_height - 1) / 2) * (
+        ops.cast(element_height, "float32") / n_height
     )
-    return ops.reshape(ops.tile(u[:, None], (1, n_elevation)), (-1,)), ops.tile(v, (n_lateral,))
+    return ops.reshape(ops.tile(u[:, None], (1, n_height)), (-1,)), ops.tile(v, (n_width,))
 
 
 def _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed):
-    """Thickness removed from the lens at elevation offset ``v`` to focus at ``elevation_focus``.
+    """Thickness removed from the lens at height offset ``v`` to focus at ``elevation_focus``.
 
     A slower lens is thickest at the centre, a faster one thinnest (negative sag).
     """
@@ -292,84 +392,66 @@ def _lens_spread_distance(lens_len, medium_len, thickness, sound_speed, lens_sou
     )
 
 
-def _element_responses(
-    positions,
-    geometry,
-    freqs,
-    sound_speed,
-    element_width,
-    element_height,
-    attenuation_coef,
-    lens_thickness,
-    lens_sound_speed,
-    apply_lens_correction,
-    elevation_slab_2d,
-    baffle_impedance_ratio,
-    element_normals,
-    n_sub_elements=(1, 1),
-    elevation_focus=None,
-    lens_attenuation_coef=0.0,
-    min_dist=0.0,
-):
+def element_responses(positions, model, freqs):
     """Transmit and receive one-way responses [scatterer, element, frequency_bin] and the
-    one-way path length [scatterer, element].
+    one-way travel time [scatterer, element] of the element centre.
 
-    Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
-    own distance, phase and sinc directivity, so the response holds in the near field too. The
-    sub-element distance is clamped at ``min_dist`` for the phase and the spreading (see
-    :func:`min_distance`), not for the angles. An
-    elevation focus is the ideal focusing advance of each elevation sub-element, or with the lens
-    the refracted (Fermat) path through the local lens thickness, which the focus thins towards
-    the edges. The lens path is expressed as the medium distance with the same travel time for the
-    phase, and spreads as the refracted ray tube (:func:`_lens_spread_distance`); the lens leg is
-    attenuated with ``lens_attenuation_coef``. The returned path length is the element centre's.
+    ``model`` is the :class:`ElementModel`. Each element is the mean of its ``n_sub_elements``
+    (width, height) sub-elements with their own distance, phase and sinc directivity, so the
+    response holds in the near field too. The sub-element distance is clamped at
+    ``model.min_dist`` for the phase and the spreading (see :func:`min_distance`), not for the
+    angles. An elevation focus is the ideal focusing advance of each sub-element over the height,
+    or with the lens the refracted (Fermat) path through the local lens thickness, which the
+    focus thins towards the edges. The lens path is expressed as the medium distance with the
+    same travel time for the phase, and spreads as the refracted ray tube
+    (:func:`_lens_spread_distance`); the lens leg is attenuated with ``lens_attenuation_coef``.
     """
-    n_lateral, n_elevation = n_sub_elements
-    n_sub = n_lateral * n_elevation
+    geometry, sound_speed = model.geometry, model.sound_speed
+    lens_thickness, lens_sound_speed = model.lens_thickness, model.lens_sound_speed
+    n_width, n_height = model.n_sub_elements
+    n_sub = n_width * n_height
     relative_center = positions[:, None] - geometry[None]
     dtype = relative_center.dtype
-    lateral_axis, elevation_axis, normal = frame = _element_frame(element_normals, dtype)
+    width_axis, height_axis, normal = frame = _element_frame(model.element_normals, dtype)
     # A conformal lens on a curved probe: its face is normal to each element.
-    lens_normals = None if element_normals is None else normal
-    dist_center = ops.linalg.norm(relative_center, axis=-1)
-    if apply_lens_correction:
-        dist = (
-            compute_lens_corrected_travel_times(
-                geometry,
-                positions,
-                lens_thickness=lens_thickness,
-                c_lens=lens_sound_speed,
-                c_medium=sound_speed,
-                n_iter=3,
-                element_normals=lens_normals,
-            )
-            * sound_speed
+    lens_normals = None if model.element_normals is None else normal
+    if model.apply_lens_correction:
+        travel_time = compute_lens_corrected_travel_times(
+            geometry,
+            positions,
+            lens_thickness=lens_thickness,
+            c_lens=lens_sound_speed,
+            c_medium=sound_speed,
+            n_iter=3,
+            element_normals=lens_normals,
         )
     else:
-        dist = dist_center
-    u, v = _sub_element_offsets(n_lateral, n_elevation, element_width, element_height)
+        travel_time = ops.linalg.norm(relative_center, axis=-1) / sound_speed
+    u, v = _sub_element_offsets(n_width, n_height, model.element_width, model.element_height)
     u, v = ops.cast(u, dtype), ops.cast(v, dtype)
-    if elevation_focus is None or apply_lens_correction:
+    if model.elevation_focus is None or model.apply_lens_correction:
         advance = ops.zeros_like(v)
     else:
-        focus = ops.cast(elevation_focus, dtype)
+        focus = ops.cast(model.elevation_focus, dtype)
         advance = (ops.sqrt(focus**2 + v**2) - focus) / sound_speed
-    if apply_lens_correction and elevation_focus is not None:
-        thickness = lens_thickness - _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed)
+    if model.apply_lens_correction and model.elevation_focus is not None:
+        thickness = lens_thickness - _lens_sag(
+            v, model.elevation_focus, sound_speed, lens_sound_speed
+        )
     else:
         thickness = ops.full_like(v, lens_thickness)
-    sub_width = element_width / n_lateral
-    sub_height = element_height / n_elevation
+    sub_width = model.element_width / n_width
+    sub_height = model.element_height / n_height
     f3 = freqs[None, None, :]
 
     def response(j):
-        offset = u[j] * lateral_axis + v[j] * elevation_axis
+        offset = u[j] * width_axis + v[j] * height_axis
         relative = relative_center - offset[None]
         theta, phi, obliquity = _element_angles(relative, frame)
         amplitude = directivity(f3, theta[..., None], sub_width, sound_speed) * directivity(
             f3, phi[..., None], sub_height, sound_speed
         )
-        if apply_lens_correction:
+        if model.apply_lens_correction:
             lens_len, medium_len = compute_lens_path_lengths(
                 geometry + offset,
                 positions,
@@ -383,22 +465,24 @@ def _element_responses(
             spread_dist = _lens_spread_distance(
                 lens_len, medium_len, thickness[j], sound_speed, lens_sound_speed
             )
-            amplitude = amplitude * attenuate(f3, lens_attenuation_coef, lens_len[..., None])
+            amplitude = amplitude * attenuate(f3, model.lens_attenuation_coef, lens_len[..., None])
         else:
             medium_len = sub_dist = spread_dist = ops.linalg.norm(relative, axis=-1)
-        sub_dist = ops.maximum(sub_dist, min_dist)
-        spread_dist = ops.maximum(spread_dist, min_dist)
-        amplitude = amplitude * attenuate(f3, attenuation_coef, medium_len[..., None])
-        amplitude = amplitude * obliquity_factor(obliquity, baffle_impedance_ratio)[..., None]
+        sub_dist = ops.maximum(sub_dist, model.min_dist)
+        spread_dist = ops.maximum(spread_dist, model.min_dist)
+        amplitude = amplitude * attenuate(f3, model.attenuation_coef, medium_len[..., None])
+        amplitude = amplitude * obliquity_factor(obliquity, model.baffle_impedance_ratio)[..., None]
         phase = ops.exp(
             ops.array(-2j * np.pi, "complex64")
             * ops.cast((sub_dist[..., None] / sound_speed - advance[j]) * f3, "complex64")
         )
-        rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0, min_dist), "complex64")
+        rx = ops.cast(amplitude * spread(spread_dist[..., None], 1.0, model.min_dist), "complex64")
         rx = rx * phase
-        if elevation_slab_2d:
+        if model.elevation_slab_2d:
             # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
-            tx = ops.cast(amplitude * spread(spread_dist[..., None], 0.5, min_dist), "complex64")
+            tx = ops.cast(
+                amplitude * spread(spread_dist[..., None], 0.5, model.min_dist), "complex64"
+            )
             tx = tx * phase
         else:
             tx = rx
@@ -406,7 +490,7 @@ def _element_responses(
 
     if n_sub == 1:
         tx, rx = response(0)
-        return tx, rx, dist
+        return tx, rx, travel_time
 
     def body(j, carry):
         tx, rx = response(j)
@@ -415,7 +499,12 @@ def _element_responses(
     zeros = ops.zeros(ops.shape(response(0)[0]), "complex64")
     tx, rx = ops.fori_loop(0, n_sub, body, (zeros, zeros))
     scale = ops.array(1.0 / n_sub, "complex64")
-    return tx * scale, rx * scale, dist
+    return tx * scale, rx * scale, travel_time
+
+
+# ---------------------------------------------------------------------------------------------
+# The elevation slab of a 1D probe
+# ---------------------------------------------------------------------------------------------
 
 
 def elevation_slab_mask(scatterer_positions, probe_geometry, element_height):
@@ -536,3 +625,14 @@ def _apply_elevation_slab(
     except (RuntimeError, ValueError, TypeError):
         mask = elevation_slab_mask(scatterer_positions, probe_geometry, element_height)
         return scatterer_positions, scatterer_magnitudes * mask
+
+
+def scene_scatterers(scatterer_positions, scatterer_magnitudes, model):
+    """The scatterers as the simulators take them: pruned to the elevation slab of ``model``
+    when it is 2D, and as float32 (phantoms are float64, which tensorflow would not mix)."""
+    if model.elevation_slab_2d:
+        _warn_if_elevation_extent(model.geometry)
+        scatterer_positions, scatterer_magnitudes = _apply_elevation_slab(
+            scatterer_positions, scatterer_magnitudes, model.geometry, model.element_height
+        )
+    return ops.cast(scatterer_positions, "float32"), ops.cast(scatterer_magnitudes, "float32")

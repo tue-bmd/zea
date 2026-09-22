@@ -17,6 +17,7 @@ from zea.func.tensor import (
 from zea.func.ultrasound import (
     apply_aligned_apodization,
     apply_receive_apodization,
+    apply_receive_chain,
     demodulate,
     envelope_detect,
     get_band_pass_filter,
@@ -33,12 +34,7 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import (
-    apply_receive_chain,
-    elevation_slab_bucket,
-    simulate_rf,
-)
-from zea.simulator_time_domain import simulate_rf_td
+from zea.simulator import elevation_slab_bucket, simulate_rf, simulate_rf_td
 from zea.utils import canonicalize_axis
 
 # The simulators take different options, so the type checker cannot resolve the union.
@@ -65,7 +61,7 @@ class Simulate(Operation):
     with :func:`zea.simulator.transmit_pulse`), and the default pulse of that function without.
     ``element_height`` (all methods) defaults to an eighth of the width of a 1D probe. The
     simulators return noiseless RF; the receive chain (``noise_level_db``, ``tgc_max_db``,
-    ``noise_seed``, ``noise_reference``) is :func:`zea.simulator.apply_receive_chain`, applied
+    ``noise_seed``, ``noise_reference``) is :func:`zea.func.apply_receive_chain`, applied
     here for every method.
     """
 

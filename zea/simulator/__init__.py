@@ -49,6 +49,7 @@ more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_e
 
 """
 
+from zea.func.ultrasound import apply_receive_chain
 from zea.simulator.element import (
     attenuate,
     elevation_slab_bucket,
@@ -58,7 +59,7 @@ from zea.simulator.element import (
     select_elevation_slab,
     spread,
 )
-from zea.simulator.frequency_domain import apply_receive_chain, simulate_rf
+from zea.simulator.frequency_domain import simulate_rf
 from zea.simulator.pulse import (
     PULSE_MODELS,
     Pulse,

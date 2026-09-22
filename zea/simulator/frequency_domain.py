@@ -1,25 +1,16 @@
 """Frequency-domain RF simulator: the superposition of the scatterer responses on the rfft grid
 of the record, one transmit at a time."""
 
-import keras
-import numpy as np
 from keras import ops
 
 from zea.simulator.element import (
-    _apply_elevation_slab,
-    _element_responses,
-    _resolve_element_height,
-    _resolve_element_width,
-    _resolve_sub_elements,
-    _validate_baffle,
-    _validate_elevation,
-    _validate_lens,
     _validate_scatter_exponent,
-    _warn_if_elevation_extent,
-    min_distance,
+    element_model,
+    element_responses,
+    scene_scatterers,
 )
-from zea.simulator.pulse import _round_up_to_power_of_two, transmit_pulses
-from zea.simulator.record import delay2
+from zea.simulator.pulse import transmit_pulses
+from zea.simulator.record import delay2, in_fft, in_record, record_grid
 
 
 def simulate_rf(
@@ -59,7 +50,7 @@ def simulate_rf(
     which has the parametric models. Without it the default pulse of :func:`transmit_pulse` is
     used: a one-cycle burst at ``center_frequency`` through a 70 % Butterworth transducer.
     The RF is noiseless; electronic noise and time gain compensation are
-    :func:`apply_receive_chain`, which :class:`zea.ops.Simulate` applies.
+    :func:`zea.func.apply_receive_chain`, which :class:`zea.ops.Simulate` applies.
 
     Args:
         scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
@@ -114,7 +105,7 @@ def simulate_rf(
             be static under jit.
         element_normals (array-like, optional): Outward normal of each element of shape
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
-            evaluated in each element's own frame: the elevation axis is the projection of
+            evaluated in each element's own frame: the height axis is the projection of
             +y onto the element plane, so a normal must not be parallel to +y. None is every
             element facing +z. See :func:`zea.probes.curved_probe_normals`. With
             ``apply_lens_correction`` the lens is conformal: its face is normal to each element.
@@ -128,19 +119,17 @@ def simulate_rf(
             250 MHz in zea files and in :meth:`Pulse.waveform`. Must be static under jit.
         n_sub_elements (optional): Sub-elements per element, summed coherently with their own
             distance and sinc directivity so the response holds in the near field. A pair
-            (n_lateral, n_elevation), an int for the lateral count, or ``"auto"`` for the SIMUS
-            rule ceil(size / lambda_min) in both directions, with lambda_min at the top of the
-            -6 dB band of the transmit pulse (SIMUS takes the transducer band, which is a
+            (n_width, n_height), an int for the count along the width, or ``"auto"`` for the
+            SIMUS rule ceil(size / lambda_min) in both directions, with lambda_min at the top of
+            the -6 dB band of the transmit pulse (SIMUS takes the transducer band, which is a
             little wider than that of a one-cycle burst through it). None is a single
-            sub-element, except in elevation when
-            ``elevation_focus`` is set, which then follows the auto rule. Must be static under
-            jit.
+            sub-element, except along the height when ``elevation_focus`` is set, which then
+            follows the auto rule. Must be static under jit.
         elevation_focus (float, optional): Focal distance [m] of a fixed elevation lens, modelled
-            on transmit and on receive through the elevation sub-elements: an ideal focusing
-            advance per sub-element, or with ``apply_lens_correction`` the refracted path through
-            the lens thickness profile. Exclusive with ``elevation_slab_2d``, the cheap 2D
-            approximation of an elevation lens. Must be static under
-            jit.
+            on transmit and on receive through the sub-elements along the height: an ideal
+            focusing advance per sub-element, or with ``apply_lens_correction`` the refracted
+            path through the lens thickness profile. Exclusive with ``elevation_slab_2d``, the
+            cheap 2D approximation of an elevation lens. Must be static under jit.
         lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
             sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
             the aperture where the lens is thick and lowers the centre frequency.
@@ -149,162 +138,83 @@ def simulate_rf(
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
 
     """
-
     _validate_scatter_exponent(scatter_exponent)
-    _validate_baffle(baffle_impedance_ratio)
-    _validate_elevation(elevation_slab_2d, elevation_focus)
-
     n_tx = t0_delays.shape[0]
-
-    element_width = _resolve_element_width(probe_geometry, element_width)
-    element_height = _resolve_element_height(probe_geometry, element_width, element_height)
-    _validate_lens(
-        apply_lens_correction,
-        lens_thickness,
-        lens_sound_speed,
-        sound_speed,
-        elevation_focus,
-        element_height,
-    )
     pulses = transmit_pulses(
         n_tx, center_frequency, sampling_frequency, waveforms_two_way, waveform_sampling_frequency
     )
-    n_sub_elements = _resolve_sub_elements(
-        n_sub_elements,
-        elevation_focus,
-        element_width,
-        element_height,
+    model = element_model(
+        probe_geometry,
         sound_speed,
-        max(pulse.band[1] for pulse in pulses),
+        center_frequency,
+        pulses,
+        element_width=element_width,
+        element_height=element_height,
+        attenuation_coef=attenuation_coef,
+        apply_lens_correction=apply_lens_correction,
+        lens_thickness=lens_thickness,
+        lens_sound_speed=lens_sound_speed,
+        elevation_slab_2d=elevation_slab_2d,
+        baffle_impedance_ratio=baffle_impedance_ratio,
+        element_normals=element_normals,
+        n_sub_elements=n_sub_elements,
+        elevation_focus=elevation_focus,
+        lens_attenuation_coef=lens_attenuation_coef,
     )
+    positions, magnitudes = scene_scatterers(scatterer_positions, scatterer_magnitudes, model)
+    if positions.shape[0] == 0:
+        # tensorflow can't reduce over an empty axis.
+        return ops.zeros((n_tx, int(n_ax), model.geometry.shape[0], 1), dtype="float32")
 
-    magnitudes = scatterer_magnitudes
-    if elevation_slab_2d:
-        _warn_if_elevation_extent(probe_geometry)
-        scatterer_positions, magnitudes = _apply_elevation_slab(
-            scatterer_positions, magnitudes, probe_geometry, element_height
-        )
-
-    # tensorflow can't reduce over an empty axis.
-    if scatterer_positions.shape[0] == 0:
-        shape = (t0_delays.shape[0], int(n_ax), probe_geometry.shape[0], 1)
-        return ops.zeros(shape, dtype="float32")
-
-    # Phantoms are float64. Cast manually so tensorflow doesn't complain.
-    scatterer_positions = ops.cast(scatterer_positions, "float32")
-    magnitudes = ops.cast(magnitudes, "float32")
-
-    # Room for a whole pulse, so record_length below never gates the end of the record away.
-    n_pulse = max(pulse.n_samples for pulse in pulses)
-    n_ax_rounded = float(_round_up_to_power_of_two(int(n_ax) + n_pulse))
-    freqs_np = np.fft.rfftfreq(int(n_ax_rounded), 1 / pulses[0].sampling_frequency)
-    freqs = ops.convert_to_tensor(freqs_np.astype(np.float32))
-    waveform_spectra = {}
-    for pulse in pulses:
-        if pulse not in waveform_spectra:
-            waveform_spectra[pulse] = ops.convert_to_tensor(pulse.spectrum(freqs_np))
-
-    if scatter_exponent:
-        scatter_gain = (freqs / center_frequency) ** scatter_exponent
-    else:
-        scatter_gain = ops.ones_like(freqs)
+    record = record_grid(n_ax, sampling_frequency, pulses)
+    freqs = ops.convert_to_tensor(record.freqs)
+    spectra = {pulse: record.spectrum(pulse) for pulse in pulses}
+    scatter_gain = _scatter_gain(freqs, center_frequency, scatter_exponent)
 
     # [n_scat, n_el, n_freq]
-    tx_response, rx_response, dist = _element_responses(
-        scatterer_positions,
-        probe_geometry,
-        freqs,
-        sound_speed,
-        element_width,
-        element_height,
-        attenuation_coef,
-        lens_thickness,
-        lens_sound_speed,
-        apply_lens_correction,
-        elevation_slab_2d,
-        baffle_impedance_ratio,
-        element_normals,
-        n_sub_elements,
-        elevation_focus,
-        lens_attenuation_coef,
-        min_distance(sound_speed, center_frequency),
-    )
-    # One-way delays past the FFT length are gated, as delay2 does for the transmit shifts.
-    in_fft = ops.cast(dist / sound_speed < n_ax_rounded / sampling_frequency, "complex64")
-    tx_response = tx_response * in_fft[..., None]
-    rx_response = rx_response * in_fft[..., None]
+    tx_response, rx_response, travel_time = element_responses(positions, model, freqs)
+    fits = in_fft(record, travel_time)
+    tx_response = tx_response * fits[..., None]
+    rx_response = rx_response * fits[..., None]
 
-    # Leave room for the pulse tail
-    n_after = max(pulse.n_after for pulse in pulses)
-    record_length = (n_ax_rounded - n_after) / pulses[0].sampling_frequency
-    travel_time = dist / sound_speed
     parts = []
     for tx in range(n_tx):
-        shifts_not_travel_related = t0_delays[tx][:, None] - initial_times[tx] + t_peak[tx]
-
-        tx_delay = delay2(freqs[None], shifts_not_travel_related, n_ax_rounded, sampling_frequency)
-        tx_element_weights = ops.cast(tx_apodizations[tx][:, None], "complex64") * tx_delay
-
-        # delay2 only gates one-way delays. Worst case over the active transmit elements,
-        # to never alias in ops.irfft.
-        tx_arrival = ops.max(
-            ops.where(
-                tx_apodizations[tx][None] != 0,
-                travel_time + shifts_not_travel_related[None, :, 0],
-                -float("inf"),
-            ),
-            axis=1,
-        )
-        within_record = ops.cast(tx_arrival[:, None] + travel_time < record_length, "complex64")
+        shift = _transmit_shift(t0_delays[tx], initial_times[tx], t_peak[tx])
+        weights = _transmit_weights(record, freqs, shift, tx_apodizations[tx])
+        arrival = _transmit_arrival(travel_time, shift, tx_apodizations[tx])
+        fits = in_record(record, arrival[:, None] + travel_time)
 
         # Explicitly sum over tx dimension before the receive axis exists.
-        incident_field = ops.sum(tx_response * tx_element_weights[None], axis=1)
+        incident_field = ops.sum(tx_response * weights[None], axis=1)
         scattered_field = incident_field * ops.cast(magnitudes[:, None] * scatter_gain, "complex64")
-        received_field = scattered_field[:, None] * rx_response * within_record[..., None]
-        rf_spectrum = waveform_spectra[pulses[tx]] * ops.sum(received_field, axis=0)
+        received_field = scattered_field[:, None] * rx_response * fits[..., None]
+        rf_spectrum = spectra[pulses[tx]] * ops.sum(received_field, axis=0)
         parts.append(ops.irfft((ops.real(rf_spectrum), ops.imag(rf_spectrum))))
 
-    rf_data = ops.stack(parts, axis=0)
-    rf_data = ops.transpose(rf_data, (0, 2, 1))
-    rf_data = rf_data[..., None]
-    return rf_data[:, :n_ax, :, :]
+    rf_data = ops.transpose(ops.stack(parts, axis=0), (0, 2, 1))[..., None]
+    return rf_data[:, : record.n_ax]
 
 
-def apply_receive_chain(
-    rf_data, noise_level_db=None, tgc_max_db=0.0, noise_seed=0, noise_reference=None
-):
-    """Add electronic noise and time gain compensation to noiseless RF.
+def _scatter_gain(freqs, center_frequency, scatter_exponent):
+    """The frequency dependence of the scattering, ``(f / fc) ** scatter_exponent``."""
+    if scatter_exponent:
+        return (freqs / center_frequency) ** scatter_exponent
+    return ops.ones_like(freqs)
 
-    Args:
-        rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1), optionally with a
-            leading batch axis.
-        noise_level_db (float): Noise floor in dB below the peak of ``rf_data``. None disables
-            the noise. Must be static when using jit compilation.
-        tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Must be static when
-            using jit compilation.
-        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. An int
-            is stateless, so the same value gives the same realisation; vary it across transmit
-            batches. None draws from the global generator and cannot be traced under jit.
-        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
-            ``rf_data`` maximum. Pass a fixed reference to avoid the noise level changing per
-            transmit batch.
 
-    Returns:
-        array-like: RF with same shape as ``rf_data``.
-    """
-    dtype = keras.backend.standardize_dtype(rf_data.dtype)
+def _transmit_shift(t0_delays, initial_time, t_peak):
+    """The delay [s] of every element's pulse in one transmit, (n_el, 1), apart from its travel."""
+    return t0_delays[:, None] - initial_time + t_peak
 
-    if noise_level_db is not None and noise_level_db > -float("inf"):
-        if noise_reference is None:
-            # When passing a batch, normalize noise level per item instead of per batch
-            noise_reference = ops.max(ops.abs(rf_data), axis=(-4, -3, -2, -1), keepdims=True)
-        sigma = noise_reference * 10.0 ** (noise_level_db / 20.0)
-        noise = keras.random.normal(ops.shape(rf_data), dtype=dtype, seed=noise_seed)
-        rf_data = rf_data + ops.cast(sigma, dtype) * noise
 
-    if tgc_max_db:
-        n_ax = int(ops.shape(rf_data)[-3])
-        ramp = ops.arange(n_ax, dtype=dtype) / max(n_ax - 1, 1)
-        rf_data = rf_data * ops.reshape(10.0 ** (tgc_max_db * ramp / 20.0), (n_ax, 1, 1))
+def _transmit_weights(record, freqs, shift, tx_apodization):
+    """Apodization and delay of every element in one transmit, (n_el, n_freq) complex."""
+    delay = delay2(freqs[None], shift, record.n_fft, record.sampling_frequency)
+    return ops.cast(tx_apodization[:, None], "complex64") * delay
 
-    return rf_data
+
+def _transmit_arrival(travel_time, shift, tx_apodization):
+    """The latest one-way arrival [s] of one transmit at every scatterer, (n_scat,), over its
+    active elements: :func:`delay2` only gates one-way delays, so this gates the round trip."""
+    delays = ops.where(tx_apodization[None] != 0, travel_time + shift[None, :, 0], -float("inf"))
+    return ops.max(delays, axis=1)

@@ -5,10 +5,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import numpy as np
-from keras import ops
 from scipy.signal import hilbert
 from scipy.special import fresnel
 
+from zea.internal.core import concrete, round_up_to_power_of_two
 
 PULSE_MODELS = ("realistic", "hann", "simus")
 
@@ -60,7 +60,7 @@ class Pulse:
             n_after = self.n_after
         else:
             n_before = n_after = self.n_samples // 2
-        n_fft = int(_round_up_to_power_of_two(2 * (n_before + n_after + 1)))
+        n_fft = round_up_to_power_of_two(2 * (n_before + n_after + 1))
         freqs = np.fft.rfftfreq(n_fft, 1 / self.sampling_frequency)
         waveform = np.fft.irfft(self.spectrum_fn(freqs), n_fft)
         return np.roll(waveform, n_before)[: n_before + n_after + 1].astype(np.float32)
@@ -81,7 +81,7 @@ def transmit_pulse(
     """The parametric two-way (pulse-echo) transmit pulse: excitation times transducer response.
 
     Its :meth:`Pulse.waveform` is the ``waveforms_two_way`` of :func:`simulate_rf`,
-    :func:`zea.simulator_time_domain.simulate_rf_td` and :class:`zea.ops.Simulate`, which use
+    :func:`simulate_rf_td` and :class:`zea.ops.Simulate`, which use
     the default pulse of this function when none is given::
 
         pulse = transmit_pulse(5e6, pulse_model="simus", bandwidth_percent=75.0)
@@ -263,7 +263,7 @@ def _calibrate(
     ``oversample`` times finer than ``sampling_frequency`` so that none of it depends on it.
     ``trigger`` is the time [s] of the transmit trigger in the frame of ``spectrum_fn``."""
     fs = oversample * sampling_frequency
-    n = int(_round_up_to_power_of_two(max(4 * duration * fs, 256)))
+    n = round_up_to_power_of_two(max(4 * duration * fs, 256))
     while True:
         freqs = np.fft.rfftfreq(n, 1 / fs)
         waveform = np.fft.irfft(spectrum_fn(freqs), n)
@@ -296,7 +296,7 @@ def _calibrate(
 
 
 def _static_float(x, name):
-    value = _concrete(x)
+    value = concrete(x)
     if value is None:
         raise ValueError(
             f"{name} must be static (not traced): the transmit pulse is built in numpy."
@@ -438,18 +438,3 @@ def butterworth_transfer(f, fc, bandwidth_percent, order=2):
     q = np.asarray(1j * (w**2 - w0_squared) / (band * w_safe))
     poles = np.exp(1j * np.pi * (2 * np.arange(1, order + 1) + order - 1) / (2 * order))
     return np.where(w == 0, 0.0, np.prod(1 / (q[..., None] - poles), axis=-1))
-
-
-def _round_up_to_power_of_two(x):
-    """Rounds up to the next power of two."""
-    return 2 ** np.ceil(np.log2(x))
-
-
-def _concrete(x):
-    """numpy view of ``x``, or None when it is traced."""
-    if x is None:
-        return None
-    try:
-        return ops.convert_to_numpy(x)
-    except (RuntimeError, ValueError, TypeError, NotImplementedError):
-        return None

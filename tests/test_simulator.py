@@ -12,17 +12,18 @@ from zea import Parameters, Probe, display
 from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
-from zea.simulator import (
-    apply_receive_chain,
-    elevation_slab_bucket,
-    select_elevation_slab,
-    simulate_rf,
-    transmit_pulse,
-)
+from zea.func import apply_receive_chain
 from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
 from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
-from zea.simulator.time_domain import _scattered_waveform, simulate_rf_td
+from zea.simulator import (
+    elevation_slab_bucket,
+    select_elevation_slab,
+    simulate_rf,
+    simulate_rf_td,
+    transmit_pulse,
+)
+from zea.simulator.time_domain import _scattered_waveform
 
 N_EL = 80
 APERTURE = 32e-3

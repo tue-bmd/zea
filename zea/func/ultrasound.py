@@ -772,6 +772,46 @@ def make_tgc_curve(n_ax, attenuation_coef, sampling_frequency, center_frequency,
     return tgc_gain_curve.astype(np.float32)
 
 
+def apply_receive_chain(
+    rf_data, noise_level_db=None, tgc_max_db=0.0, noise_seed=0, noise_reference=None
+):
+    """Add electronic noise and time gain compensation to noiseless RF, such as the simulators'.
+
+    Args:
+        rf_data (array-like): Noiseless RF of shape (n_tx, n_ax, n_el, 1), optionally with a
+            leading batch axis.
+        noise_level_db (float): Noise floor in dB below the peak of ``rf_data``. None disables
+            the noise. Must be static when using jit compilation.
+        tgc_max_db (float): Gain in dB at the last axial sample. 0 disables it. Must be static when
+            using jit compilation.
+        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. An int
+            is stateless, so the same value gives the same realisation; vary it across transmit
+            batches. None draws from the global generator and cannot be traced under jit.
+        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
+            ``rf_data`` maximum. Pass a fixed reference to avoid the noise level changing per
+            transmit batch.
+
+    Returns:
+        array-like: RF with same shape as ``rf_data``.
+    """
+    dtype = keras.backend.standardize_dtype(rf_data.dtype)
+
+    if noise_level_db is not None and noise_level_db > -float("inf"):
+        if noise_reference is None:
+            # When passing a batch, normalize noise level per item instead of per batch
+            noise_reference = ops.max(ops.abs(rf_data), axis=(-4, -3, -2, -1), keepdims=True)
+        sigma = noise_reference * 10.0 ** (noise_level_db / 20.0)
+        noise = keras.random.normal(ops.shape(rf_data), dtype=dtype, seed=noise_seed)
+        rf_data = rf_data + ops.cast(sigma, dtype) * noise
+
+    if tgc_max_db:
+        n_ax = int(ops.shape(rf_data)[-3])
+        ramp = ops.arange(n_ax, dtype=dtype) / max(n_ax - 1, 1)
+        rf_data = rf_data * ops.reshape(10.0 ** (tgc_max_db * ramp / 20.0), (n_ax, 1, 1))
+
+    return rf_data
+
+
 def dehaze_nuclear_diffusion(
     hazy_video,
     diffusion_model,

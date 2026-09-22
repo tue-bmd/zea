@@ -16,17 +16,18 @@ from zea.simulator import (
     measured_pulse,
     obliquity_factor,
     simulate_rf,
+    simulate_rf_td,
     square_burst_pulses,
     square_burst_spectrum,
     transmit_pulse,
     transmit_pulses,
 )
 from zea.simulator.element import (
-    _element_responses,
     _resolve_element_height,
     _resolve_sub_elements,
+    element_model,
+    element_responses,
 )
-from zea.simulator_time_domain import simulate_rf_td
 
 SOUND_SPEED = 1540.0
 CENTER_FREQUENCY = 3e6
@@ -703,21 +704,23 @@ def test_lens_spreading_matches_the_sommerfeld_slab():
     y = np.concatenate([np.linspace(-6e-3, 6e-3, 13), np.zeros(4)])
     z = np.concatenate([np.full(13, 20e-3), [5e-3, 10e-3, 30e-3, 40e-3]])
     positions = np.stack([np.zeros_like(y), y, z], -1).astype(np.float32)
-    _, rx, _ = _element_responses(
-        ops.convert_to_tensor(positions),
-        ops.convert_to_tensor(np.zeros((1, 3), np.float32)),
-        ops.convert_to_tensor(np.array([CENTER_FREQUENCY], np.float32)),
+    model = element_model(
+        np.zeros((1, 3), np.float32),
         SOUND_SPEED,
-        0.1e-3,
-        height,
-        0.0,
-        thickness,
-        c_lens,
-        True,
-        False,
-        True,
-        None,
+        CENTER_FREQUENCY,
+        [transmit_pulse(CENTER_FREQUENCY, SAMPLING_FREQUENCY)],
+        element_width=0.1e-3,
+        element_height=height,
+        attenuation_coef=0.0,
+        apply_lens_correction=True,
+        lens_thickness=thickness,
+        lens_sound_speed=c_lens,
         n_sub_elements=(1, n_sub),
+    )
+    _, rx, _ = element_responses(
+        ops.convert_to_tensor(positions),
+        model,
+        ops.convert_to_tensor(np.array([CENTER_FREQUENCY], np.float32)),
     )
     simulated = np.abs(_np(rx)[:, 0, 0])
     offsets = (np.arange(n_sub) - (n_sub - 1) / 2) * height / n_sub
