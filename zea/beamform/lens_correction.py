@@ -3,9 +3,10 @@ r"""Lens-corrected delay computation for ultrasound beamforming.
 The acoustic lens fitted over most ultrasound probes has a lower speed of
 sound than the surrounding medium (tissue / water), ~1000 m/s versus 1540 m/s,
 which shortens the travel time near the face of the transducer and alters
-the effective focus. We assume a flat lens with uniform thickness and
-speed of sound. The simulator applies these functions per sub-element with the
-local thickness of a focusing lens, see :func:`zea.simulator.simulate_rf`.
+the effective focus. We assume a lens of uniform thickness and speed of sound, flat
+unless element normals are given, in which case it is conformal to the elements. The
+simulator applies these functions per sub-element with the local thickness of a focusing
+lens, see :func:`zea.simulator.simulate_rf`.
 
 The corrected one-way travel time from each transducer element to each image
 pixel is computed by finding the lateral crossing point :math:`x_l` on the
@@ -38,13 +39,13 @@ from keras import ops
 
 
 def compute_lens_corrected_travel_times(
-    element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter=1
+    element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter=1, element_normals=None
 ):
     """Compute the travel time of the shortest path between the element and the pixel.
 
     .. note::
 
-        This function assumes a flat array geometry.
+        Without ``element_normals`` this function assumes a flat array geometry.
 
     Args:
         element_pos (ndarray): The position of the element of shape (n_el, 3).
@@ -53,21 +54,26 @@ def compute_lens_corrected_travel_times(
         c_lens (float): The speed of sound in the lens in m/s.
         c_medium (float): The speed of sound in the medium in m/s.
         n_iter (int): The number of iterations to run the Newton-Raphson method.
+        element_normals (ndarray, optional): Outward normal of each element of shape (n_el, 3)
+            or (1, 3), for curved or tilted arrays. The lens face is then normal to each
+            element (a conformal lens) instead of to z.
 
     Returns:
         ndarray: The travel times of shape (n_pixels, n_el).
     """
     lens_length, medium_length = compute_lens_path_lengths(
-        element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter
+        element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter, element_normals
     )
     return lens_length / c_lens + medium_length / c_medium
 
 
-def compute_lens_path_lengths(element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter=1):
+def compute_lens_path_lengths(
+    element_pos, pixel_pos, lens_thickness, c_lens, c_medium, n_iter=1, element_normals=None
+):
     """Lengths of the two legs of the shortest path: inside the lens and in the medium.
 
     Same assumptions as :func:`compute_lens_corrected_travel_times`. The lens face lies at
-    ``lens_thickness`` above the element along z.
+    ``lens_thickness`` above the element along its normal, z without ``element_normals``.
 
     Returns:
         tuple: (lens_length, medium_length), each of shape (n_pixels, n_el) [m].
@@ -75,10 +81,16 @@ def compute_lens_path_lengths(element_pos, pixel_pos, lens_thickness, c_lens, c_
     pixel_pos = pixel_pos[:, None] - element_pos[None]
 
     # Project the 3D problem to a 2D problem by shifting all pixels to have the element
-    # in the origin and then projecting the positions to the plane spanned by
-    # [pixel_x-element_x, pixel_z-element_z, 0], [0, 0, 1]
-    xs = ops.norm(pixel_pos[..., :2], axis=-1)
-    zs = pixel_pos[..., -1]
+    # in the origin and then projecting the positions to the plane spanned by the element
+    # normal and the pixel's offset across it.
+    if element_normals is None:
+        xs = ops.norm(pixel_pos[..., :2], axis=-1)
+        zs = pixel_pos[..., -1]
+    else:
+        normals = ops.cast(element_normals, pixel_pos.dtype)
+        normals = normals / ops.norm(normals, axis=-1, keepdims=True)
+        zs = ops.sum(pixel_pos * normals[None], axis=-1)
+        xs = ops.norm(pixel_pos - zs[..., None] * normals[None], axis=-1)
 
     pixel_pos_2d = ops.stack([xs, zs], axis=-1)
     element_pos_2d = ops.zeros((1, element_pos.shape[0], 2))

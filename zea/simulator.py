@@ -169,8 +169,8 @@ def simulate_rf(
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
             evaluated in each element's own frame: the elevation axis is the projection of
             +y onto the element plane, so a normal must not be parallel to +y. None is every
-            element facing +z. See :func:`zea.probes.curved_probe_normals`. The lens correction
-            keeps assuming a flat lens.
+            element facing +z. See :func:`zea.probes.curved_probe_normals`. With
+            ``apply_lens_correction`` the lens is conformal: its face is normal to each element.
         waveforms_two_way (array-like, optional): Two-way (pulse-echo) transmit waveforms of
             shape (n_tx, n_samples), or (n_samples,) for one waveform for every transmit,
             sampled at ``waveform_sampling_frequency``. The envelope peak of the waveform is
@@ -650,7 +650,9 @@ def _element_responses(
     n_sub = n_lateral * n_elevation
     relative_center = positions[:, None] - geometry[None]
     dtype = relative_center.dtype
-    lateral_axis, elevation_axis, _ = frame = _element_frame(element_normals, dtype)
+    lateral_axis, elevation_axis, normal = frame = _element_frame(element_normals, dtype)
+    # A conformal lens on a curved probe: its face is normal to each element.
+    lens_normals = None if element_normals is None else normal
     dist_center = ops.linalg.norm(relative_center, axis=-1)
     if apply_lens_correction:
         dist = (
@@ -661,6 +663,7 @@ def _element_responses(
                 c_lens=lens_sound_speed,
                 c_medium=sound_speed,
                 n_iter=3,
+                element_normals=lens_normals,
             )
             * sound_speed
         )
@@ -696,6 +699,7 @@ def _element_responses(
                 c_lens=lens_sound_speed,
                 c_medium=sound_speed,
                 n_iter=3,
+                element_normals=lens_normals,
             )
             sub_dist = lens_len * (sound_speed / lens_sound_speed) + medium_len
             spread_dist = _lens_spread_distance(
