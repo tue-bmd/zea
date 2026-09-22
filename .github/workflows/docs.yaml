@@ -6,6 +6,9 @@
 # while publishing the *old* docs -- nothing shows up as failed, the docs are
 # just silently stale. We therefore make Read the Docs re-read the refs first,
 # wait until the version resolves to the pushed commit, and only then build.
+#
+# Requires an `RTD_TOKEN` secret: a Read the Docs API token for a maintainer of
+# the project (https://app.readthedocs.org/accounts/tokens/).
 name: Rebuild Docs
 
 on:
@@ -42,6 +45,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Require RTD_TOKEN
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          if [ -z "${RTD_TOKEN}" ]; then
+            echo "::error::RTD_TOKEN is not set; the Read the Docs API would reject every call"
+            exit 1
+          fi
+
       - name: Resolve tag
         id: tag
         env:
@@ -66,7 +78,7 @@ jobs:
           EXPECTED: ${{ steps.tag.outputs.sha }}
         run: |
           python3 - <<'PY'
-          import json, os, time, urllib.request
+          import json, os, time, urllib.error, urllib.request
 
           PROJECT = os.environ["RTD_PROJECT"]
           VERSION = os.environ["VERSION"]
@@ -91,6 +103,9 @@ jobs:
                           body = response.read()
                       return json.loads(body) if body else {}
                   except Exception as error:
+                      # A rejected token will not start working on the next attempt.
+                      if isinstance(error, urllib.error.HTTPError) and error.code in (401, 403):
+                          fail(f"Read the Docs rejected RTD_TOKEN ({error.code}) for {method} {path}")
                       print(f"  {method} {path} failed: {error}")
                       if attempt == attempts:
                           fail(f"Read the Docs API kept failing for {method} {path}")
