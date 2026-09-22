@@ -13,6 +13,7 @@ from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
 from zea.simulator import (
+    apply_receive_chain,
     elevation_slab_bucket,
     select_elevation_slab,
     simulate_rf,
@@ -453,7 +454,8 @@ def test_record_length_gate_keeps_in_record_pairs_without_aliasing():
 
 def _receive_chain_image(fish_scan, simulator, **receive_chain_kwargs):
     _, simulation_args, beamform = fish_scan
-    return beamform(simulator(**simulation_args, noise_seed=0, **receive_chain_kwargs))
+    rf = simulator(**simulation_args)
+    return beamform(apply_receive_chain(rf, noise_seed=0, **receive_chain_kwargs))
 
 
 @pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
@@ -543,17 +545,14 @@ def test_batched_receive_chain_matches_unbatched(fish_scan):
     positions = np.asarray(simulation_args["scatterer_positions"], dtype=np.float32)[:16]
 
     batched = _batched_rf(simulation_args, 2, noise_level_db=None, tgc_max_db=50.0)
-    single = keras.ops.convert_to_numpy(
-        simulate_rf(
-            **{
-                **simulation_args,
-                "scatterer_positions": positions,
-                "scatterer_magnitudes": np.ones(len(positions), dtype=np.float32),
-            },
-            noise_level_db=None,
-            tgc_max_db=50.0,
-        )
+    single = simulate_rf(
+        **{
+            **simulation_args,
+            "scatterer_positions": positions,
+            "scatterer_magnitudes": np.ones(len(positions), dtype=np.float32),
+        }
     )
+    single = keras.ops.convert_to_numpy(apply_receive_chain(single, tgc_max_db=50.0))
 
     # ops.map reduces in a different order, so compare against the RF peak.
     scale = np.abs(single).max()

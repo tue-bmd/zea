@@ -78,13 +78,9 @@ def simulate_rf(
     attenuation_coef,
     tx_apodizations,
     t_peak,
+    *,
     elevation_slab_2d=False,
     element_height=None,
-    max_chunk_gb=10.0,
-    noise_level_db=None,
-    tgc_max_db=0.0,
-    noise_seed=0,
-    noise_reference=None,
     scatter_exponent=2.0,
     baffle_impedance_ratio=0.0,
     element_normals=None,
@@ -101,6 +97,8 @@ def simulate_rf(
     (the Verasonics ``TW.Wvfm2Wy``), a measured one, or one built with :func:`transmit_pulse`,
     which has the parametric models. Without it the default pulse of :func:`transmit_pulse` is
     used: a one-cycle burst at ``center_frequency`` through a 70 % Butterworth transducer.
+    The RF is noiseless; electronic noise and time gain compensation are
+    :func:`apply_receive_chain`, which :class:`zea.ops.Simulate` applies.
 
     Args:
         scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
@@ -139,17 +137,6 @@ def simulate_rf(
         element_height (float): The elevation height of the elements [m], used for the
             elevation directivity and the elevation slab. If None, an eighth of the width of a
             1D probe (at least ``element_width``), or ``element_width`` for a 2D probe.
-        max_chunk_gb (float): Unused here; accepted so :func:`simulate_rf` and
-            :func:`zea.simulator_time_domain.simulate_rf_td` share a call signature.
-        noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
-            maximum. None disables the noise. Must be static under jit.
-        tgc_max_db (float): Time gain compensation in dB at the last axial sample, ramped
-            linearly in dB from 0 at the first. 0 disables it. Must be static under jit.
-        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. Vary it
-            across transmit batches to keep the realisations independent.
-        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
-            noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
-            transmit batch. See :func:`apply_receive_chain`.
         scatter_exponent (float): Weigh the scattered field by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
@@ -240,13 +227,7 @@ def simulate_rf(
     # tensorflow can't reduce over an empty axis.
     if scatterer_positions.shape[0] == 0:
         shape = (t0_delays.shape[0], int(n_ax), probe_geometry.shape[0], 1)
-        return apply_receive_chain(
-            ops.zeros(shape, dtype="float32"),
-            noise_level_db,
-            tgc_max_db,
-            noise_seed,
-            noise_reference,
-        )
+        return ops.zeros(shape, dtype="float32")
 
     # Phantoms are float64. Cast manually so tensorflow doesn't complain.
     scatterer_positions = ops.cast(scatterer_positions, "float32")
@@ -325,8 +306,7 @@ def simulate_rf(
     rf_data = ops.stack(parts, axis=0)
     rf_data = ops.transpose(rf_data, (0, 2, 1))
     rf_data = rf_data[..., None]
-    rf_data = rf_data[:, :n_ax, :, :]
-    return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed, noise_reference)
+    return rf_data[:, :n_ax, :, :]
 
 
 def apply_receive_chain(

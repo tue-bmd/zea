@@ -63,7 +63,10 @@ class Simulate(Operation):
     frequency-domain methods only; ``"time_approximation"`` does not model them. The transmit
     pulse is ``waveforms_two_way`` (the one of a :class:`zea.Parameters` or zea file, or built
     with :func:`zea.simulator.transmit_pulse`), and the default pulse of that function without.
-    ``element_height`` (all methods) defaults to an eighth of the width of a 1D probe.
+    ``element_height`` (all methods) defaults to an eighth of the width of a 1D probe. The
+    simulators return noiseless RF; the receive chain (``noise_level_db``, ``tgc_max_db``,
+    ``noise_seed``, ``noise_reference``) is :func:`zea.simulator.apply_receive_chain`, applied
+    here for every method.
     """
 
     # Define operation-specific static parameters
@@ -160,6 +163,8 @@ class Simulate(Operation):
                 elevation_focus=elevation_focus,
                 lens_attenuation_coef=lens_attenuation_coef,
             )
+        if method == "time_approximation":
+            simulate = functools.partial(simulate, max_chunk_gb=max_chunk_gb)
         simulate_kwargs = {
             "waveforms_two_way": waveforms_two_way,
             "waveform_sampling_frequency": waveform_sampling_frequency,
@@ -180,11 +185,6 @@ class Simulate(Operation):
             "elevation_slab_2d": elevation_slab_2d,
             "element_height": element_height,
             "scatter_exponent": scatter_exponent,
-            "max_chunk_gb": max_chunk_gb,
-            "noise_level_db": noise_level_db,
-            "tgc_max_db": tgc_max_db,
-            "noise_seed": noise_seed,
-            "noise_reference": noise_reference,
         }
         if not self.with_batch_dim:
             simulated_rf = simulate(
@@ -193,20 +193,18 @@ class Simulate(Operation):
                 **simulate_kwargs,
             )
         else:
-            # A stateless seed inside `map` repeats the same noise for every item, so instead, first
-            # simulate everything and then apply TGC and nosie.
-            mapped_kwargs = {**simulate_kwargs, "noise_level_db": None, "tgc_max_db": 0.0}
             simulated_rf = ops.map(
                 lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
-                    **mapped_kwargs,
+                    **simulate_kwargs,
                 ),
                 {"positions": scatterer_positions, "magnitudes": scatterer_magnitudes},
             )
-            simulated_rf = apply_receive_chain(
-                simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
-            )
+        # After the map: a stateless seed inside it would repeat the noise for every item.
+        simulated_rf = apply_receive_chain(
+            simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
+        )
 
         return {
             self.output_key: simulated_rf,
