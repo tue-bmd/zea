@@ -56,6 +56,7 @@ exclude_patterns = [
     "_autosummary/zea.func.ultrasound.rst",
     "_autosummary/zea.func.usct.rst",
     "_autosummary/zea.ops.base.rst",
+    "_autosummary/zea.ops.imports.rst",
     "_autosummary/zea.ops.tensor.rst",
     "_autosummary/zea.ops.ultrasound.rst",
     "_autosummary/zea.ops.usct.rst",
