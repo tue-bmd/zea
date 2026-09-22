@@ -22,7 +22,7 @@ from zea.simulator import (
 from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
 from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
-from zea.simulator_time_domain import _scattered_waveform, simulate_rf_td
+from zea.simulator.time_domain import _scattered_waveform, simulate_rf_td
 
 N_EL = 80
 APERTURE = 32e-3
