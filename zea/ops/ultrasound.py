@@ -1319,8 +1319,21 @@ class CommonMidpointPhaseError(Operation):
     def __init__(
         self,
         reshape_grid=True,
+        subaperture_half_elements=8,
+        subaperture_stride=1,
         **kwargs,
     ):
+        """
+        Args:
+            reshape_grid (bool): Reshape the flat pixel axis back onto the grid.
+            subaperture_half_elements (int): Subaperture half-width, in
+                elements. Both this and the stride are element counts, so the
+                aperture they span scales with pitch; set them from the pitch
+                to compare probes at a fixed physical size. Defaults to 8.
+            subaperture_stride (int): Spacing, in elements, between the
+                neighbouring subapertures whose phases are differenced.
+                Defaults to 1.
+        """
         super().__init__(
             input_data_type=None,
             # DataTypes.IMAGE, because we have an image of the phase map
@@ -1328,6 +1341,8 @@ class CommonMidpointPhaseError(Operation):
             **kwargs,
         )
         self.reshape_grid = reshape_grid
+        self.subaperture_half_elements = int(subaperture_half_elements)
+        self.subaperture_stride = int(subaperture_stride)
 
     def create_subapertures(self, data, halfsa, dx):
         """Create subapertures from the data.
@@ -1359,7 +1374,9 @@ class CommonMidpointPhaseError(Operation):
             phase_error_map (ops.Tensor): The phase error map.
         """
 
-        transmit_subaps, receive_subaps = self.create_subapertures(data, 8, 1)
+        transmit_subaps, receive_subaps = self.create_subapertures(
+            data, self.subaperture_half_elements, self.subaperture_stride
+        )
         complex_data = ops.view_as_complex(data)  # [n_tx, n_pix, n_rx, n_ch] -> [n_rtx, n_pix, r_x]
         complex_data = ops.transpose(complex_data, (2, 0, 1))  # [n_rx, n_tx, n_pix]
         rx_zero_count = ops.matmul(receive_subaps, ops.cast(complex_data == 0, "int32"))
