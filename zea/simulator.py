@@ -393,8 +393,9 @@ def obliquity_factor(cos_angle, baffle_impedance_ratio):
     """Obliquity factor of an element in a baffle of finite impedance, at the cosine of the
     angle to its normal: 1 in a rigid baffle (ratio 0), the cosine in a soft one (``inf``), and
     cos / (cos + ratio) in between, with the ratio the medium impedance over the baffle's
-    (Selfridge et al. 1980, as in SIMUS). With a non-rigid baffle, directions behind the
-    element get 0, not a pole.
+    (Pesque et al., IEEE Ultrasonics Symposium 1984, as in SIMUS; the soft-baffle cosine is
+    Selfridge et al. 1980). With a non-rigid baffle, directions behind the element get 0, not
+    a pole.
     """
     if baffle_impedance_ratio == 0:
         return ops.ones_like(cos_angle)
@@ -632,7 +633,8 @@ def _element_responses(
     lens_attenuation_coef=0.0,
     min_dist=0.0,
 ):
-    """Transmit and receive one-way responses [s, e, f] and the one-way path length [s, e].
+    """Transmit and receive one-way responses [scatterer, element, frequency_bin] and the
+    one-way path length [scatterer, element].
 
     Each element is the mean of ``n_sub_elements`` (lateral, elevation) sub-elements with their
     own distance, phase and sinc directivity, so the response holds in the near field too. The
