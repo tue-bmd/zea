@@ -26,6 +26,7 @@ from zea.data.spec import strip_track_prefix
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.internal.device import init_device
+from zea.ops.imports import import_ops_modules
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer, ProgressBar
 
@@ -232,6 +233,8 @@ def run_processing(
     revision: str | None = None,
     config_revision: str | None = None,
     track: str | None = None,
+    imports=(),
+    trust_remote_code: bool = False,
 ) -> None:
     if keep_dynamic_range and save_as != "hdf5":
         raise ValueError("--keep_dynamic_range is only supported with --save_as hdf5.")
@@ -241,11 +244,19 @@ def run_processing(
         raise ValueError(f"save_as must be one of {SUPPORTED_FORMATS}, got {save_as!r}")
 
     dataset_hf_kwargs = {"revision": revision} if revision is not None else {}
+    config_resolved_revision = config_revision if config_revision is not None else revision
     config_hf_kwargs = (
-        {"revision": config_revision if config_revision is not None else revision}
-        if (config_revision or revision)
-        else {}
+        {"revision": config_resolved_revision} if (config_revision or revision) else {}
     )
+
+    # Imported after init_device has run (custom operations may touch keras at import
+    # time) and before anything resolves an operation name.
+    import_ops_modules(
+        imports,
+        trust_remote_code=trust_remote_code,
+        revision=config_resolved_revision,
+    )
+
     config = Config.from_path(config_path, **config_hf_kwargs)
     config_params = _get_config_parameters(config)
 
@@ -277,7 +288,15 @@ def run_processing(
                     pass  # fall back to runtime slicing if the peek fails
 
     try:
-        pipeline = Pipeline.from_path(config_path, with_batch_dim=False, **config_hf_kwargs)
+        pipeline = Pipeline.from_path(
+            config_path,
+            with_batch_dim=False,
+            trust_remote_code=trust_remote_code,
+            **config_hf_kwargs,
+        )
+    # A missing/unbuildable pipeline is recoverable for keys that need no beamforming.
+    # Failures from the config's own ``imports`` are not: those raise RemoteCodeError /
+    # OpsModuleImportError, which deliberately fall outside this except clause.
     except (ValueError, KeyError) as exc:
         if _key_requires_pipeline(data_key):
             raise
