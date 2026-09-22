@@ -7,7 +7,9 @@ is the reference; :func:`simulate_rf_td` is its time-domain approximation.
 To use them in your code, simply call :func:`simulate_rf` with the desired transmit scheme
 parameters and scatterers. To simulate a sequence of multiple frames, you can call
 :func:`simulate_rf` repeatedly with different scatterer positions and magnitudes and then stack
-the results. :class:`zea.ops.Simulate` wraps both simulators for a :class:`zea.Pipeline`.
+the results. :class:`zea.ops.Simulate` wraps both simulators for a :class:`zea.Pipeline` and
+applies the receive chain (electronic noise and time gain compensation,
+:func:`zea.func.apply_receive_chain`) to the noiseless RF they return.
 
 The package is layered: :mod:`~zea.simulator.pulse` builds the transmit pulse,
 :mod:`~zea.simulator.element` the element model and its responses,

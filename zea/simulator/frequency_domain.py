@@ -1,5 +1,5 @@
 """Frequency-domain RF simulator: the superposition of the scatterer responses on the rfft grid
-of the record, one transmit at a time."""
+of the record, with the one-way responses shared by every transmit."""
 
 from keras import ops
 
@@ -42,14 +42,13 @@ def simulate_rf(
     elevation_focus=None,
     lens_attenuation_coef=0.0,
 ):
-    """
-    Simulates RF data for a given set of scatterers.
+    """Simulates RF data for a given set of scatterers.
 
     The two-way (pulse-echo) transmit pulse is ``waveforms_two_way``: the waveform of a zea file
     (the Verasonics ``TW.Wvfm2Wy``), a measured one, or one built with :func:`transmit_pulse`,
     which has the parametric models. Without it the default pulse of :func:`transmit_pulse` is
     used: a one-cycle burst at ``center_frequency`` through a 70 % Butterworth transducer.
-    The RF is noiseless; electronic noise and time gain compensation are
+    The RF is noiseless: electronic noise and time gain compensation are
     :func:`zea.func.apply_receive_chain`, which :class:`zea.ops.Simulate` applies.
 
     Args:
@@ -60,12 +59,12 @@ def simulate_rf(
             in front of the elements. Every sub-element's path refracts through it (Fermat), so
             the lens delay depends on the direction to the scatterer, and the lens attenuates
             with ``lens_attenuation_coef``. With ``elevation_focus`` the layer is a cylindrical
-            lens: ``lens_thickness`` at the element centre, thinned (``lens_sound_speed`` below
+            lens: ``lens_thickness`` at the element center, thinned (``lens_sound_speed`` below
             ``sound_speed``) or thickened towards the elevation edges so that the normal-incidence
             delay focuses at ``elevation_focus``. The lens face is taken locally flat under each
             sub-element, for the delay and for the spreading of the refracted wave, and the sinc
             directivity uses the geometric angle to the scatterer.
-        lens_thickness (float): The thickness of the lens [m] at the element centre.
+        lens_thickness (float): The thickness of the lens [m] at the element center.
         lens_sound_speed (float): The speed of sound in the lens [m/s].
         sound_speed (float): The speed of sound in the medium [m/s].
         n_ax (int): The number of samples in the RF data.
@@ -106,7 +105,7 @@ def simulate_rf(
         element_normals (array-like, optional): Outward normal of each element of shape
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
             evaluated in each element's own frame: the height axis is the projection of
-            +y onto the element plane, so a normal must not be parallel to +y. None is every
+            +y onto the element plane, so a normal must not point along the y axis. None is every
             element facing +z. See :func:`zea.probes.curved_probe_normals`. With
             ``apply_lens_correction`` the lens is conformal: its face is normal to each element.
         waveforms_two_way (array-like, optional): Two-way (pulse-echo) transmit waveforms of
@@ -132,11 +131,10 @@ def simulate_rf(
             cheap 2D approximation of an elevation lens. Must be static under jit.
         lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
             sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
-            the aperture where the lens is thick and lowers the centre frequency.
+            the aperture where the lens is thick and lowers the center frequency.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
-
     """
     _validate_scatter_exponent(scatter_exponent)
     n_tx = t0_delays.shape[0]

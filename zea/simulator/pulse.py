@@ -1,5 +1,5 @@
-"""The two-way transmit pulse of the simulators: parametric models, measured waveforms and
-their spectra, all in numpy."""
+"""The two-way transmit pulse of the simulators: the parametric models of :func:`transmit_pulse`,
+a measured waveform through :func:`measured_pulse`, and the spectra behind them."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -18,9 +18,9 @@ class Pulse:
     """Two-way transmit pulse of the simulators, with its envelope peak at ``t = 0``.
 
     Built by :func:`transmit_pulse` or :func:`measured_pulse`. ``spectrum_fn`` is the
-    continuous-time spectrum, scaled so
-    that ``irfft`` of its samples on an rfft grid of ``sampling_frequency`` recovers the waveform
-    with a unit peak. The support is where the envelope is above -80 dB.
+    continuous-time spectrum, scaled so that ``irfft`` of its samples on an rfft grid of
+    ``sampling_frequency`` recovers the waveform with a unit peak. The support is where the
+    envelope is above -80 dB.
     """
 
     spectrum_fn: Callable
@@ -81,8 +81,8 @@ def transmit_pulse(
     """The parametric two-way (pulse-echo) transmit pulse: excitation times transducer response.
 
     Its :meth:`Pulse.waveform` is the ``waveforms_two_way`` of :func:`simulate_rf`,
-    :func:`simulate_rf_td` and :class:`zea.ops.Simulate`, which use
-    the default pulse of this function when none is given::
+    :func:`simulate_rf_td` and :class:`zea.ops.Simulate`, which use the default pulse of this
+    function when none is given::
 
         pulse = transmit_pulse(5e6, pulse_model="simus", bandwidth_percent=75.0)
         rf = simulate_rf(..., waveforms_two_way=pulse.waveform())

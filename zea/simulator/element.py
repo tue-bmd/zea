@@ -1,4 +1,4 @@
-"""Transducer elements definitions for the simulators. Includes the resolved geometry and physics
+"""The transducer elements of the simulators: their resolved geometry and physics
 (:class:`ElementModel`), the one-way transmit and receive responses of every element to every
 scatterer (:func:`element_responses`), and the elevation slab of a 1D probe."""
 
@@ -18,14 +18,14 @@ from zea.internal.core import concrete
 
 
 def min_distance(sound_speed, center_frequency):
-    """The distance the simulator clamps the element-scatterer distance to for the phase and spread,
-    so that the 1 / r of a scatterer on an element stays finite."""
+    """Half a wavelength: the simulators clamp the element-scatterer distance to it for the
+    phase and the spreading, as SIMUS does, so that the 1 / r of a scatterer on an element stays
+    finite. The angles keep the true geometry."""
     return sound_speed / (2.0 * center_frequency)
 
 
 def attenuate(f, attenuation_coef, dist):
-    """
-    Applies attenuation to the signal in the frequency domain.
+    """Amplitude left after attenuation in the frequency domain.
 
     Args:
         f (array-like): The input frequencies.
@@ -83,9 +83,9 @@ def _validate_scatter_exponent(scatter_exponent):
 
 @dataclass(frozen=True)
 class ElementModel:
-    """The transducer as :func:`element_responses` sees it: the element positions and the
-    physics of one element, with the defaults of :func:`simulate_rf` resolved. Built by
-    :func:`element_model` once per simulator call.
+    """The element positions and the physics of one element, with the defaults of
+    :func:`simulate_rf` resolved. Built once per simulator call by :func:`element_model`, and
+    read by :func:`element_responses`.
 
     Attributes:
         geometry: Element positions [m], (n_el, 3) float32.
@@ -94,7 +94,7 @@ class ElementModel:
             :func:`simulate_rf`, resolved.
         apply_lens_correction, elevation_slab_2d: Static switches.
         baffle_impedance_ratio: Static float, see :func:`obliquity_factor`.
-        element_normals: Unit normals (n_el, 3), or None for +z.
+        element_normals: Outward normals (n_el, 3), or None for +z.
         n_sub_elements: Static (n_width, n_height), see :func:`_resolve_sub_elements`.
         elevation_focus: Static focal distance [m], or None.
     """
@@ -135,9 +135,9 @@ def element_model(
     elevation_focus=None,
     lens_attenuation_coef=0.0,
 ):
-    """The :class:`ElementModel` of the element arguments of :func:`simulate_rf`, validated and
-    with the defaults resolved: the element width from the pitch, the height from the width,
-    and the sub-element counts from the top of the band of ``pulses``."""
+    """Validate the element arguments of :func:`simulate_rf` and resolve their defaults: the
+    element width from the pitch, the height from the width, and the sub-element counts from
+    the top of the band of ``pulses``."""
     _validate_elevation(elevation_slab_2d, elevation_focus)
     _validate_baffle(baffle_impedance_ratio)
     element_width = _resolve_element_width(probe_geometry, element_width)
@@ -221,7 +221,7 @@ def _validate_lens(
     if thickness - sag <= 0:
         raise ValueError(
             f"lens_thickness {thickness:.2e} m is too thin to focus at {elevation_focus} m: the "
-            f"lens needs at least {sag:.2e} m at the centre."
+            f"lens needs at least {sag:.2e} m at the center."
         )
 
 
@@ -253,10 +253,10 @@ def _resolve_element_width(probe_geometry, element_width):
 
 
 def _resolve_element_height(probe_geometry, element_width, element_height, tol=1e-6):
-    """Return the element height, inferring it when not given: an eighth of the width of a 1D
-    probe (elements without elevation extent; n_el times the pitch), at least the element
-    width, and the element width for a 2D probe or a single element. Works on a traced
-    geometry, as a traced height; a Python float otherwise."""
+    """Element height, inferred when not given: an eighth of the probe width for a 1D probe (at
+    least the element width), and the element width for a 2D probe or a single element. The
+    probe width is n_el times the pitch. A traced geometry gives a traced height, a concrete
+    one a Python float."""
     if element_height is not None:
         return element_height
     n_el = int(probe_geometry.shape[0])
@@ -313,10 +313,11 @@ def _resolve_sub_elements(
 def element_responses(positions, model, freqs):
     """Transmit and receive one-way responses [scatterer, element, frequency_bin] of the
     elements of ``model`` to the scatterers at ``positions``, and the one-way travel time
-    [scatterer, element] from the element centres.
+    [scatterer, element] from the element centers.
 
-    Each element is the mean of its sub-elements, so the response holds in the near field.
-    The distances are clamped at ``model.min_dist`` for the phase and the spreading only.
+    Each element is the mean of its sub-elements, each with its own path, phase and sinc
+    directivity, so the response holds in the near field. The path is clamped at
+    ``model.min_dist`` for the phase and the spreading only.
     """
     dtype = positions.dtype
     frame = _element_frame(model.element_normals, dtype)
@@ -326,6 +327,8 @@ def element_responses(positions, model, freqs):
     f3 = freqs[None, None, :]
 
     def response(j):
+        """Receive response of sub-element ``j``, preceded by its transmit response under the
+        elevation slab, where the two differ."""
         path = _sub_element_path(positions, sub, j, model, lens_normals)
         amplitude = _sub_element_amplitude(f3, path, frame, sub, model)
         distance = ops.maximum(path.phase, model.min_dist)[..., None]
@@ -337,13 +340,13 @@ def element_responses(positions, model, freqs):
             return ops.cast(amplitude * gain, "complex64") * phase
 
         rx = with_spreading(1.0)
-        # An elevation lens focuses the transmit to a slab: cylindrical spread on the way out.
-        tx = with_spreading(0.5) if model.elevation_slab_2d else rx
-        return tx, rx
+        if not model.elevation_slab_2d:
+            return (rx,)
+        # An ideal elevation lens: cylindrical spread on the way out, spherical back.
+        return with_spreading(0.5), rx
 
-    shape = (ops.shape(positions)[0], ops.shape(model.geometry)[0], ops.shape(freqs)[0])
-    tx, rx = _mean_over_sub_elements(response, sub.n, shape)
-    return tx, rx, _travel_time(positions, model, lens_normals)
+    responses = _mean_over_sub_elements(response, sub.n)
+    return responses[0], responses[-1], _travel_time(positions, model, lens_normals)
 
 
 @dataclass(frozen=True)
@@ -357,9 +360,10 @@ class _Frame:
 
 
 def _element_frame(element_normals, dtype="float32"):
-    """The :class:`_Frame` of elements with the given normals, or +z for None.
+    """Element axes for the given normals, or for +z when None.
 
-    The height axis is +y projected onto the element plane, the width axis completes the frame.
+    The height axis is +y projected onto the element plane, and the width axis completes the
+    frame.
     """
     if element_normals is None:
         eye = ops.cast(ops.convert_to_tensor(np.eye(3, dtype=np.float32)), dtype)
@@ -376,7 +380,7 @@ def _element_frame(element_normals, dtype="float32"):
 @dataclass(frozen=True)
 class _SubElements:
     """The ``n`` sub-elements of every element, ``width`` by ``height`` [m] each. ``offsets``
-    (n, n_el or 1, 3) are their centres relative to the element centre, ``advance`` (n,) the
+    (n, n_el or 1, 3) are their centers relative to the element center, ``advance`` (n,) the
     focusing advance [s] of an ideal elevation lens at each, and ``thickness`` (n,) the lens
     thickness [m] under each, None without the lens."""
 
@@ -389,7 +393,7 @@ class _SubElements:
 
 
 def _sub_elements(model, frame, dtype):
-    """The :class:`_SubElements` of ``model`` in its element ``frame``."""
+    """Sub-element geometry of ``model``, with the offsets laid out along the axes of ``frame``."""
     n_width, n_height = model.n_sub_elements
     u, v = _sub_element_offsets(n_width, n_height, model.element_width, model.element_height)
     u, v = ops.cast(u, dtype), ops.cast(v, dtype)
@@ -417,10 +421,10 @@ def _sub_element_offsets(n_width, n_height, element_width, element_height):
 
 
 def _elevation_focusing(v, model):
-    """How the elevation focus acts on the sub-elements at height offsets ``v``: as the ideal
-    focusing advance [s] of each without the lens, or with it as the lens thickness [m] under
-    each, thinned towards the edges. Returns ``(advance, thickness)``, the latter None without
-    the lens."""
+    """Focusing advance [s] and lens thickness [m] of the sub-elements at height offsets ``v``.
+    Without the lens the focus is an ideal advance per sub-element and the thickness is None;
+    with it the advance is zero and the thickness profile, thinned towards the edges, does the
+    focusing."""
     advance = ops.zeros_like(v)
     if not model.apply_lens_correction:
         if model.elevation_focus is not None:
@@ -436,7 +440,7 @@ def _elevation_focusing(v, model):
 def _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed):
     """Thickness removed from the lens at height offset ``v`` to focus at ``elevation_focus``.
 
-    A slower lens is thickest at the centre, a faster one thinnest (negative sag).
+    A slower lens is thickest at the center, a faster one thinnest (negative sag).
     """
     focus = ops.cast(elevation_focus, v.dtype)
     path = ops.sqrt(focus**2 + v**2) - focus
@@ -458,8 +462,8 @@ class _Path:
 
 
 def _sub_element_path(positions, sub, j, model, lens_normals):
-    """The :class:`_Path` from sub-element ``j``: straight, or with the lens the shortest path
-    through its local thickness, whose leg counts ``sound_speed / lens_sound_speed`` times in
+    """Path from sub-element ``j`` to every scatterer: straight, or refracted through the lens
+    thickness under it, whose leg counts ``sound_speed / lens_sound_speed`` times in
     ``phase``."""
     vector = positions[:, None] - model.geometry[None] - sub.offsets[j][None]
     if not model.apply_lens_correction:
@@ -506,9 +510,9 @@ def _lens_spread_distance(lens_len, medium_len, thickness, sound_speed, lens_sou
 
 
 def _sub_element_amplitude(f3, path, frame, sub, model):
-    """The real amplitude over the frequencies ``f3`` (1, 1, n_freq) along ``path``: the sinc
-    directivity of the sub-element in the geometric direction, the attenuation over the lens
-    and medium legs, and the baffle obliquity."""
+    """Real amplitude along ``path`` at the frequencies ``f3`` (1, 1, n_freq): the sinc
+    directivity of the sub-element in the geometric direction, the attenuation of the lens and
+    medium legs, and the baffle obliquity."""
     theta, phi, obliquity = _element_angles(path.vector, frame)
     c = model.sound_speed
     amplitude = directivity(f3, theta[..., None], sub.width, c) * directivity(
@@ -524,7 +528,7 @@ def _element_angles(relative, frame):
     """Angles in the width and height directions and cos of the angle to the element normal.
 
     The sines of theta and phi are the direction cosines along the width and the height over
-    r, as in the Fraunhofer pattern of a rectangular aperture (and SIMUS). Projected angles
+    r, as in the Fraunhofer pattern of a rectangular aperture. Projected angles
     arctan2(width, axial) would narrow the height pattern for scatterers off the width axis.
 
     Args:
@@ -544,24 +548,22 @@ def _element_angles(relative, frame):
     return theta, phi, obliquity
 
 
-def _mean_over_sub_elements(response, n_sub, shape):
-    """The mean of the (tx, rx) pairs ``response(j)``, each of ``shape``, over the ``n_sub``
-    sub-elements, summed in a loop so that one sub-element's responses are live at a time."""
+def _mean_over_sub_elements(response, n_sub):
+    """Mean of the tuples of arrays ``response(j)`` over the ``n_sub`` sub-elements, summed in
+    a loop so that one sub-element's responses are live at a time."""
     if n_sub == 1:
         return response(0)
 
-    def body(j, carry):
-        tx, rx = response(j)
-        return carry[0] + tx, carry[1] + rx
+    def body(j, total):
+        return tuple(t + r for t, r in zip(total, response(j)))
 
-    zeros = ops.zeros(shape, "complex64")
-    tx, rx = ops.fori_loop(0, n_sub, body, (zeros, zeros))
+    total = ops.fori_loop(1, n_sub, body, response(0))
     scale = ops.array(1.0 / n_sub, "complex64")
-    return tx * scale, rx * scale
+    return tuple(t * scale for t in total)
 
 
 def _travel_time(positions, model, lens_normals):
-    """One-way travel time [s] from the element centres to every scatterer, (n_scat, n_el):
+    """One-way travel time [s] from the element centers to every scatterer, (n_scat, n_el):
     straight, or the shortest path through the lens."""
     if not model.apply_lens_correction:
         distance = ops.linalg.norm(positions[:, None] - model.geometry[None], axis=-1)

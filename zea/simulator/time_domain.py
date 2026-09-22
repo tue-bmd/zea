@@ -44,15 +44,14 @@ def simulate_rf_td(
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
-    A faster alternative to :func:`simulate_rf` that produces equivalent RF data
-    without a per-scatterer, per-frequency Fourier synthesis. Each scatterer
-    contribution is splatted, with linear sub-sample interpolation, into an
-    ``(n_ax, n_el)`` spike map at its two-way sample delay; the spike map is then
-    convolved once per receive channel with a real transmit pulse.
+    An approximation of :func:`simulate_rf` without the per-frequency synthesis. Each scatterer
+    contribution is splatted, with linear sub-sample interpolation, into an ``(n_ax, n_el)``
+    spike map at its two-way sample delay; the spike map is then convolved once per receive
+    channel with a real transmit pulse.
 
-    Directivity, geometric spreading, and attenuation are evaluated at the pulse
-    center frequency (a broadband approximation appropriate for the time domain),
-    reusing the same helpers as :func:`simulate_rf`.
+    Directivity, geometric spreading, and attenuation are evaluated at the pulse center
+    frequency (a broadband approximation appropriate for the time domain), reusing the same
+    helpers as :func:`simulate_rf`.
 
     Args:
         scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
@@ -207,7 +206,10 @@ def _scatterer_response(positions, magnitudes, model, center_frequency):
 
 
 def _one_way_distances(positions, model):
-    """Compute the one-way distance [m] from each scatterer to each element."""
+    """One-way path length [m] from each element center to each scatterer, (n_scat, n_el).
+
+    Through a lens it is the medium distance with the travel time of the refracted path.
+    """
     if not model.apply_lens_correction:
         return ops.linalg.norm(model.geometry[None] - positions[:, None], axis=-1)
     travel_times = compute_lens_corrected_travel_times(
