@@ -162,9 +162,8 @@ def simulate_rf(
             elements are mounted in, which sets the obliquity factor applied on transmit and on
             receive next to the sinc directivity: 1 for a rigid baffle (0, the default),
             cos(angle to the element normal) for a soft one (``inf``), and in general
-            cos / (cos + ratio) (Selfridge et al. 1980, as in SIMUS; 0.57 for epoxy against
-            soft tissue). Scatterers behind the element plane get no obliquity factor. Must be
-            static under jit.
+            cos / (cos + ratio). Scatterers behind the element plane get no obliquity factor. Must
+            be static under jit.
         element_normals (array-like, optional): Outward normal of each element of shape
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
             evaluated in each element's own frame: the elevation axis is the projection of
