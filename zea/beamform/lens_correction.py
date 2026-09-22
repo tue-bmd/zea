@@ -3,10 +3,10 @@ r"""Lens-corrected delay computation for ultrasound beamforming.
 The acoustic lens fitted over most ultrasound probes has a lower speed of
 sound than the surrounding medium (tissue / water), ~1000 m/s versus 1540 m/s,
 which shortens the travel time near the face of the transducer and alters
-the effective focus. We assume a lens of uniform thickness and speed of sound, flat
-unless element normals are given, in which case it is conformal to the elements. The
-simulator applies these functions per sub-element with the local thickness of a focusing
-lens, see :func:`zea.simulator.simulate_rf`.
+the effective focus. We assume a lens of uniform thickness and speed of sound,
+normal to each element (flat when no element normals are given). The simulator applies
+these functions per sub-element with the local thickness of a focusing lens, see
+:func:`zea.simulator.simulate_rf`.
 
 The corrected one-way travel time from each transducer element to each image
 pixel is computed by finding the lateral crossing point :math:`x_l` on the
@@ -54,9 +54,9 @@ def compute_lens_corrected_travel_times(
         c_lens (float): The speed of sound in the lens in m/s.
         c_medium (float): The speed of sound in the medium in m/s.
         n_iter (int): The number of iterations to run the Newton-Raphson method.
-        element_normals (ndarray, optional): Outward normal of each element of shape (n_el, 3)
-            or (1, 3), for curved or tilted arrays. The lens face is then normal to each
-            element (a conformal lens) instead of to z.
+        element_normals (ndarray, optional): Unit outward normal of each element of shape
+            (n_el, 3) or (1, 3), for curved or tilted arrays: the lens face is then normal to
+            each element instead of to z. See :func:`zea.beamform.geometry.compute_element_normals`.
 
     Returns:
         ndarray: The travel times of shape (n_pixels, n_el).
@@ -87,10 +87,9 @@ def compute_lens_path_lengths(
         xs = ops.norm(pixel_pos[..., :2], axis=-1)
         zs = pixel_pos[..., -1]
     else:
-        normals = ops.cast(element_normals, pixel_pos.dtype)
-        normals = normals / ops.norm(normals, axis=-1, keepdims=True)
-        zs = ops.sum(pixel_pos * normals[None], axis=-1)
-        xs = ops.norm(pixel_pos - zs[..., None] * normals[None], axis=-1)
+        normals = ops.cast(element_normals, pixel_pos.dtype)[None]
+        zs = ops.sum(pixel_pos * normals, axis=-1)
+        xs = ops.norm(pixel_pos - zs[..., None] * normals, axis=-1)
 
     pixel_pos_2d = ops.stack([xs, zs], axis=-1)
     element_pos_2d = ops.zeros((1, element_pos.shape[0], 2))

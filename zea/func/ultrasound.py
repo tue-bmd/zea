@@ -440,7 +440,32 @@ def hilbert(x, N: int | None = None, axis=-1):
     return x
 
 
-def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
+def _padded_analytic(x, axis):
+    """Analytic signal of ``x`` along ``axis``, without circular wraparound.
+
+    :func:`hilbert` is FFT-based and so treats the record as periodic: a strong
+    near-field echo wraps onto the end of the record, where beamforming sums it into
+    an unphysical brightness at depth. See
+    https://github.com/tue-bmd/zea/discussions/147.
+
+    Transforming at ``2 * n_ax``, the linear-convolution length, and cropping back
+    keeps that wrapped copy out of the returned samples. The ideal Hilbert kernel
+    decays as ``1 / t`` rather than terminating, so this bounds the leakage rather
+    than removing it: the residual stays below ``0.64 / n_ax`` of the peak.
+
+    Args:
+        x (Tensor): Real-valued input.
+        axis (int): Fast-time (axial) axis to transform along.
+
+    Returns:
+        Tensor: Complex analytic signal, with the same shape as ``x``.
+    """
+    n_ax = x.shape[axis]
+    analytic = hilbert(x, N=2 * n_ax, axis=axis)
+    return ops.take(analytic, ops.arange(n_ax), axis=axis)
+
+
+def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad_fast_time=True):
     """Demodulates the input data to baseband. The function computes the analytical
     signal (the signal with negative frequencies removed) and then shifts the spectrum
     of the signal to baseband by multiplying with a complex exponential. Where the
@@ -453,12 +478,17 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
         demodulation_frequency (float): The center frequency of the signal.
         sampling_frequency (float): The sampling frequency of the signal.
         axis (int, optional): The axis along which to demodulate. Defaults to -3.
+        pad_fast_time (bool, optional): Avoid circular wraparound in the analytic-signal
+            transform. See :func:`_padded_analytic`. Defaults to ``True``.
 
     Returns:
         ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.
     """
     # Compute the analytical signal
-    analytical_signal = hilbert(data, axis=axis)
+    if pad_fast_time:
+        analytical_signal = _padded_analytic(data, axis)
+    else:
+        analytical_signal = hilbert(data, axis=axis)
 
     # Define frequency indices
     frequency_indices = ops.arange(analytical_signal.shape[axis])
@@ -552,18 +582,7 @@ def channels_to_analytic(data, axis):
     if n_ch == 2:
         return ops.view_as_complex(data)
     if n_ch == 1:
-        n_ax = ops.shape(data)[axis]
-
-        # Calculate next power of 2: M = 2^ceil(log2(n_ax))
-        # see https://github.com/tue-bmd/zea/discussions/147
-        log2_n_ax = np.log2(n_ax)
-        M = int(2 ** np.ceil(log2_n_ax))
-
-        data = hilbert(data, N=M, axis=axis)
-        indices = ops.arange(n_ax)
-
-        data = ops.take(data, indices, axis=axis)
-        return ops.squeeze(data, axis=-1)
+        return ops.squeeze(_padded_analytic(data, axis), axis=-1)
     raise ValueError(f"Expected data with n_ch in {{1, 2}} (last axis), got n_ch={n_ch}.")
 
 

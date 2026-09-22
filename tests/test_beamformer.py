@@ -13,13 +13,13 @@ from zea.beamform.beamformer import (
     transmit_delays,
 )
 from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
+from zea.beamform.geometry import compute_element_normals
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
     scanline_aligned_apodization,
     scanline_pixel_grid,
 )
-
 from . import backend_equality_check
 
 N_EL = 8  # number of transducer elements
@@ -855,6 +855,59 @@ def test_lens_correction_known_vertical_path():
     expected = lens_thickness / c_lens + (z_pixel - lens_thickness) / c_medium
     np.testing.assert_allclose(tt[0, 0], expected, rtol=1e-4)
     return tt
+
+
+def _rotate_about_y(points, angle):
+    """Rotate (n, 3) points about the y-axis by ``angle`` radians."""
+    c, s = np.cos(angle), np.sin(angle)
+    rotation = np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=np.float32)
+    return np.asarray(points, dtype=np.float32) @ rotation.T
+
+
+def _lens_travel_times(element_pos, pixel_pos, element_normals=None):
+    """Lens-corrected travel times (n_pix, n_el) for a 1 mm lens, as a numpy array."""
+    to_tensor = keras.ops.convert_to_tensor
+    if element_normals is not None:
+        element_normals = to_tensor(element_normals)
+    tt = compute_lens_corrected_travel_times(
+        to_tensor(element_pos),
+        to_tensor(pixel_pos),
+        lens_thickness=1e-3,
+        c_lens=1000.0,
+        c_medium=SOUND_SPEED,
+        n_iter=5,
+        element_normals=element_normals,
+    )
+    return keras.ops.convert_to_numpy(tt)
+
+
+@backend_equality_check()
+def test_lens_correction_is_invariant_to_element_tilt():
+    """The lens sits on the element face, so tilting an element together with its pixels
+    must not change the travel times."""
+    tilt = np.radians(30.0)
+    element = np.zeros((1, 3), np.float32)
+    # Straight ahead, off-axis and out of plane.
+    pixels = np.array([[0.0, 0.0, 20e-3], [5e-3, 0.0, 20e-3], [-3e-3, 2e-3, 10e-3]], np.float32)
+    upright = _lens_travel_times(element, pixels)
+    tilted = _lens_travel_times(
+        element,
+        _rotate_about_y(pixels, tilt),
+        element_normals=_rotate_about_y([[0.0, 0.0, 1.0]], tilt),
+    )
+    np.testing.assert_allclose(tilted, upright, rtol=1e-5)
+    return tilted
+
+
+@backend_equality_check()
+def test_lens_correction_flat_array_unchanged_by_normals(probe_geometry, flatgrid):
+    """A flat array has normals of exactly +z, so passing them gives bit-identical results."""
+    reference = _lens_travel_times(probe_geometry, flatgrid)
+    with_normals = _lens_travel_times(
+        probe_geometry, flatgrid, element_normals=compute_element_normals(probe_geometry)
+    )
+    np.testing.assert_array_equal(with_normals, reference)
+    return with_normals
 
 
 @backend_equality_check()
