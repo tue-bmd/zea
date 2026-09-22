@@ -218,9 +218,12 @@ def generate_h5_indices(
     if sort_files:
         try:
             # this is like an np.argsort, returns the indices that would sort the array
+            # NOTE: match against the stem, not the full path -- the ".hdf5" suffix itself
+            # contains a digit ("5"), which would otherwise shift [-2] off the file's own
+            # second-to-last number.
             indices_sorting_file_paths = sorted(
                 range(len(file_paths)),
-                key=lambda i: int(re.findall(r"\d+", file_paths[i])[-2]),
+                key=lambda i: int(re.findall(r"\d+", Path(file_paths[i]).stem)[-2]),
             )
             file_paths = [file_paths[i] for i in indices_sorting_file_paths]
             file_shapes = [file_shapes[i] for i in indices_sorting_file_paths]
