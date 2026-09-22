@@ -21,6 +21,7 @@ naming the operations inside can be loaded:
 See :ref:`custom-ops` for the full story.
 """
 
+import contextlib
 import hashlib
 import importlib
 import importlib.util
@@ -30,6 +31,7 @@ from pathlib import Path
 from types import ModuleType
 
 from zea import log
+from zea.internal.registry import ops_registry
 
 #: Package under which modules loaded from a file are registered in
 #: ``sys.modules``, so they stay importable (and picklable) afterwards.
@@ -131,6 +133,25 @@ def _module_name_for(path: Path) -> str:
     return f"{base}_{hashlib.sha1(str(path).encode()).hexdigest()[:8]}"
 
 
+@contextlib.contextmanager
+def _rollback_registrations_on_failure():
+    """Undo operation registrations made by a module that raised halfway through.
+
+    The registry refuses a name that is already taken, so a module that registers
+    an operation and *then* fails would report "already registered" on the next
+    attempt, hiding the error the user actually has to fix.
+    """
+    before = set(ops_registry.registry)
+    try:
+        yield
+    except BaseException:
+        for name in set(ops_registry.registry) - before:
+            cls = ops_registry.registry.pop(name)
+            for additional in ops_registry.additional_registries.values():
+                additional.pop(cls, None)
+        raise
+
+
 def _import_from_file(path: Path) -> ModuleType:
     """Execute a ``.py`` file as a module and return it."""
     module_name = _module_name_for(path)
@@ -143,7 +164,8 @@ def _import_from_file(path: Path) -> ModuleType:
     # if it refers to itself, and so tracebacks and introspection name it properly.
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        with _rollback_registrations_on_failure():
+            spec.loader.exec_module(module)
     except Exception as exc:  # noqa: BLE001 - re-raised with context below
         del sys.modules[module_name]
         raise OpsModuleImportError(f"Error while importing '{path}': {exc}") from exc
@@ -160,11 +182,14 @@ def _register_pickle_by_value(module: ModuleType) -> None:
     reference cannot be resolved again and pickling fails outright. cloudpickle can
     serialize the module's contents by value instead.
 
-    Best effort: cloudpickle is not a runtime dependency of zea, so this only applies
-    when something else has already imported it.
+    Best effort: cloudpickle is not a runtime dependency of zea, so this is a no-op
+    when it is not installed. It is imported here rather than looked up in
+    ``sys.modules``, so that registration does not depend on whether something else
+    happened to import cloudpickle first.
     """
-    cloudpickle = sys.modules.get("cloudpickle")
-    if cloudpickle is None:
+    try:
+        import cloudpickle
+    except ImportError:
         return
     try:
         cloudpickle.register_pickle_by_value(module)
@@ -224,7 +249,8 @@ def import_ops_module(
         if source in _LOADED:
             return _LOADED[source]
         try:
-            module = importlib.import_module(source)
+            with _rollback_registrations_on_failure():
+                module = importlib.import_module(source)
         except ImportError as exc:
             raise OpsModuleImportError(
                 f"Could not import module '{source}': {exc}. Make sure it is installed "

@@ -575,3 +575,78 @@ def test_imported_op_is_picklable(tmp_path):
     restored = cloudpickle.loads(cloudpickle.dumps(module.TmpOp))
 
     assert restored.__name__ == "TmpOp"
+
+
+def test_failed_import_does_not_leave_operations_registered(tmp_path):
+    """A module that registers an op and then raises can be fixed and retried.
+
+    Without a rollback the registry keeps the half-registered name, and the retry
+    reports "already registered" instead of the error the user has to fix.
+    """
+    name = f"fixture_rollback_op_{next(_op_module_counter)}"
+    path = tmp_path / "half_broken_ops.py"
+    body = _OP_MODULE_TEMPLATE.format(name=name)
+    path.write_text(body + "\nraise RuntimeError('boom halfway')\n", encoding="utf-8")
+
+    with pytest.raises(OpsModuleImportError, match="boom halfway"):
+        import_ops_module(str(path))
+    assert name not in ops_registry
+
+    # The same error again, rather than a misleading one about the registry.
+    with pytest.raises(OpsModuleImportError, match="boom halfway"):
+        import_ops_module(str(path))
+
+    # And once the module is corrected, it loads.
+    path.write_text(body, encoding="utf-8")
+    module = import_ops_module(str(path))
+    assert get_ops(name) is module.TmpOp
+
+
+def test_imports_on_a_plain_operation_are_not_loaded(tmp_path):
+    """`imports` is a pipeline key, so an operation parameter of that name is ignored.
+
+    A custom operation is free to take a parameter called ``imports``; it must not be
+    mistaken for a list of modules to import.
+    """
+    _, name = write_op_module(tmp_path)
+    config_path = tmp_path / "pipeline.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "pipeline": {
+                    "imports": ["tmp_ops.py"],
+                    "operations": [{"name": name, "params": {"imports": ["does_not_exist.py"]}}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Reaches the operation itself (which has no such parameter) rather than
+    # failing earlier on a missing module.
+    with pytest.raises(TypeError):
+        Pipeline.from_path(str(config_path), jit_options=None)
+
+
+def test_nested_pipeline_imports_survive_a_config_roundtrip(tmp_path):
+    """Nested `imports` still load after to_yaml → from_path.
+
+    A Config round-trip turns the operations list into a numpy array, which the
+    hand-written configs in the tests above do not exercise.
+    """
+    path, name = write_op_module(tmp_path)
+    import_ops_module(str(path))
+    inner = Pipeline(
+        operations=[get_ops(name)()],
+        imports=[str(path)],
+        jit_options=None,
+        name="inner",
+    )
+    out_path = tmp_path / "nested.yaml"
+    Pipeline(operations=[inner], jit_options=None).to_yaml(str(out_path))
+
+    written = yaml.safe_load(out_path.read_text(encoding="utf-8"))
+    assert written["pipeline"]["operations"][0]["params"]["imports"] == [str(path)]
+
+    reloaded = Pipeline.from_path(str(out_path), jit_options=None)
+    assert reloaded.operations[0].imports == [str(path)]

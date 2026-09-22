@@ -2550,28 +2550,48 @@ def make_operation_chain(
     return chain
 
 
-def _collect_imports(node, found: list) -> list:
+def _collect_imports(node, found: list, root: bool = False) -> list:
     """Gather every ``imports`` declaration in a pipeline config, depth first.
 
     Nested pipelines (``name: pipeline``, ``name: map``, ...) may declare their own
     modules, and those have to be imported before :func:`make_operation_chain`
-    resolves any name, so the whole tree is scanned up front rather than during
+    resolves any name, so the tree is scanned up front rather than during
     construction.
+
+    Only the places that actually *accept* ``imports`` are read: the root section,
+    and the ``params`` of a nested entry that has its own ``operations``. An ordinary
+    operation is left alone, so a custom operation taking a parameter called
+    ``imports`` is not mistaken for a list of modules to load.
     """
     if isinstance(node, Config):
         node = node.serialize()
 
-    if isinstance(node, dict):
-        imports = node.get("imports")
-        if imports is not None:
-            found.extend([imports] if isinstance(imports, str) else [str(m) for m in imports])
-        for key, value in node.items():
-            if key != "imports":
-                _collect_imports(value, found)
-    elif isinstance(node, (list, tuple)):
+    if isinstance(node, (list, tuple, np.ndarray)):
         for item in node:
             _collect_imports(item, found)
+        return found
 
+    if not isinstance(node, dict):
+        return found
+
+    if root:
+        imports = node.get("imports")
+    elif "operations" in node:
+        # Nested pipelines carry their kwargs under "params"; note that a Config
+        # round-trip turns lists into numpy arrays, so never test these for truthiness.
+        params = node.get("params")
+        if isinstance(params, Config):
+            params = params.serialize()
+        imports = params.get("imports") if isinstance(params, dict) else None
+    else:
+        return found
+
+    if imports is not None:
+        found.extend([imports] if isinstance(imports, str) else [str(m) for m in imports])
+
+    operations = node.get("operations")
+    if operations is not None:
+        _collect_imports(operations, found)
     return found
 
 
@@ -2633,7 +2653,7 @@ def pipeline_from_config(
     # Import any module the config depends on before a single name is resolved,
     # so that custom operations are in the registry by the time get_ops runs.
     import_ops_modules(
-        _collect_imports(config, []),
+        _collect_imports(config, [], root=True),
         base_path=base_path,
         trust_remote_code=trust_remote_code,
         revision=revision,
