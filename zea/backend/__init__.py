@@ -212,7 +212,10 @@ def _jax_jit_with_default_compiler_options(func, default_compiler_options, jit_k
                 if _jax_compiler_option_supported(name, value)
             }
             compiler_options.update(jit_kwargs.get("compiler_options") or {})
-            options = {**jit_kwargs, "compiler_options": compiler_options or None}
+            # Leave the keyword out when empty: jax.jit only has it from JAX 0.4.36.
+            options = {k: v for k, v in jit_kwargs.items() if k != "compiler_options"}
+            if compiler_options:
+                options["compiler_options"] = compiler_options
             jitted = jax_mod.jit(func, **options)
         return jitted(*args, **kwargs)
 

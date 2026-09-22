@@ -203,6 +203,11 @@ class TestJit:
             np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
             assert jax_jit.call_args.kwargs["compiler_options"] == {flag: True}
 
+            # With nothing left, the keyword is left out: jax<0.4.36 does not accept it.
+            compiled = jit(lambda x: x * 2, default_compiler_options={"xla_no_such_option": 1})
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+            assert "compiler_options" not in jax_jit.call_args.kwargs
+
     @staticmethod
     def _check_default_compiler_options_ignored():
         import keras
