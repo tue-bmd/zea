@@ -9,7 +9,7 @@ from zea.simulator.element import (
     _validate_scatter_exponent,
     attenuate,
     element_model,
-    scene_scatterers,
+    prepare_scatterers,
     spread,
 )
 from zea.simulator.pulse import transmit_pulses
@@ -118,7 +118,7 @@ def simulate_rf_td(
         lens_sound_speed=lens_sound_speed,
         elevation_slab_2d=elevation_slab_2d,
     )
-    positions, magnitudes = scene_scatterers(scatterer_positions, scatterer_magnitudes, model)
+    positions, magnitudes = prepare_scatterers(scatterer_positions, scatterer_magnitudes, model)
     n_scat = positions.shape[0]
     waveforms = {
         pulse: _scattered_waveform(pulse, center_frequency, scatter_exponent) for pulse in pulses

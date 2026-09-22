@@ -7,7 +7,7 @@ from zea.simulator.element import (
     _validate_scatter_exponent,
     element_model,
     element_responses,
-    scene_scatterers,
+    prepare_scatterers,
 )
 from zea.simulator.pulse import transmit_pulses
 from zea.simulator.record import delay2, in_fft, in_record, record_grid
@@ -161,7 +161,7 @@ def simulate_rf(
         elevation_focus=elevation_focus,
         lens_attenuation_coef=lens_attenuation_coef,
     )
-    positions, magnitudes = scene_scatterers(scatterer_positions, scatterer_magnitudes, model)
+    positions, magnitudes = prepare_scatterers(scatterer_positions, scatterer_magnitudes, model)
     if positions.shape[0] == 0:
         # tensorflow can't reduce over an empty axis.
         return ops.zeros((n_tx, int(n_ax), model.geometry.shape[0], 1), dtype="float32")
