@@ -119,7 +119,8 @@ from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated, renamed_items
 from zea.probes import Probe, fit_curved_probe_radius
-from zea.simulator import _shift_np, fft_length
+from zea.simulator import fft_length
+from zea.simulator.record import _shift_np
 
 
 class Parameters(BaseParameters):

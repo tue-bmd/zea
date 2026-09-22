@@ -21,11 +21,12 @@ from zea.simulator import (
     record_bounds,
     record_reach,
     simulate_rf,
+    simulate_rf_td,
     smooth_size,
     transmit_pulse,
     transmit_pulses,
 )
-from zea.simulator_time_domain import simulate_rf_td
+
 
 from .simulator_helpers import (
     CENTER_FREQUENCY,
@@ -118,9 +119,6 @@ CASES = {
     ),
     "lens_correction": case(linear_probe(), apply_lens_correction=True),
     "two_dimensional": case(linear_probe(), two_dimensional=True, element_height=1e-3),
-    "noise_and_tgc": case(
-        linear_probe(), noise_level_db=-40.0, tgc_max_db=20.0, noise_seed=3, noise_reference=1.0
-    ),
 }
 
 
@@ -430,6 +428,18 @@ def test_simulate_op_derives_n_fft_for_its_jitted_call():
     result = to_np(op(**tensors(batched))[op.output_key])
     assert_close(reference, result[0], rel_tol=1e-3)
     assert_close(reference, result[1], rel_tol=1e-3)
+
+
+def test_simulate_op_receive_chain_is_invariant_to_fft_length_and_frequency_blocks():
+    """The receive chain runs after the simulator, on the record it returns: a seeded noise
+    with a fixed reference and TGC give the same output whatever the FFT bookkeeping."""
+    kwargs = tensors(CASES["linear"])
+    chain = dict(noise_level_db=-40.0, tgc_max_db=20.0, noise_seed=3, noise_reference=1.0)
+    op = Simulate(jit_compile=False, with_batch_dim=False)
+    reference = op(**kwargs, **chain)[op.output_key]
+    assert not np.allclose(to_np(reference), to_np(simulate_rf(**kwargs)))
+    blocked = op(**kwargs, **chain, n_fft=2048, max_chunk_gb=1e-3)[op.output_key]
+    assert_close(reference, blocked, rel_tol=1e-4)
 
 
 def test_simulate_op_methods():

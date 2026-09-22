@@ -482,6 +482,7 @@ def calculate_delays(
             lens_sound_speed,
             sound_speed,
             n_iter=n_iter,
+            element_normals=compute_element_normals(probe_geometry),
         )
 
     # Compute transmit delays

@@ -27,6 +27,9 @@ from zea.data.spec import (
     Spec,
     Subject,
     TrackSpec,
+    is_array_like,
+    is_lazy_array,
+    iter_slabs,
 )
 
 
@@ -2283,3 +2286,205 @@ def test_rx_aperture_indices_must_match_receive_channel_count():
     indices = np.tile(np.arange(5, dtype=np.int32), (2, 1))
     with pytest.raises(ValueError, match="maps 5 receive channels per transmit"):
         TrackSpec(**_track_with_subaperture(n_rx=4, n_el=8, rx_aperture_indices=indices))
+
+
+class TestSlabIteration:
+    """:func:`~zea.data.spec.iter_slabs` cuts an array into memory-bounded pieces."""
+
+    @pytest.mark.parametrize("shape", [(4,), (4, 3), (5, 2, 7), (3, 2, 2, 2)])
+    @pytest.mark.parametrize("max_bytes", [1, 8, 64, 1 << 20])
+    @pytest.mark.parametrize("split_axes", [True, False])
+    def test_slabs_tile_the_array(self, shape, max_bytes, split_axes):
+        """The slabs cover every element exactly once, whatever the budget."""
+        array = np.arange(int(np.prod(shape)), dtype=np.int32).reshape(shape)
+        reassembled = np.zeros_like(array)
+        covered = 0
+        for selection, slab in iter_slabs(array, max_bytes=max_bytes, split_axes=split_axes):
+            reassembled[selection] = slab
+            covered += slab.size
+        assert np.array_equal(reassembled, array)
+        assert covered == array.size, "slabs must not overlap"
+
+    def test_slabs_respect_the_budget(self):
+        """No slab holds more than the bytes it was allowed."""
+        array = np.zeros((16, 4, 8), dtype=np.float32)  # 128 bytes per frame
+        sizes = {slab.nbytes for _, slab in iter_slabs(array, max_bytes=512)}
+        assert max(sizes) <= 512
+
+    def test_an_oversized_frame_splits_the_next_axis_in(self):
+        """A frame over budget is cut further rather than blowing the budget."""
+        array = np.zeros((4, 8, 4), dtype=np.float32)  # 128 bytes per frame
+        slabs = list(iter_slabs(array, max_bytes=64))
+        assert max(slab.nbytes for _, slab in slabs) <= 64
+        assert all(len(selection) == 2 for selection, _ in slabs), (
+            "a frame over budget should be cut along the next axis as well"
+        )
+
+    def test_split_axes_false_keeps_whole_frames(self):
+        """A reduction needs each frame intact, so oversized frames stay whole."""
+        array = np.zeros((4, 8, 4), dtype=np.float32)
+        slabs = list(iter_slabs(array, max_bytes=64, split_axes=False))
+        # Oversized, but each slab is one whole frame: a reduction needs them intact.
+        assert [slab.shape for _, slab in slabs] == [(1, 8, 4)] * 4
+
+    def test_slabs_align_to_chunk_boundaries(self):
+        """Slabs start on a chunk boundary, so no chunk is written twice."""
+        array = np.zeros((10, 4), dtype=np.float32)  # 16 bytes per frame
+        selections = [selection for selection, _ in iter_slabs(array, 100, chunks=(3, 4))]
+        starts = [selection[0].start for selection in selections]
+        assert all(start % 3 == 0 for start in starts), (
+            "a slab should cover whole chunks, so no chunk is written twice"
+        )
+
+    def test_empty_array_yields_no_slabs(self):
+        """An empty array has nothing to copy."""
+        assert list(iter_slabs(np.zeros((0, 3), dtype=np.float32))) == []
+
+    def test_scalar_array_yields_one_slab(self):
+        """A 0-d array is one slab selected by the empty tuple."""
+        [(selection, slab)] = list(iter_slabs(np.array(3.0)))
+        assert selection == () and slab == 3.0
+
+    def test_budget_defaults_to_the_module_constant(self, monkeypatch):
+        """Resolved per call, so lowering the constant takes effect everywhere."""
+        array = np.zeros((8, 1024), dtype=np.float32)  # 4 KiB per frame
+        monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 4096)
+        assert len(list(iter_slabs(array))) == 8
+
+
+class TestLazyArrays:
+    """A spec validates, and saves, an array that is still on disk."""
+
+    @pytest.fixture
+    def on_disk(self, tmp_path):
+        """Factory writing values to an HDF5 file and handing back the open dataset."""
+        files = []
+
+        def _write(values, name="values"):
+            file = h5py.File(tmp_path / f"{name}_{len(files)}.hdf5", "w")
+            files.append(file)
+            return file.create_dataset(name, data=values)
+
+        yield _write
+        for file in files:
+            file.close()
+
+    @pytest.fixture
+    def mapped(self, tmp_path):
+        """Factory writing values to a plain file and handing back a memmap of them."""
+        paths: list = []
+
+        def _write(values):
+            path = tmp_path / f"mapped_{len(paths)}.dat"
+            paths.append(path)
+            memmap = np.memmap(path, dtype=values.dtype, mode="w+", shape=values.shape)
+            memmap[:] = values
+            memmap.flush()
+            return np.memmap(path, dtype=values.dtype, mode="r", shape=values.shape)
+
+        return _write
+
+    def test_is_array_like_excludes_values_that_merely_have_a_dtype(self):
+        """Numpy scalars and strings carry a dtype and a shape, but are values."""
+        assert is_array_like(np.zeros(3))
+        assert not is_array_like(np.str_("label"))
+        assert not is_array_like(np.float32(1.0))
+        assert not is_array_like("label")
+        assert not is_array_like([1, 2, 3])
+
+    def test_a_partial_array_is_not_array_like(self):
+        """Everything the save path uses is required up front, not discovered mid-write."""
+
+        class OnlyShapeAndDtype:
+            shape = (2, 3)
+            dtype = np.dtype("float32")
+
+            def __getitem__(self, selection):
+                """Never called: the value should be rejected before anything reads it."""
+                raise AssertionError("should never be read")
+
+        assert not is_array_like(OnlyShapeAndDtype())
+
+    def test_an_hdf5_dataset_is_a_lazy_array(self, on_disk):
+        """An unread dataset describes itself like an array, and is marked lazy."""
+        dataset = on_disk(np.zeros((2, 3), dtype=np.float32))
+        assert is_array_like(dataset) and is_lazy_array(dataset)
+        assert not is_lazy_array(np.zeros((2, 3)))
+        assert spec_module.value_shape(dataset) == (2, 3)
+
+    def test_spec_validates_shape_and_dtype_of_a_lazy_array(self, on_disk):
+        """Metadata is enough to accept a valid array and reject a wrong dtype."""
+        image = Image(values=on_disk(np.zeros((2, 4, 4), dtype=np.float32)))
+        assert image.values.shape == (2, 4, 4)
+
+        with pytest.raises(TypeError, match="invalid dtype"):
+            Image(values=on_disk(np.zeros((2, 4, 4), dtype=np.int32), name="ints"))
+
+    def test_content_checks_are_skipped_for_a_lazy_array(self, on_disk):
+        """Contents are not read back: the file that holds them was validated on write."""
+        invalid_db = np.ones((2, 4, 4), dtype=np.float32)  # dB values must be <= 0
+        with pytest.raises(ValueError, match="dB scale"):
+            Image(values=invalid_db)
+        Image(values=on_disk(invalid_db))
+
+    def test_a_lazy_value_is_recast_without_being_read(self, on_disk):
+        """A float64 field for a float32 schema is converted per slab, not loaded whole."""
+        values = np.zeros((2, 4, 4), dtype=np.float64)
+        image = Image(values=on_disk(values))
+
+        assert image.values.dtype == np.float32
+        assert is_lazy_array(image.values), "recasting must not materialise the array"
+        np.testing.assert_array_equal(image.values[0:1], values[0:1].astype(np.float32))
+
+    def test_a_recast_slab_stays_within_the_budget(self, on_disk):
+        """A slab that converts on read holds both buffers, and both count against it."""
+        source = on_disk(np.zeros((8, 16), dtype=np.float64))
+        casting = spec_module._CastArray(source, np.float32)
+
+        budget = 16 * (8 + 4)  # one row of source plus its float32 conversion
+        for _, slab in iter_slabs(casting, max_bytes=budget):
+            held = slab.nbytes + slab.size * source.dtype.itemsize
+            assert held <= budget, f"a slab held {held} bytes of a {budget} byte budget"
+
+    def test_a_recast_lazy_value_is_written_in_the_schema_dtype(self, tmp_path, on_disk):
+        """What lands on disk is the converted array, whatever the source dtype was."""
+        values = np.arange(2 * 4 * 4, dtype=np.float64).reshape(2, 4, 4)
+        image = Image(values=on_disk(-values))
+
+        with h5py.File(tmp_path / "out.hdf5", "w") as out:
+            image.store_in_group(out, warn_missing_optional_fields=False)
+            assert out["values"].dtype == np.float32
+            np.testing.assert_array_equal(out["values"][()], -values.astype(np.float32))
+
+    def test_lazy_values_are_written_slab_by_slab(self, tmp_path, on_disk, monkeypatch):
+        """A dataset filled one slab at a time holds exactly the source values."""
+        values = np.arange(8 * 16, dtype=np.float32).reshape(8, 16)
+        source = on_disk(values)
+        monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 64)  # one frame per slab
+
+        with h5py.File(tmp_path / "out.hdf5", "w") as out:
+            Spec.create_dataset(out, "values", source, compression=None, chunk_axes=None)
+            assert np.array_equal(out["values"][()], values)
+            assert out["values"].dtype == values.dtype
+
+    def test_an_array_is_lazy_when_it_maps_a_file_whatever_its_type(self, mapped):
+        """A memmap subclasses ndarray, and what ``astype`` returns is one without a file."""
+        values = mapped(np.zeros((2, 4, 4), dtype=np.float64))
+
+        assert is_lazy_array(values), "a memmap keeps its contents in a file"
+        assert is_lazy_array(values[0:1]), "so does a view of one"
+        assert is_lazy_array(np.asarray(values)), "even where numpy drops the memmap type"
+        assert not is_lazy_array(values.astype(np.float32)), "a converted copy is in memory"
+
+    def test_a_mapped_value_is_recast_and_written_without_being_read(self, tmp_path, mapped):
+        """A float64 memmap for a float32 schema converts per slab, like any lazy array."""
+        values = -np.arange(2 * 4 * 4, dtype=np.float64).reshape(2, 4, 4)
+        image = Image(values=mapped(values))
+
+        assert image.values.dtype == np.float32
+        assert is_lazy_array(image.values), "recasting must not materialise the mapping"
+
+        with h5py.File(tmp_path / "out.hdf5", "w") as out:
+            image.store_in_group(out, warn_missing_optional_fields=False)
+            assert out["values"].dtype == np.float32
+            np.testing.assert_array_equal(out["values"][()], values.astype(np.float32))

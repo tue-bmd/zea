@@ -12,11 +12,12 @@ from zea import Parameters, Probe, display
 from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
-from zea.simulator import apply_receive_chain, simulate_rf, transmit_pulse
+from zea.func import apply_receive_chain
 from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
 from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
-from zea.simulator_time_domain import _scattered_waveform, simulate_rf_td
+from zea.simulator import simulate_rf, simulate_rf_td, transmit_pulse
+from zea.simulator.time_domain import _scattered_waveform
 
 N_EL = 80
 APERTURE = 32e-3
@@ -291,6 +292,54 @@ def test_receive_chain_noise_reference_is_per_batch_item():
     sigma = np.abs(rf).max(axis=(1, 2, 3, 4)) * 10.0 ** (-20.0 / 20.0)
     np.testing.assert_allclose(noise.std(axis=(1, 2, 3, 4)), sigma, rtol=0.05)
     assert not np.allclose(noise[0] / sigma[0], noise[1] / sigma[1])
+
+
+def _receive_chain_image(fish_scan, simulator, **receive_chain_kwargs):
+    _, simulation_args, beamform = fish_scan
+    rf = simulator(**simulation_args)
+    return beamform(apply_receive_chain(rf, noise_seed=0, **receive_chain_kwargs))
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_tgc_brightens_the_deepest_scatterers(fish_scan, simulator):
+    """TGC compensates spreading loss, so the deep scatterers gain on the shallow ones."""
+    positions, _, _ = fish_scan
+    by_depth = np.argsort(positions[:, 2])
+    quartile = len(positions) // 4
+    deepest, shallowest = positions[by_depth[-quartile:]], positions[by_depth[:quartile]]
+
+    without = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=0.0)
+    with_tgc = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
+
+    dim = _dot_brightness(without, deepest).mean()
+    bright = _dot_brightness(with_tgc, deepest).mean()
+    assert dim < bright, (
+        f"Deepest scatterers are not brighter with TGC: {dim:.1f} without, {bright:.1f} with"
+    )
+
+    # Depth ratio isolates the gain ramp from any global brightness shift.
+    without_ratio = dim / _dot_brightness(without, shallowest).mean()
+    with_ratio = bright / _dot_brightness(with_tgc, shallowest).mean()
+    assert without_ratio < 1.0 < with_ratio, (
+        f"TGC did not invert the deep/shallow brightness ratio: {without_ratio:.2f} without, "
+        f"{with_ratio:.2f} with"
+    )
+
+
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
+def test_noise_lowers_relative_scatterer_amplitude(fish_scan, simulator):
+    """Electronic noise lifts the background, so scatterers stand out less above the mean."""
+    positions, _, _ = fish_scan
+
+    noiseless = _receive_chain_image(fish_scan, simulator, noise_level_db=None, tgc_max_db=50.0)
+    noisy = _receive_chain_image(fish_scan, simulator, noise_level_db=-30.0, tgc_max_db=50.0)
+
+    clean = _dot_brightness(noiseless / noiseless.mean(), positions).mean()
+    degraded = _dot_brightness(noisy / noisy.mean(), positions).mean()
+    assert degraded < clean, (
+        f"Noise did not lower the relative scatterer amplitude: {clean:.1f}x noiseless, "
+        f"{degraded:.1f}x at -30 dB"
+    )
 
 
 def _batched_rf(simulation_args, batch, **receive_chain_kwargs):

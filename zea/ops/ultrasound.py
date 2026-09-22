@@ -17,6 +17,7 @@ from zea.func.tensor import (
 from zea.func.ultrasound import (
     apply_aligned_apodization,
     apply_receive_apodization,
+    apply_receive_chain,
     demodulate,
     envelope_detect,
     get_band_pass_filter,
@@ -28,21 +29,15 @@ from zea.func.ultrasound import (
 from zea.internal.core import (
     DEFAULT_DYNAMIC_RANGE,
     DataTypes,
+    concrete,
+    ndim,
     python_constant,
 )
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated, renamed_keywords
 from zea.ops.base import Filter, Operation
-from zea.simulator import (
-    _concrete,
-    _ndim,
-    _shift_np,
-    apply_receive_chain,
-    fft_length,
-    scatter_exponent_bounds,
-    simulate_rf,
-)
-from zea.simulator_time_domain import simulate_rf_td
+from zea.simulator import fft_length, scatter_exponent_bounds, simulate_rf, simulate_rf_td
+from zea.simulator.record import _shift_np
 from zea.utils import canonicalize_axis
 
 # Different function arguments, so annotate as Callable to avoid the type checker trying to check
@@ -89,11 +84,11 @@ def _ignored_by_time_domain(kwargs):
     ignored = []
     for name, default in _frequency_domain_only.items():
         value = kwargs.get(name)
-        value = None if value is None else _concrete(value)
+        value = None if value is None else concrete(value)
         if value is not None and (default is None or not np.all(value == default)):
             ignored.append(name)
     normals = kwargs.get("element_normals")
-    normals = None if normals is None else _concrete(normals)
+    normals = None if normals is None else concrete(normals)
     if normals is not None and not np.allclose(normals, [0.0, 0.0, 1.0], atol=1e-6):
         ignored.append("element_normals")
     return ignored
@@ -106,13 +101,13 @@ def _derived_fft_length(kwargs):
     static value per scan and the jit cache is not invalidated by the scatterers.
     """
     keys = ("t0_delays", "initial_times", "t_peak", "probe_geometry", "sound_speed")
-    raw = [_concrete(kwargs.get(key)) for key in keys]
+    raw = [concrete(kwargs.get(key)) for key in keys]
     scalars = ("n_ax", "sampling_frequency", "center_frequency")
     if any(x is None for x in raw) or any(kwargs.get(key) is None for key in scalars):
         return None
     sos_map = kwargs.get("sos_map")
     if sos_map is not None:
-        sos_map = _concrete(sos_map)
+        sos_map = concrete(sos_map)
         if sos_map is None:
             return None
     t0, t_init, t_peak, geometry, sound_speed = raw
@@ -137,7 +132,7 @@ class Simulate(Operation):
 
     ``method`` selects the simulator. ``"frequency_domain"`` (default) is
     :func:`zea.simulator.simulate_rf`, the full model. ``"time_domain"`` is
-    :func:`zea.simulator_time_domain.simulate_rf_td`, which evaluates the geometry-dependent
+    :func:`zea.simulator.simulate_rf_td`, which evaluates the geometry-dependent
     factors at the center frequency: less accurate, faster in some settings. The element
     options (``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
     ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``, ``n_fft`` and
@@ -167,6 +162,10 @@ class Simulate(Operation):
       under jit without it; inside an outer jit take it from :attr:`zea.Parameters.n_fft`.
 
     ``element_height`` (both simulators) defaults to an eighth of the width of a 1D probe.
+
+    The simulators return noiseless RF; the receive chain (``noise_level_db``, ``tgc_max_db``,
+    ``noise_seed``, ``noise_reference``) is :func:`zea.func.apply_receive_chain`, applied here
+    for every method.
     """
 
     # Define operation-specific static parameters
@@ -214,7 +213,7 @@ class Simulate(Operation):
     def _track_scatter_exponent(self, scatter_exponent):
         """Rebuild the jit when the exponent switches between a concrete scalar and anything
         else, since that moves it between the static and the traced arguments."""
-        static = _ndim(scatter_exponent) == 0 and _concrete(scatter_exponent) is not None
+        static = ndim(scatter_exponent) == 0 and concrete(scatter_exponent) is not None
         if static == self._scatter_exponent_static:
             return
         self._scatter_exponent_static = static
@@ -355,10 +354,6 @@ class Simulate(Operation):
             "two_dimensional": two_dimensional,
             "element_height": element_height,
             "scatter_exponent": scatter_exponent,
-            "noise_level_db": noise_level_db,
-            "tgc_max_db": tgc_max_db,
-            "noise_seed": noise_seed,
-            "noise_reference": noise_reference,
         }
         if max_chunk_gb is not None:
             simulate_kwargs["max_chunk_gb"] = max_chunk_gb
@@ -369,20 +364,18 @@ class Simulate(Operation):
                 **simulate_kwargs,
             )
         else:
-            # A stateless seed inside `map` repeats the same noise for every item, so instead, first
-            # simulate everything and then apply TGC and nosie.
-            mapped_kwargs = {**simulate_kwargs, "noise_level_db": None, "tgc_max_db": 0.0}
             simulated_rf = ops.map(
                 lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
-                    **mapped_kwargs,
+                    **simulate_kwargs,
                 ),
                 {"positions": scatterer_positions, "magnitudes": scatterer_magnitudes},
             )
-            simulated_rf = apply_receive_chain(
-                simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
-            )
+        # After the map: a stateless seed inside it would repeat the noise for every item.
+        simulated_rf = apply_receive_chain(
+            simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
+        )
 
         return {
             self.output_key: simulated_rf,
@@ -741,7 +734,13 @@ class Demodulate(Operation):
 
     ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
 
-    def __init__(self, axis=-3, **kwargs):
+    def __init__(self, axis=-3, pad_fast_time=True, **kwargs):
+        """
+        Args:
+            axis (int): Fast-time (axial) axis to demodulate along. Defaults to -3.
+            pad_fast_time (bool): Avoid circular wraparound in the analytic-signal
+                transform. See :func:`~zea.func.ultrasound.demodulate`. Defaults to True.
+        """
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -749,6 +748,7 @@ class Demodulate(Operation):
             **kwargs,
         )
         self.axis = axis
+        self.pad_fast_time = pad_fast_time
 
     def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
@@ -761,6 +761,7 @@ class Demodulate(Operation):
             demodulation_frequency=demodulation_frequency,
             sampling_frequency=sampling_frequency,
             axis=self.axis,
+            pad_fast_time=self.pad_fast_time,
         )
 
         return {

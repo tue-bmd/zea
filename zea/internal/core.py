@@ -91,6 +91,27 @@ def python_constant(x):
     return tuple(tuple(row) if isinstance(row, list) else row for row in value.tolist())
 
 
+def concrete(x):
+    """numpy view of ``x``, or None when it is traced."""
+    if x is None:
+        return None
+    try:
+        return keras.ops.convert_to_numpy(x)
+    except (RuntimeError, ValueError, TypeError, NotImplementedError):
+        return None
+
+
+def ndim(x):
+    """Rank of ``x`` without converting it, so a traced array is not forced to numpy. A list or
+    tuple counts as the array it converts to."""
+    shape = getattr(x, "shape", None)
+    return np.ndim(x) if shape is None else len(shape)
+
+
+def round_up_to_power_of_two(x):
+    return int(2 ** np.ceil(np.log2(x)))
+
+
 def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
     from zea.config import Config

@@ -170,6 +170,12 @@ def test_iq_matches_demodulated_rf(
     Asserting this pins down the carrier offset, the fftfreq sign convention,
     the even-length Nyquist bin and the inverse-FFT normalization of the IQ
     path all at once.
+
+    Refocus decodes circularly in fast time, so this round trip only holds exactly
+    against an equally circular demodulation. ``pad_fast_time=False`` therefore
+    stays pinned here: the padded default is aperiodic by design, and comparing it
+    against a circular decode would measure that mismatch instead of the frequency
+    conventions above.
     """
     import keras
 
@@ -183,6 +189,7 @@ def test_iq_matches_demodulated_rf(
                 DEMODULATION_FREQ,
                 SAMPLING_FREQ,
                 axis=-3,
+                pad_fast_time=False,
             )
         )
 

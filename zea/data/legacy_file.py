@@ -2,7 +2,7 @@ import numpy as np
 from keras.utils import pad_sequences
 
 from zea import log
-from zea.data.spec import DataSpec
+from zea.data.spec import DataSpec, is_array_like
 
 
 def dict_to_sorted_list(dictionary: dict):
@@ -208,7 +208,8 @@ def legacy_data(data: dict) -> dict:
     """
     formatted = dict(data)
     for key, value in data.items():
-        if not isinstance(value, np.ndarray):
+        # Array-like, not ndarray: a lazily loaded file hands out on-disk arrays here too.
+        if not is_array_like(value):
             continue
         schema_entry = DataSpec.SCHEMA.get(key)
         # raw_data / aligned_data are valid plain-array fields — leave as-is.

@@ -6,25 +6,28 @@ from keras import ops
 from scipy.signal import hilbert
 from scipy.special import jv
 
+from zea.beamform.lens_correction import compute_lens_path_lengths
 from zea.ops import Simulate
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
 from zea.simulator import (
-    _element_model,
-    _element_responses,
-    _resolve_element_height,
-    _resolve_sub_elements,
     butterworth_transfer,
     gaussian_transfer,
     generalized_normal_transfer,
     measured_pulse,
     obliquity_factor,
     simulate_rf,
+    simulate_rf_td,
     square_burst_pulses,
     square_burst_spectrum,
     transmit_pulse,
     transmit_pulses,
 )
-from zea.simulator_time_domain import simulate_rf_td
+from zea.simulator.element import (
+    _resolve_element_height,
+    _resolve_sub_elements,
+    element_model,
+    element_responses,
+)
 
 from .simulator_helpers import (
     CENTER_FREQUENCY,
@@ -198,6 +201,53 @@ def test_curved_probe_normals_point_along_the_arc():
     expected = np.stack([np.sin(angles), np.zeros(16), np.cos(angles)], -1)
     np.testing.assert_allclose(normals, expected, atol=1e-6)
     np.testing.assert_allclose(curved_probe_normals(geometry, radius=40e-3), expected, atol=1e-6)
+
+
+def test_lens_path_follows_the_element_normal():
+    # A scatterer straight ahead of a tilted element crosses a conformal lens at normal
+    # incidence: the lens leg is the thickness, whatever the tilt. The flat-slab lens does not.
+    thickness, distance = 1e-3, 20e-3
+    normals = np.stack(
+        [np.sin(np.deg2rad([0.0, 20.0, 40.0])), np.zeros(3), np.cos(np.deg2rad([0.0, 20.0, 40.0]))],
+        -1,
+    )
+    geometry = np.zeros((3, 3), np.float32)
+    targets = (distance * normals).astype(np.float32)
+    kwargs = {"lens_thickness": thickness, "c_lens": 1000.0, "c_medium": SOUND_SPEED, "n_iter": 3}
+    lens_len, medium_len = compute_lens_path_lengths(
+        geometry, targets, element_normals=normals, **kwargs
+    )
+    np.testing.assert_allclose(np.diag(to_np(lens_len)), thickness, rtol=1e-4)
+    np.testing.assert_allclose(np.diag(to_np(medium_len)), distance - thickness, rtol=1e-4)
+    flat_lens, flat_medium = compute_lens_path_lengths(geometry, targets, **kwargs)
+    np.testing.assert_allclose(to_np(flat_lens)[:, 0], to_np(lens_len)[:, 0], rtol=1e-6)
+    # Snell at 40 degrees, up to the far endpoint being fixed rather than the medium angle.
+    lens_angle = np.arcsin(1000.0 / SOUND_SPEED * np.sin(np.deg2rad(40.0)))
+    np.testing.assert_allclose(to_np(flat_lens)[2, 2], thickness / np.cos(lens_angle), rtol=1e-2)
+
+
+@pytest.mark.parametrize("n_sub_elements", [None, (2, 2)])
+def test_lens_correction_is_conformal_on_a_curved_probe(n_sub_elements):
+    # On an arc, element i firing alone at a scatterer on its own normal is element 0's scene
+    # rotated about the centre of curvature, so the records must match. A flat lens breaks that.
+    geometry = create_curved_probe_geometry(16, 2e-3, 40e-3)  # edge elements tilted 21 degrees
+    normals = curved_probe_normals(geometry)
+    records = {}
+    for with_normals in (False, True):
+        for i in (0, 8, 15):
+            scene = _scene(
+                geometry,
+                geometry[i] + 20e-3 * normals[i],
+                apply_lens_correction=True,
+                n_sub_elements=n_sub_elements,
+                element_normals=normals if with_normals else None,
+                tx_apodizations=np.eye(16, dtype=np.float32)[i][None],
+            )
+            records[with_normals, i] = to_np(simulate_rf(**scene))[0, :, i, 0]
+    assert rel_err(records[True, 8], records[True, 0]) < 1e-3
+    assert rel_err(records[True, 8], records[True, 15]) < 1e-3
+    assert rel_err(records[False, 8], records[False, 0]) > 0.1
+    assert rel_err(records[False, 8], records[False, 15]) > 0.1
 
 
 def _half_max_width(rf):
@@ -520,7 +570,7 @@ def test_default_element_height_is_an_eighth_of_the_aperture_of_a_1d_probe():
     assert tilted == pytest.approx(height, rel=1e-5)
     curved = create_curved_probe_geometry(128, 0.508e-3, 49.57e-3)  # C5-2v, chord 60.4 mm
     assert _resolve_element_height(curved, 0.46e-3, None) == pytest.approx(7.6e-3, abs=1e-4)
-    model = _element_model(
+    model = element_model(
         linear_probe(128),
         SOUND_SPEED,
         CENTER_FREQUENCY,
@@ -690,7 +740,7 @@ def test_lens_spreading_matches_the_sommerfeld_slab():
     y = np.concatenate([np.linspace(-6e-3, 6e-3, 13), np.zeros(4)])
     z = np.concatenate([np.full(13, 20e-3), [5e-3, 10e-3, 30e-3, 40e-3]])
     positions = np.stack([np.zeros_like(y), y, z], -1).astype(np.float32)
-    model = _element_model(
+    model = element_model(
         np.zeros((1, 3), np.float32),
         SOUND_SPEED,
         CENTER_FREQUENCY,
@@ -708,7 +758,7 @@ def test_lens_spreading_matches_the_sommerfeld_slab():
         elevation_focus=None,
         lens_attenuation_coef=0.0,
     )
-    _, rx, _ = _element_responses(
+    _, rx, _ = element_responses(
         ops.convert_to_tensor(positions),
         model,
         ops.convert_to_tensor(np.array([CENTER_FREQUENCY], np.float32)),
