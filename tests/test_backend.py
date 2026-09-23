@@ -212,10 +212,14 @@ class TestJit:
     @run_in_backend("jax")
     def test_compiler_options_inside_outer_jit():
         """JAX refuses ``compiler_options`` on a nested jit; the function then compiles
-        as part of the outer one instead of raising (e.g. a pipeline under ``jax.jit``)."""
+        as part of the outer one instead of raising (e.g. a pipeline under ``jax.jit``),
+        with a single warning on how to apply the options there."""
+        import unittest.mock
+
         import jax
         import numpy as np
 
+        import zea.backend
         from zea.backend import jit
 
         flag = "xla_gpu_experimental_enable_fusion_autotuner"
@@ -224,8 +228,16 @@ class TestJit:
             {"compiler_options": {flag: False}},
         ):
             compiled = jit(lambda x: x * 2, **kwargs)
-            outer = jax.jit(jax.value_and_grad(lambda x: compiled(x).sum()))
-            value, grad = outer(np.ones(2, dtype="float32"))
+            # The test worker disables jit, which would leave nothing to nest in.
+            with (
+                jax.disable_jit(False),
+                unittest.mock.patch.object(zea.backend.log, "warning") as warning,
+            ):
+                outer = jax.jit(jax.value_and_grad(lambda x: compiled(x).sum()))
+                value, grad = outer(np.ones(2, dtype="float32"))
+                jax.jit(lambda x: compiled(x) + 1)(np.ones(2, dtype="float32"))
+            warning.assert_called_once()
+            assert f"XLA_FLAGS='--{flag}=false'" in warning.call_args.args[0]
             np.testing.assert_allclose(value, 4.0)
             np.testing.assert_allclose(grad, 2.0)
             # Still usable at the top level afterwards.

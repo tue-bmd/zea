@@ -201,13 +201,15 @@ def _jax_jit_with_compiler_options(func, default_compiler_options, jit_kwargs):
 
     JAX only accepts ``compiler_options`` on a top-level ``jax.jit``. Called inside
     another trace, for example a pipeline inside the user's own ``jax.jit``, the function
-    is compiled as part of the outer function, whose options then apply.
+    is compiled as part of the outer function, whose options then apply; a warning
+    explains how to pass them there instead.
 
     The support check compiles a function, which would start the JAX backend. That has
     to wait until the first call: a pipeline built before :func:`zea.init_device` would
     otherwise fix the visible devices before they are selected.
     """
-    jitted = None  # (top_level, nested), built on the first call
+    jitted = None  # (top_level, nested, compiler_options), built on the first call
+    warned = False
 
     def build():
         compiler_options = {
@@ -220,15 +222,16 @@ def _jax_jit_with_compiler_options(func, default_compiler_options, jit_kwargs):
         options = {k: v for k, v in jit_kwargs.items() if k != "compiler_options"}
         nested = jax_mod.jit(func, **options)
         if not compiler_options:
-            return nested, nested
-        return jax_mod.jit(func, **options, compiler_options=compiler_options), nested
+            return nested, nested, compiler_options
+        top_level = jax_mod.jit(func, **options, compiler_options=compiler_options)
+        return top_level, nested, compiler_options
 
     @functools.wraps(func)
     def call(*args, **kwargs):
-        nonlocal jitted
+        nonlocal jitted, warned
         if jitted is None:
             jitted = build()
-        top_level, nested = jitted
+        top_level, nested, compiler_options = jitted
         if top_level is nested:
             return nested(*args, **kwargs)
         try:
@@ -236,9 +239,26 @@ def _jax_jit_with_compiler_options(func, default_compiler_options, jit_kwargs):
         except ValueError as exc:
             if "compiler_options" not in str(exc):
                 raise
+            if not warned:
+                warned = True
+                _warn_compiler_options_dropped(func, compiler_options)
             return nested(*args, **kwargs)
 
     return call
+
+
+def _warn_compiler_options_dropped(func, options):
+    """Warn that ``options`` are lost because ``func`` is jit as an inner function."""
+    name = getattr(func, "__qualname__", repr(func))
+    xla_flags = " ".join(
+        f"--{k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in options.items()
+    )
+    log.warning(
+        f"{name} is traced inside another jax.jit, which does not allow its XLA compiler_options"
+        f"{options}; without them compilation can be much slower. Pass them to the outer"
+        f"function `jax.jit(f, compiler_options={options})`, or set XLA_FLAGS='{xla_flags}' "
+        f"before importing JAX."
+    )
 
 
 class device:
