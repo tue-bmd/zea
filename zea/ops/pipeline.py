@@ -18,7 +18,7 @@ from zea.internal.ops_list import OperationList
 from zea.internal.precision import LOW_PRECISION_DTYPES
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
-from zea.ops.base import Operation, get_ops, merge_jit_kwargs
+from zea.ops.base import Operation, get_ops
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     AlignedApodization,
@@ -101,22 +101,6 @@ def _summarize_inputs(inputs: Dict[str, Any]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-# jit_kwargs that refer to the arguments of one specific function (static or donated
-# arguments, shardings, TensorFlow's input_signature). A pipeline applies them to its own
-# call only; the operations inside it never inherit them.
-_NON_INHERITED_JIT_KWARGS = frozenset(
-    {
-        "static_argnames",
-        "static_argnums",
-        "donate_argnames",
-        "donate_argnums",
-        "in_shardings",
-        "out_shardings",
-        "input_signature",
-    }
-)
-
-
 @ops_registry("pipeline")
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of
@@ -155,14 +139,6 @@ class Pipeline:
                 Defaults to "ops".
 
             jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
-                Operations and nested pipelines that compile themselves (for example with
-                ``jit_options="ops"``) inherit them, with their own ``jit_kwargs`` taking
-                precedence. Keywords that refer to specific arguments are not inherited
-                (``static_argnames``, ``static_argnums``, ``donate_argnames``,
-                ``donate_argnums``, ``in_shardings``, ``out_shardings`` and
-                ``input_signature``). ``compiler_options`` are merged per option, and
-                also override the XLA options that operations declare themselves (see
-                :attr:`compiler_options`).
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
             validate (bool, optional): Whether to validate the pipeline. Defaults to True.
             timed (bool, optional): Whether to time each operation. Defaults to False.
@@ -225,9 +201,6 @@ class Pipeline:
         # pipeline already runs inside that trace. Updated by the parent via
         # _configure_jit; defaults to False for a standalone/root pipeline.
         self._inside_outer_jit = False
-        # jit_kwargs the enclosing pipelines were given. Updated by the parent via
-        # _configure_jit; empty for a standalone/root pipeline.
-        self._inherited_jit_kwargs = {}
         self.jit_options = jit_options  # will handle the jit compilation
         self.device = device
 
@@ -284,19 +257,9 @@ class Pipeline:
             compiler_options.update(operation.compiler_options)
         return compiler_options
 
-    def _jit_kwargs_for_children(self) -> dict:
-        """jit_kwargs that operations compiling themselves inside this pipeline inherit.
-
-        Keywords tied to the signature of one function (``_NON_INHERITED_JIT_KWARGS``)
-        are left out: they only apply to this pipeline's own call.
-        """
-        own = {k: v for k, v in self._user_jit_kwargs.items() if k not in _NON_INHERITED_JIT_KWARGS}
-        return merge_jit_kwargs(self._inherited_jit_kwargs, own)
-
     def _compile(self, func):
-        """JIT compile ``func`` with this pipeline's (and its parents') jit_kwargs."""
-        jit_kwargs = merge_jit_kwargs(self._inherited_jit_kwargs, self.jit_kwargs)
-        return jit(func, **jit_kwargs, default_compiler_options=self.compiler_options)
+        """JIT compile ``func`` with this pipeline's jit_kwargs and compiler options."""
+        return jit(func, **self.jit_kwargs, default_compiler_options=self.compiler_options)
 
     @property
     def needs_keys(self) -> set:
@@ -637,28 +600,19 @@ class Pipeline:
         """Set the jit_options property of the pipeline."""
         self._configure_jit(value, inside_outer_jit=self._inside_outer_jit)
 
-    def _configure_jit(
-        self,
-        value: Union[str, None],
-        inside_outer_jit: bool,
-        inherited_jit_kwargs: dict | None = None,
-    ):
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
         """Recursively configure JIT for this pipeline and all descendants.
 
         Args:
             value: jit_options for this pipeline ("pipeline", "ops", or None).
             inside_outer_jit: True if an enclosing pipeline is JIT-compiled as a
                 whole, so this pipeline already runs inside a trace.
-            inherited_jit_kwargs: jit_kwargs of the enclosing pipelines. None keeps
-                the ones this pipeline already inherited.
         """
         if value not in ("pipeline", "ops", None):
             raise ValueError(f"jit_options must be 'pipeline', 'ops', or None, got {value!r}")
 
         self._jit_options = value
         self._inside_outer_jit = inside_outer_jit
-        if inherited_jit_kwargs is not None:
-            self._inherited_jit_kwargs = inherited_jit_kwargs
         self.set_jit(value == "pipeline")
 
         # Children run inside a trace if we compile ourselves as a whole, or we
@@ -666,16 +620,10 @@ class Pipeline:
         # jit_options is forced to None.
         child_inside_outer_jit = inside_outer_jit or value == "pipeline"
         child_value = None if child_inside_outer_jit else value
-        child_jit_kwargs = self._jit_kwargs_for_children()
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation._configure_jit(
-                    child_value,
-                    inside_outer_jit=child_inside_outer_jit,
-                    inherited_jit_kwargs=child_jit_kwargs,
-                )
+                operation._configure_jit(child_value, inside_outer_jit=child_inside_outer_jit)
             else:
-                operation._inherited_jit_kwargs = child_jit_kwargs
                 operation.set_jit(child_value == "ops")
                 operation._inside_outer_jit = child_inside_outer_jit
 
@@ -1191,12 +1139,7 @@ class Map(Pipeline):
 
         return out
 
-    def _configure_jit(
-        self,
-        value: Union[str, None],
-        inside_outer_jit: bool,
-        inherited_jit_kwargs: dict | None = None,
-    ):
+    def _configure_jit(self, value: Union[str, None], inside_outer_jit: bool):
         """Configure JIT for this Map and its inner operations.
 
         Map compiles its entire mapped call as a single unit whenever it self-jits
@@ -1208,22 +1151,14 @@ class Map(Pipeline):
 
         self._jit_options = value
         self._inside_outer_jit = inside_outer_jit
-        if inherited_jit_kwargs is not None:
-            self._inherited_jit_kwargs = inherited_jit_kwargs
         self.set_jit(value is not None)
 
         # Inner ops run inside a trace if Map self-jits or an outer pipeline does.
         child_inside_outer_jit = value is not None or inside_outer_jit
-        child_jit_kwargs = self._jit_kwargs_for_children()
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                operation._configure_jit(
-                    None,
-                    inside_outer_jit=child_inside_outer_jit,
-                    inherited_jit_kwargs=child_jit_kwargs,
-                )
+                operation._configure_jit(None, inside_outer_jit=child_inside_outer_jit)
             else:
-                operation._inherited_jit_kwargs = child_jit_kwargs
                 operation.set_jit(False)
                 operation._inside_outer_jit = child_inside_outer_jit
 
