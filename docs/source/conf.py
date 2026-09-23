@@ -66,6 +66,8 @@ exclude_patterns = [
     "_autosummary/zea.models.hvae.model.rst",
     "_autosummary/zea.models.hvae.utils.rst",
     "_autosummary/zea.cli_args.rst",
+    "_autosummary/zea.simulator.*.rst",
+    "_autosummary/zea.simulator_time_domain.rst",
 ]
 
 autodoc_default_options = {
