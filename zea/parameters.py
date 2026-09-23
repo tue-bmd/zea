@@ -120,7 +120,6 @@ from zea.internal.parameters import BaseParameters, MissingDependencyError, cach
 from zea.internal.utils import deprecated, renamed_items
 from zea.probes import Probe, fit_curved_probe_radius
 from zea.simulator import fft_length
-from zea.simulator.record import _shift_np
 
 
 class Parameters(BaseParameters):
@@ -1132,15 +1131,15 @@ class Parameters(BaseParameters):
         n_fft = self._params.get("n_fft")
         if n_fft is not None:
             return n_fft
-        shift = _shift_np(self.t0_delays, self.initial_times, self.t_peak)  # rank-aware (mpt)
         return fft_length(
             self.n_ax,
             self.sampling_frequency,
             self.center_frequency,
             self.sound_speed,
             self.probe_geometry,
-            shift.min(),
-            shift.max(),
+            self.t0_delays,
+            self.initial_times,
+            self.t_peak,
             waveforms_two_way=self.waveforms_two_way,
             waveform_sampling_frequency=self.waveform_sampling_frequency,
             sos_map=self.sos_map,

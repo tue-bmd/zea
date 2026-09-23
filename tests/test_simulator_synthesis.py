@@ -555,15 +555,15 @@ def test_parameters_derive_n_fft_for_a_jitted_pipeline():
         element_width=0.27e-3,
         attenuation_coef=0.5,
     )
-    shift = transmit["t0_delays"]
     expected = fft_length(
         N_AX,
         SAMPLING_FREQUENCY,
         CENTER_FREQUENCY,
         SOUND_SPEED,
         transmit["probe_geometry"],
-        shift.min(),
-        shift.max(),
+        transmit["t0_delays"],
+        transmit["initial_times"],
+        transmit["t_peak"],
     )
     assert parameters.n_fft == expected
     parameters.n_fft = 1024
@@ -618,15 +618,15 @@ def test_multi_plane_delays_derive_n_fft():
     kwargs["t0_delays"] = np.stack([single, single + 2e-6], axis=1)
     kwargs["initial_times"] = np.full(4, 1e-6, np.float32)
     kwargs["t_peak"] = np.linspace(0, 1e-6, 4, dtype=np.float32)
-    shift = kwargs["t0_delays"] + (kwargs["t_peak"] - kwargs["initial_times"])[:, None, None]
     expected = fft_length(
         N_AX,
         SAMPLING_FREQUENCY,
         CENTER_FREQUENCY,
         SOUND_SPEED,
         kwargs["probe_geometry"],
-        shift.min(),
-        shift.max(),
+        kwargs["t0_delays"],
+        kwargs["initial_times"],
+        kwargs["t_peak"],
     )
     assert _derived_fft_length(kwargs) == expected
     assert _parameters(kwargs).n_fft == expected
@@ -643,15 +643,15 @@ def test_parameters_use_the_waveform_sampling_frequency():
     default = _parameters(transmit, waveforms_two_way=waveform)
     at_rate = _parameters(transmit, waveforms_two_way=waveform, waveform_sampling_frequency=50e6)
     np.testing.assert_allclose(at_rate.t_peak, 5 * default.t_peak, rtol=0.05)
-    shift = transmit["t0_delays"] + (at_rate.t_peak - transmit["initial_times"])[:, None]
     assert at_rate.n_fft == fft_length(
         N_AX,
         SAMPLING_FREQUENCY,
         CENTER_FREQUENCY,
         SOUND_SPEED,
         transmit["probe_geometry"],
-        shift.min(),
-        shift.max(),
+        transmit["t0_delays"],
+        transmit["initial_times"],
+        at_rate.t_peak,
         waveforms_two_way=waveform,
         waveform_sampling_frequency=50e6,
     )
@@ -820,33 +820,14 @@ def test_op_traces_a_per_scatterer_scatter_exponent():
 def test_smooth_size_and_fft_length():
     assert [smooth_size(n) for n in (1, 7, 100, 601, 1025)] == [1, 8, 100, 625, 1080]
     geometry = linear_probe()
-    n_fft = fft_length(N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, geometry, 0, 0)
+    common = (N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, geometry)
+    no_shift = (np.zeros((1, len(geometry))), np.zeros(1), np.zeros(1))
+    n_fft = fft_length(*common, *no_shift)
     assert n_fft >= N_AX
     assert n_fft == smooth_size(n_fft)
     # The farthest scatterer bounds the length below the aperture bound when it is closer.
     near = np.array([[0.0, 0.0, 5e-3]])
-    assert (
-        fft_length(
-            N_AX,
-            SAMPLING_FREQUENCY,
-            CENTER_FREQUENCY,
-            SOUND_SPEED,
-            geometry,
-            0,
-            0,
-            scatterer_positions=near,
-        )
-        <= n_fft
-    )
+    assert fft_length(*common, *no_shift, scatterer_positions=near) <= n_fft
     # A longer pulse needs a longer FFT.
-    longer = fft_length(
-        N_AX,
-        SAMPLING_FREQUENCY,
-        CENTER_FREQUENCY,
-        SOUND_SPEED,
-        geometry,
-        0,
-        0,
-        waveforms_two_way=hann_waveform(32.0),
-    )
+    longer = fft_length(*common, *no_shift, waveforms_two_way=hann_waveform(32.0))
     assert longer > n_fft

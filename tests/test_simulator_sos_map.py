@@ -290,13 +290,13 @@ def test_fft_length_grows_with_the_map_and_keeps_the_echoes_from_wrapping():
     kwargs.update(
         scatterer_positions=positions, scatterer_magnitudes=np.ones(len(positions), np.float32)
     )
-    shift = kwargs["t0_delays"]
     common = (N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, kwargs["probe_geometry"])
-    homogeneous = fft_length(*common, shift.min(), shift.max())
-    mapped = fft_length(*common, shift.min(), shift.max(), sos_map=trio["sos_map"])
+    delays = (kwargs["t0_delays"], kwargs["initial_times"], kwargs["t_peak"])
+    homogeneous = fft_length(*common, *delays)
+    mapped = fft_length(*common, *delays, sos_map=trio["sos_map"])
     assert mapped > homogeneous
     # Only the extremes of the map matter, not its shape.
-    assert mapped == fft_length(*common, shift.min(), shift.max(), sos_map=[[1000.0, 1540.0]])
+    assert mapped == fft_length(*common, *delays, sos_map=[[1000.0, 1540.0]])
 
     # The derived length holds every echo, up to the faint tail of the synthesis that a longer
     # record also shows for a homogeneous medium; the homogeneous bound wraps the late echoes.
@@ -337,15 +337,15 @@ def test_parameters_derive_n_fft_from_the_map():
         attenuation_coef=0.0,
         **trio,
     )
-    shift = kwargs["t0_delays"]
     common = (N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, kwargs["probe_geometry"])
-    expected = fft_length(*common, shift.min(), shift.max(), sos_map=trio["sos_map"])
+    delays = (kwargs["t0_delays"], kwargs["initial_times"], kwargs["t_peak"])
+    expected = fft_length(*common, *delays, sos_map=trio["sos_map"])
     assert parameters.n_fft == expected
-    assert expected > fft_length(*common, shift.min(), shift.max())
+    assert expected > fft_length(*common, *delays)
     parameters.sos_map = None
     parameters.map_grid_x = None
     parameters.map_grid_z = None
-    assert parameters.n_fft == fft_length(*common, shift.min(), shift.max())
+    assert parameters.n_fft == fft_length(*common, *delays)
     parameters.sos_map = trio["sos_map"]
     parameters.map_grid_x = trio["map_grid_x"]
     parameters.map_grid_z = trio["map_grid_z"]

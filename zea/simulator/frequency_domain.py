@@ -24,7 +24,6 @@ from zea.simulator.record import (
     _record_gate_time,
     _record_keep,
     _resolve_scatter_exponent,
-    _shift_np,
     _sound_speed_minmax,
     _transmit_shift,
     _validate_scatter_exponent,
@@ -282,14 +281,14 @@ def simulate_rf(
     def bound():
         """Samples that hold every echo (see :func:`fft_length`), from the concrete inputs."""
         t0_np, t_init_np, t_peak_np, geom_np, c_np = raw
-        shift_np = _shift_np(t0_np, t_init_np, t_peak_np)
         return _fft_bound(
             n_ax,
             fs,
             float(c_np),
             geom_np,
-            shift_np.min(),
-            shift_np.max(),
+            t0_np,
+            t_init_np,
+            t_peak_np,
             pulses,
             concrete(positions),
             map_np,

@@ -8,7 +8,6 @@ from keras import ops
 from zea.internal.core import concrete, ndim, round_up_to_power_of_two
 from zea.simulator.element import (
     _as_f32,
-    _element_frame,
     _one_way_time,
     _ray_slowness,
     _ray_starts,
@@ -219,7 +218,8 @@ def in_record(
     geometry = ops.cast(probe_geometry, "float32")
     if two_dimensional:
         positions = _snap_elevation(positions, geometry)
-    apply_lens_correction = bool(apply_lens_correction)
+    # No lens speed is no lens, as in record_reach.
+    apply_lens_correction = bool(apply_lens_correction) and lens_sound_speed is not None
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
     slowness = _ray_slowness(
         positions,
@@ -231,16 +231,15 @@ def in_record(
         map_grid_y,
         n_sos_ray_samples,
     )
-    lens_normals = None if element_normals is None else _element_frame(element_normals).normal
     tau = _one_way_time(
         positions,
         geometry,
+        _as_f32(sound_speed),
         apply_lens_correction,
         _as_f32(lens_thickness),
         _as_f32(lens_sound_speed),
-        _as_f32(sound_speed),
+        element_normals,
         slowness,
-        lens_normals,
     )
     pulses = transmit_pulses(
         None,
@@ -308,8 +307,9 @@ def fft_length(
     center_frequency,
     sound_speed,
     probe_geometry,
-    shift_min,
-    shift_max,
+    t0_delays,
+    initial_times,
+    t_peak,
     waveforms_two_way=None,
     waveform_sampling_frequency=250e6,
     scatterer_positions=None,
@@ -320,7 +320,8 @@ def fft_length(
     A kept scatterer has its earliest echo inside the record, so its last one is at most the
     aperture round trip, the spread of the transmit shifts and one pulse later. When the
     positions are given the bound from the farthest scatterer is used if smaller. When using a
-    sound speed map, uses the worst case based on the min/max speeds in the map.
+    sound speed map, uses the worst case based on the min/max speeds in the map. Every input
+    must be concrete; :class:`zea.ops.Simulate` and :attr:`zea.Parameters.n_fft` call this.
 
     Args:
         n_ax (int): Number of axial samples in the record.
@@ -328,8 +329,9 @@ def fft_length(
         center_frequency (float): Pulse center frequency in Hz.
         sound_speed (float): Speed of sound in m/s.
         probe_geometry (array-like): Element positions of shape (n_el, 3).
-        shift_min (float): Smallest transmit shift (``t0_delays - initial_times + t_peak``).
-        shift_max (float): Largest transmit shift.
+        t0_delays (array-like): Transmit delays [s] of shape (n_tx, n_el) or (n_tx, n_mpt, n_el).
+        initial_times (array-like): Record start times [s] of shape (n_tx,).
+        t_peak (array-like): Pulse peak times [s] of shape (n_tx,).
         waveforms_two_way (array-like, optional): The transmit waveforms of
             :func:`simulate_rf`; None is its default pulse.
         waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``.
@@ -352,8 +354,9 @@ def fft_length(
             sampling_frequency,
             sound_speed,
             probe_geometry,
-            shift_min,
-            shift_max,
+            t0_delays,
+            initial_times,
+            t_peak,
             pulses,
             scatterer_positions,
             sos_map,
@@ -366,15 +369,17 @@ def _fft_bound(
     sampling_frequency,
     sound_speed,
     probe_geometry,
-    shift_min,
-    shift_max,
+    t0_delays,
+    initial_times,
+    t_peak,
     pulses,
     scatterer_positions=None,
     sos_map=None,
 ):
     """Samples that hold every kept echo, before rounding: see :func:`fft_length`."""
     n_ax, fs = int(n_ax), float(sampling_frequency)
-    shift_min, shift_max = float(shift_min), float(shift_max)
+    shift = _shift_np(t0_delays, initial_times, t_peak)
+    shift_min, shift_max = float(shift.min()), float(shift.max())
     c_min, c_max = _sound_speed_minmax(sound_speed, sos_map)
     geometry = np.asarray(probe_geometry, np.float64)
     pulse = 2 * _pulse_span(pulses)
@@ -449,7 +454,7 @@ def _resolve_scatter_exponent(scatter_exponent):
     if ndim(scatter_exponent) == 0:
         value = concrete(scatter_exponent)
         if value is not None:
-            return float(value) or None
+            return None if float(value) == 0.0 else float(value)
     return ops.cast(scatter_exponent, "float32")
 
 

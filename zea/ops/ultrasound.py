@@ -37,7 +37,6 @@ from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated, renamed_keywords
 from zea.ops.base import Filter, Operation
 from zea.simulator import fft_length, scatter_exponent_bounds, simulate_rf, simulate_rf_td
-from zea.simulator.record import _shift_np
 from zea.utils import canonicalize_axis
 
 # Different function arguments, so annotate as Callable to avoid the type checker trying to check
@@ -111,15 +110,15 @@ def _derived_fft_length(kwargs):
         if sos_map is None:
             return None
     t0, t_init, t_peak, geometry, sound_speed = raw
-    shift = _shift_np(t0, t_init, t_peak)  # rank-aware: t0 may hold multi-plane delay sets
     return fft_length(
         int(kwargs["n_ax"]),
         float(kwargs["sampling_frequency"]),
         float(kwargs["center_frequency"]),
         float(sound_speed),
         geometry,
-        shift.min(),
-        shift.max(),
+        t0,
+        t_init,
+        t_peak,
         kwargs.get("waveforms_two_way"),
         kwargs.get("waveform_sampling_frequency", 250e6),
         sos_map=sos_map,
@@ -133,18 +132,15 @@ class Simulate(Operation):
     ``method`` selects the simulator. ``"frequency_domain"`` (default) is
     :func:`zea.simulator.simulate_rf`, the full model. ``"time_domain"`` is
     :func:`zea.simulator.simulate_rf_td`, which evaluates the geometry-dependent
-    factors at the center frequency: less accurate, faster in some settings. The element
-    options (``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
-    ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``, ``n_fft`` and
-    ``scatter_exponent_range``) reach the frequency-domain simulator only; the time-domain
-    simulator warns once when one of them is set to something it cannot honor. The transmit
+    factors at the center frequency: less accurate, faster in some settings. The transmit
     pulse is ``waveforms_two_way`` (the one of a
     :class:`zea.Parameters` or zea file, or built with :func:`zea.simulator.transmit_pulse`),
     and the default pulse of that function without. The old names ``"exact"``,
     ``"frequency_approximation"`` and ``"time_approximation"`` are deprecated aliases, accepted
     with a warning.
 
-    Frequency-domain only arguments:
+    Frequency-domain only arguments, which the time-domain simulator warns once about when one
+    of them is set to something it cannot honor:
 
     - Element model: ``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
       ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``.

@@ -3,12 +3,12 @@ with the transmit pulse."""
 
 from keras import ops
 
-from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 from zea.internal.core import ndim
 from zea.simulator.element import (
     _element_angles,
     _element_frame,
+    _one_way_time,
     _scene_positions,
     attenuate,
     element_model,
@@ -191,7 +191,15 @@ def _scatterer_response(positions, magnitudes, model, center_frequency):
         two_way_time (array-like): The (n_scat, n_tx_el, n_rx_el) round-trip travel
             time [s], excluding transmit delays and initial times.
     """
-    physical_distance = _one_way_distances(positions, model)
+    # Through a lens, the medium distance with the travel time of the refracted path.
+    physical_distance = model.sound_speed * _one_way_time(
+        positions,
+        model.geometry,
+        model.sound_speed,
+        model.apply_lens_correction,
+        model.lens_thickness,
+        model.lens_sound_speed,
+    )
     # Half a wavelength at least for the travel time and the spreading, as in simulate_rf.
     # The attenuation keeps the physical path length, as there.
     one_way_distance = ops.maximum(physical_distance, model.min_dist)
@@ -209,24 +217,6 @@ def _scatterer_response(positions, magnitudes, model, center_frequency):
     base_gain = magnitudes[:, None, None] * directivity_pair * spread_attenuation
     two_way_time = travel_time[:, :, None] + travel_time[:, None, :]
     return base_gain, two_way_time
-
-
-def _one_way_distances(positions, model):
-    """One-way path length [m] from each element center to each position, (n_scat, n_el).
-
-    Through a lens it is the medium distance with the travel time of the refracted path.
-    """
-    if not model.apply_lens_correction:
-        return ops.linalg.norm(positions[:, None] - model.geometry[None], axis=-1)
-    travel_times = compute_lens_corrected_travel_times(
-        model.geometry,
-        positions,
-        lens_thickness=model.lens_thickness,
-        c_lens=model.lens_sound_speed,
-        c_medium=model.sound_speed,
-        n_iter=3,
-    )
-    return travel_times * model.sound_speed
 
 
 def _element_directivity(positions, model, frequency):

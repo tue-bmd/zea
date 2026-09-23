@@ -249,12 +249,12 @@ def element_responses(positions, model, freqs, slowness=None, attenuation=None):
     tau = _one_way_time(
         positions,
         model.geometry,
+        model.sound_speed,
         model.apply_lens_correction,
         model.lens_thickness,
         model.lens_sound_speed,
-        model.sound_speed,
+        model.element_normals,
         slowness,
-        lens_normals,
     )
     return responses[0], responses[-1], tau
 
@@ -483,22 +483,22 @@ def _mean_over_sub_elements(response, n_sub):
 def _one_way_time(
     positions,
     geometry,
+    sound_speed,
     apply_lens_correction,
     lens_thickness,
     lens_sound_speed,
-    sound_speed,
+    element_normals=None,
     slowness=None,
-    lens_normals=None,
 ):
     """One-way travel time [s, e] from each element center to each position: straight, or the
-    shortest path through the lens, whose face follows ``lens_normals`` when given.
-
-    ``slowness`` is the mean slowness of each straight ray (:func:`_ray_slowness`), or None for
-    ``1 / sound_speed``.
+    shortest path through the lens, whose face is normal to each element (+z without
+    ``element_normals``). ``slowness`` is the mean slowness of each straight ray
+    (:func:`_ray_slowness`), or None for ``1 / sound_speed``.
     """
     if not apply_lens_correction:
         length = ops.linalg.norm(positions[:, None] - geometry[None], axis=-1)
         return _medium_time(length, sound_speed, slowness)
+    lens_normals = None if element_normals is None else _element_frame(element_normals).normal
     lens_len, medium_len = compute_lens_path_lengths(
         geometry,
         positions,
