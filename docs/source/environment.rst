@@ -27,6 +27,13 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - If set to ``1`` will write to a temporary cache directory that is deleted after the program exits.
      - ``0``
      - ``0``, ``1``
+   * - ``ZEA_TRUST_REMOTE_CODE``
+     - If set to ``1``, allow a pipeline config's ``imports`` to fetch and execute a
+       Python module from a remote location (``hf://``). Equivalent to passing
+       ``--trust-remote-code`` to ``zea process``. Off by default, because it runs code
+       from someone else's repository on your machine. See :ref:`pipeline-imports`.
+     - ``0``
+     - ``0``, ``1``
    * - ``ZEA_NVIDIA_SMI_TIMEOUT``
      - Timeout in seconds for calling ``nvidia-smi`` to get GPU information during :func:`zea.init_device`.
      - ``30``

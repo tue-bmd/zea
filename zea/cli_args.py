@@ -192,6 +192,22 @@ class ProcessArgs:
             "Only valid when --save-as hdf5."
         ),
     ] = False
+    imports: Annotated[
+        list[str],
+        tyro.conf.arg(
+            aliases=["-i", "--import"],
+            help="Modules defining custom operations, imported before the pipeline is built. "
+            "Each is a dotted module path, a path to a .py file, or an hf:// URI. "
+            "Configs can declare these themselves under 'pipeline: imports:'.",
+        ),
+    ] = field(default_factory=list)
+    trust_remote_code: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Allow imports fetched from a remote location (hf://) to be executed. "
+            "Off by default because that runs code from the repo on your machine.",
+        ),
+    ] = False
 
     def run(self) -> None:
         """Beamform the dataset with the configured pipeline."""
@@ -212,6 +228,8 @@ class ProcessArgs:
             revision=self.revision,
             config_revision=self.config_revision,
             track=self.track,
+            imports=self.imports,
+            trust_remote_code=self.trust_remote_code,
         )
 
 

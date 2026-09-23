@@ -36,6 +36,13 @@ PARAMETER_DESCRIPTIONS = {
             "The operations to perform on the data. This is a list of dictionaries, "
             "where each dictionary contains the parameters for a single operation."
         ),
+        "imports": (
+            "Modules defining custom operations that this pipeline uses, imported before "
+            "the operation names are resolved. Each entry is a dotted module path "
+            "(my_project.my_ops), a path to a .py file (absolute, or relative to this "
+            "config), or a Hugging Face URI (hf://org/repo/path/to/module.py). Remote "
+            "entries require --trust-remote-code. Defaults to None."
+        ),
         "with_batch_dim": (
             "Whether operations should expect a batch dimension in the input. Defaults to True."
         ),

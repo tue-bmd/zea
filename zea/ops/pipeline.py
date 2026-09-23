@@ -19,6 +19,7 @@ from zea.internal.precision import LOW_PRECISION_DTYPES
 from zea.internal.registry import beamformer_registry, ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Operation, get_ops
+from zea.ops.imports import import_ops_modules, parent_location
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     AlignedApodization,
@@ -117,6 +118,7 @@ class Pipeline:
         validate=True,
         timed: bool = False,
         device: Union[str, None] = None,
+        imports: Sequence[str] | None = None,
     ):
         """
         Initialize a pipeline.
@@ -149,10 +151,22 @@ class Pipeline:
                 input tensors to the device for the ``torch`` backend and wraps
                 the call in a device context for JAX / TensorFlow.  Defaults to
                 ``None`` (no device placement).
+            imports (list of str, optional): Modules that define the custom operations
+                this pipeline uses, recorded so that they travel with the pipeline when
+                it is serialized. Each entry is a dotted module path, a ``.py`` path, or
+                an ``hf://`` URI; see :ref:`custom-ops`. The modules are imported when a
+                pipeline is *loaded* from a config, not here. Defaults to ``None``.
 
         """
         self._call_pipeline = self.call
         self.name = name
+        # Not ``imports or []``: a config round-trip hands these back as a numpy
+        # array, whose truth value is ambiguous.
+        if imports is None:
+            imports = []
+        elif isinstance(imports, str):
+            imports = [imports]
+        self.imports = [str(module) for module in imports]
 
         self._pipeline_layers: List[Union[Operation, "Pipeline"]] = list(operations)
 
@@ -779,6 +793,8 @@ class Pipeline:
 
         if compact:
             params = {}
+            if self.imports:
+                params["imports"] = list(self.imports)
             if not self.with_batch_dim:
                 params["with_batch_dim"] = self.with_batch_dim
             if self.jit_options != "ops":
@@ -791,6 +807,7 @@ class Pipeline:
                 config["params"] = params
         else:
             config["params"] = {
+                "imports": list(self.imports),
                 "with_batch_dim": self.with_batch_dim,
                 "jit_options": self.jit_options,
                 "jit_kwargs": self._user_jit_kwargs,
@@ -854,13 +871,22 @@ class Pipeline:
         return pipeline_from_config(Config(config), **kwargs)
 
     @classmethod
-    def from_path(cls, file_path: str, revision: str | None = None, **kwargs) -> "Pipeline":
+    def from_path(
+        cls,
+        file_path: str,
+        revision: str | None = None,
+        trust_remote_code: bool = False,
+        **kwargs,
+    ) -> "Pipeline":
         """Create a pipeline from a YAML/config file path.
 
         Args:
             file_path (str): Path to the config file (local or ``hf://`` URI).
                 Must have a ``pipeline`` key with a subkey ``operations``.
             revision (str, optional): Revision of the config file (for Hugging Face ``hf://`` URIs).
+            trust_remote_code (bool, optional): Allow the config's ``imports`` to execute
+                code fetched from a remote location. See :ref:`custom-ops`.
+                Defaults to ``False``.
             **kwargs: Additional keyword arguments to be passed to the pipeline.
 
         Example:
@@ -886,7 +912,15 @@ class Pipeline:
 
         """
         config = Config.from_path(file_path, revision=revision)
-        return pipeline_from_config(config, **kwargs)
+        # The original path, not the resolved local cache path: an ``hf://`` config
+        # must resolve its sibling modules from the same repo and revision.
+        return pipeline_from_config(
+            config,
+            base_path=parent_location(file_path),
+            trust_remote_code=trust_remote_code,
+            revision=revision,
+            **kwargs,
+        )
 
     @classmethod
     @deprecated(replacement="Pipeline.from_path")
@@ -2532,11 +2566,72 @@ def make_operation_chain(
     return chain
 
 
-def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
+def _collect_imports(node, found: list, root: bool = False) -> list:
+    """Gather every ``imports`` declaration in a pipeline config, depth first.
+
+    Nested pipelines (``name: pipeline``, ``name: map``, ...) may declare their own
+    modules, and those have to be imported before :func:`make_operation_chain`
+    resolves any name, so the tree is scanned up front rather than during
+    construction.
+
+    Only the places that actually *accept* ``imports`` are read: the root section,
+    and the ``params`` of a nested entry that has its own ``operations``. An ordinary
+    operation is left alone, so a custom operation taking a parameter called
+    ``imports`` is not mistaken for a list of modules to load.
+    """
+    if isinstance(node, Config):
+        node = node.serialize()
+
+    if isinstance(node, (list, tuple, np.ndarray)):
+        for item in node:
+            _collect_imports(item, found)
+        return found
+
+    if not isinstance(node, dict):
+        return found
+
+    if root:
+        imports = node.get("imports")
+    elif "operations" in node:
+        # Nested pipelines carry their kwargs under "params"; note that a Config
+        # round-trip turns lists into numpy arrays, so never test these for truthiness.
+        params = node.get("params")
+        if isinstance(params, Config):
+            params = params.serialize()
+        imports = params.get("imports") if isinstance(params, dict) else None
+    else:
+        return found
+
+    if imports is not None:
+        found.extend([imports] if isinstance(imports, str) else [str(m) for m in imports])
+
+    operations = node.get("operations")
+    if operations is not None:
+        _collect_imports(operations, found)
+    return found
+
+
+def pipeline_from_config(
+    config: Config,
+    base_path=None,
+    trust_remote_code: bool = False,
+    revision: str | None = None,
+    **kwargs,
+) -> Pipeline:
     """
     Create a Pipeline instance from a Config object.
 
     The config must have a top-level ``pipeline`` key containing an ``operations`` list.
+
+    Args:
+        config (Config): The config to build the pipeline from.
+        base_path (str or Path, optional): Location that relative ``imports`` entries
+            are resolved against, usually the directory holding the config. May be an
+            ``hf://`` path. Defaults to ``None`` (the working directory).
+        trust_remote_code (bool, optional): Allow ``imports`` to execute code fetched
+            from a remote location. Defaults to ``False``.
+        revision (str, optional): Hugging Face revision for remote ``imports``.
+        **kwargs: Additional keyword arguments to be passed to the pipeline.
     """
     if "pipeline" not in config:
         top_keys = list(config.keys()) if hasattr(config, "keys") else []
@@ -2570,6 +2665,15 @@ def pipeline_from_config(config: Config, **kwargs) -> Pipeline:
             f"Cannot build Pipeline: 'operations' must be a list, "
             f"got {type(config.operations).__name__}."
         )
+
+    # Import any module the config depends on before a single name is resolved,
+    # so that custom operations are in the registry by the time get_ops runs.
+    import_ops_modules(
+        _collect_imports(config, [], root=True),
+        base_path=base_path,
+        trust_remote_code=trust_remote_code,
+        revision=revision,
+    )
 
     operations = make_operation_chain(config.operations)
 
@@ -2611,6 +2715,10 @@ def _pipeline_to_serializable_dict(pipeline: Pipeline, compact=True) -> dict:
     pipeline_dict = {
         "operations": Pipeline._pipeline_to_list(pipeline, compact=compact),
     }
+
+    # Emitted before the tuning knobs: it is what makes the config loadable at all.
+    if pipeline.imports:
+        pipeline_dict["imports"] = list(pipeline.imports)
 
     if compact:
         if not pipeline.with_batch_dim:

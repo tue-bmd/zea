@@ -108,6 +108,13 @@ def list_of_positive_integers(value: Any) -> list:
     return value
 
 
+def list_of_strings(value: Any) -> list:
+    """Validate a list of strings."""
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        raise ValueError(f"must be a list of strings, got {value!r}")
+    return value
+
+
 def string_or_path(value: Any) -> Any:
     """Validate a string or :class:`pathlib.Path`."""
     if not isinstance(value, (str, Path)):
@@ -365,6 +372,7 @@ class PipelineConfig(ConfigSpec):
     """The ``pipeline:`` section: operations and JIT settings."""
 
     operations: Any = field(default_factory=lambda: ["identity"])
+    imports: Any = None
     with_batch_dim: Any = True
     jit_options: Any = "ops"
     jit_kwargs: Any = None
@@ -373,6 +381,7 @@ class PipelineConfig(ConfigSpec):
 
     VALIDATORS: ClassVar[dict] = {
         "operations": optional(operations_list),
+        "imports": optional(list_of_strings),
         "with_batch_dim": boolean,
         "jit_options": optional(enum("ops", "pipeline")),
         "jit_kwargs": optional(mapping),

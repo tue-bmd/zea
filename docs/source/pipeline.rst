@@ -129,8 +129,71 @@ So anyone with your module on their ``PYTHONPATH`` can load the pipeline, withou
 needing to import your module themselves.
 
 If you instead register under a plain name (e.g. ``@ops_registry("my_scale")``), the
-YAML will contain ``name: my_scale`` and the recipient must ``import my_project.my_ops``
-themselves before loading, so that the name is present in the registry.
+YAML will contain ``name: my_scale``, which only works once something has imported your
+module. That is what ``imports`` below is for.
+
+.. _pipeline-imports:
+
+Declaring imports in a config
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The dotted name above only works if your module is installed, or on the ``PYTHONPATH``
+of whoever loads the config. Often it is neither, for example when the code that
+processes a dataset sits next to that dataset. Add an ``imports`` list to the config and
+``zea`` imports those modules before it builds the pipeline:
+
+.. code-block:: yaml
+
+    pipeline:
+        imports:
+          - reconstruct.py
+        operations:
+          - name: apply_probe_pose
+          - name: beamform
+
+Each entry can be:
+
+* a module you can already import, like ``my_project.my_ops``;
+* a path to a ``.py`` file. Relative paths are looked up next to the config file, not
+  in your working directory, so the same config works wherever it is;
+* a file in a Hugging Face repo, like ``hf://org/repo/reconstruct.py``. It is
+  downloaded at the same revision as the config.
+
+Pass ``imports`` when you build the pipeline and it ends up in the saved YAML:
+
+.. code-block:: python
+
+    pipeline = Pipeline(
+        operations=[ApplyProbePose(), Beamform(beamformer="delay_and_sum")],
+        imports=["reconstruct.py"],
+    )
+    pipeline.to_yaml("pipeline.yaml")
+
+A config published next to its data can then be run directly:
+
+.. code-block:: bash
+
+    zea process \\
+      --dataset hf://org/repo/data/scan_0000.hdf5 \\
+      --config  hf://org/repo/pipeline.yaml \\
+      --trust-remote-code
+
+You can also pass a module on the command line, for one that is not in the config.
+``--import`` takes the same three kinds of entry:
+
+.. code-block:: bash
+
+    zea process --dataset data/ --config cfg.yaml --import ./my_ops.py
+
+.. warning::
+
+    Importing a module runs the code in it. For local files and installed modules
+    that is no different from typing ``import``, so those load without asking. Code
+    downloaded from elsewhere is refused by default: ``hf://`` entries need
+    ``--trust-remote-code`` (or ``ZEA_TRUST_REMOTE_CODE=1``, or
+    ``trust_remote_code=True`` for :meth:`Pipeline.from_path
+    <zea.ops.Pipeline.from_path>`). Read the file first, as you would with any script
+    you downloaded.
 
 Putting it together, see a self-contained snippet that defines a custom operation,
 builds a pipeline, and saves it to YAML below:
