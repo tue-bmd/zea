@@ -246,6 +246,22 @@ class Pipeline:
         return list(set(static_params))
 
     @property
+    def compiler_options(self) -> dict:
+        """XLA options needed by the operations of the pipeline, at any depth.
+
+        Applied to every JIT-compiled function that contains those operations. See
+        :attr:`zea.ops.Operation.compiler_options`.
+        """
+        compiler_options = {}
+        for operation in self.operations:
+            compiler_options.update(operation.compiler_options)
+        return compiler_options
+
+    def _compile(self, func):
+        """JIT compile ``func`` with this pipeline's jit_kwargs and compiler options."""
+        return jit(func, **self.jit_kwargs, default_compiler_options=self.compiler_options)
+
+    @property
     def needs_keys(self) -> set:
         """Get a set of all input keys needed by the pipeline.
 
@@ -619,7 +635,7 @@ class Pipeline:
                 f"The following operations are not jittable: {self.unjitable_ops}"
                 "Try setting jit_options to 'ops' or None."
             )
-        self._call_pipeline = jit(self.call, **self.jit_kwargs)
+        self._call_pipeline = self._compile(self.call)
 
     def _unjit(self):
         """Un-JIT compile the pipeline."""
@@ -1148,7 +1164,7 @@ class Map(Pipeline):
 
     def _jit(self):
         """JIT compile the pipeline."""
-        self._jittable_call = jit(self.jittable_call, **self.jit_kwargs)
+        self._jittable_call = self._compile(self.jittable_call)
 
     def _unjit(self):
         """Un-JIT compile the pipeline."""

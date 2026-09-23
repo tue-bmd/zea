@@ -533,6 +533,46 @@ def test_map_configures_jit_on_nested_pipeline():
     assert inner._inside_outer_jit is True
 
 
+@pytest.fixture
+def jit_kwargs_of(monkeypatch):
+    """Record the kwargs ops and pipelines pass to ``jit``; returns a lookup by owner."""
+    import zea.ops.base
+    import zea.ops.pipeline
+
+    recorded = {}
+
+    def record(func, **kwargs):
+        recorded[id(func.__self__)] = kwargs  # operations are unhashable
+        return func
+
+    monkeypatch.setattr(zea.ops.base, "jit", record)
+    monkeypatch.setattr(zea.ops.pipeline, "jit", record)
+    return lambda owner: recorded[id(owner)]
+
+
+def test_tof_correction_compiler_options_reach_enclosing_jit(jit_kwargs_of):
+    """TOFCorrection's compiler options apply to every function compiled around it,
+    and to nothing else."""
+    flag = "xla_gpu_experimental_enable_fusion_autotuner"
+
+    pipeline = ops.Pipeline.from_default(jit_options="ops")
+    patched_grid = pipeline["beamform"].operations[0]
+    assert isinstance(patched_grid, PatchedGrid)
+    assert jit_kwargs_of(patched_grid)["default_compiler_options"] == {flag: False}
+    assert jit_kwargs_of(pipeline["envelope_detect"])["default_compiler_options"] == {}
+    assert pipeline.compiler_options == {flag: False}
+
+    whole = ops.Pipeline.from_default(jit_options="pipeline")
+    assert jit_kwargs_of(whole)["default_compiler_options"] == {flag: False}
+
+    unpatched = ops.Pipeline.from_default(num_patches=1, jit_options="ops")
+    tof = unpatched["beamform"].operations[0]
+    assert isinstance(tof, ops.TOFCorrection)
+    assert jit_kwargs_of(tof)["default_compiler_options"] == {flag: False}
+
+    assert ops.Pipeline([AddOperation()]).compiler_options == {}
+
+
 def test_prepare_parameters_rejects_non_parameters():
     """prepare_parameters must reject anything that is not a zea.Parameters instance."""
     pipeline = ops.Pipeline([AddOperation()], jit_options=None)
