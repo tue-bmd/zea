@@ -562,10 +562,10 @@ def test_parent_jit_kwargs_reach_self_jitting_children(jit_kwargs_of):
     ops.Pipeline(
         [inner, AddOperation()],
         jit_options="ops",
-        jit_kwargs={"donate_argnums": (), "compiler_options": {"a": 1}},
+        jit_kwargs={"keep_unused": True, "compiler_options": {"a": 1}},
     )
 
-    assert jit_kwargs_of(leaf)["donate_argnums"] == ()
+    assert jit_kwargs_of(leaf)["keep_unused"] is True
     assert jit_kwargs_of(leaf)["compiler_options"] == {"a": 2, "b": 3, "c": 4}
 
     # The Map compiles itself as a whole and passes its inherited kwargs on.
@@ -574,11 +574,33 @@ def test_parent_jit_kwargs_reach_self_jitting_children(jit_kwargs_of):
     assert mapped._inherited_jit_kwargs["compiler_options"] == {"a": 2, "b": 2}
 
 
-def test_parent_static_argnames_do_not_reach_children(jit_kwargs_of):
-    """Each operation derives its own static_argnames; a parent's never leak into it."""
+def test_signature_specific_jit_kwargs_do_not_reach_children(jit_kwargs_of):
+    """jit_kwargs that name specific arguments apply to the pipeline's own call only.
+
+    A child op has a different signature, so e.g. a pipeline's ``donate_argnames``
+    would make every op donate (and invalidate) buffers the next op still reads.
+    """
+    signature_specific = {
+        "static_argnames": ["y"],
+        "static_argnums": (0,),
+        "donate_argnames": ("x",),
+        "donate_argnums": (0,),
+        "in_shardings": None,
+        "out_shardings": None,
+        "input_signature": None,
+    }
     leaf = MultiplyOperation()
-    ops.Pipeline([leaf], jit_options="ops", jit_kwargs={"static_argnames": ["y"]})
-    assert "static_argnames" not in jit_kwargs_of(leaf)
+    inner_leaf = AddOperation()
+    ops.Pipeline(
+        [leaf, ops.Pipeline([inner_leaf])],
+        jit_options="ops",
+        jit_kwargs={**signature_specific, "compiler_options": {"a": 1}},
+    )
+    for op in (leaf, inner_leaf):
+        assert jit_kwargs_of(op)["compiler_options"] == {"a": 1}
+        # static_argnames is the op's own, derived from its signature, if it has any.
+        assert not (set(signature_specific) - {"static_argnames"}) & set(jit_kwargs_of(op))
+        assert jit_kwargs_of(op).get("static_argnames") != ["y"]
 
 
 def test_tof_correction_compiler_options_reach_enclosing_jit(jit_kwargs_of):

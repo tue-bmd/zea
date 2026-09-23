@@ -209,6 +209,29 @@ class TestJit:
             assert "compiler_options" not in jax_jit.call_args.kwargs
 
     @staticmethod
+    @run_in_backend("jax")
+    def test_compiler_options_inside_outer_jit():
+        """JAX refuses ``compiler_options`` on a nested jit; the function then compiles
+        as part of the outer one instead of raising (e.g. a pipeline under ``jax.jit``)."""
+        import jax
+        import numpy as np
+
+        from zea.backend import jit
+
+        flag = "xla_gpu_experimental_enable_fusion_autotuner"
+        for kwargs in (
+            {"default_compiler_options": {flag: False}},
+            {"compiler_options": {flag: False}},
+        ):
+            compiled = jit(lambda x: x * 2, **kwargs)
+            outer = jax.jit(jax.value_and_grad(lambda x: compiled(x).sum()))
+            value, grad = outer(np.ones(2, dtype="float32"))
+            np.testing.assert_allclose(value, 4.0)
+            np.testing.assert_allclose(grad, 2.0)
+            # Still usable at the top level afterwards.
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+
+    @staticmethod
     def _check_default_compiler_options_ignored():
         import keras
         import numpy as np

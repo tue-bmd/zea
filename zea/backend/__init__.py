@@ -153,8 +153,8 @@ def _jit_compile(func, jax=True, tensorflow=True, torch=True, **kwargs):
         if jax_mod is None:
             raise ImportError("JAX is not installed. Please install it to use this backend.")
         default_compiler_options = kwargs.pop("default_compiler_options", None)
-        if default_compiler_options:
-            return _jax_jit_with_default_compiler_options(func, default_compiler_options, kwargs)
+        if default_compiler_options or kwargs.get("compiler_options"):
+            return _jax_jit_with_compiler_options(func, default_compiler_options, kwargs)
         return jax_mod.jit(func, **kwargs)
     elif backend == "torch" and torch:
         if torch_mod is None:
@@ -193,31 +193,50 @@ def _jax_compiler_option_supported(name, value) -> bool:
     return True
 
 
-def _jax_jit_with_default_compiler_options(func, default_compiler_options, jit_kwargs):
-    """``jax.jit`` with ``default_compiler_options`` added, if jaxlib supports them.
+def _jax_jit_with_compiler_options(func, default_compiler_options, jit_kwargs):
+    """``jax.jit`` with XLA ``compiler_options``, falling back to none where JAX refuses.
+
+    ``default_compiler_options`` are only used if jaxlib supports them, and explicit
+    ``compiler_options`` in ``jit_kwargs`` override them.
+
+    JAX only accepts ``compiler_options`` on a top-level ``jax.jit``. Called inside
+    another trace, for example a pipeline inside the user's own ``jax.jit``, the function
+    is compiled as part of the outer function, whose options then apply.
 
     The support check compiles a function, which would start the JAX backend. That has
     to wait until the first call: a pipeline built before :func:`zea.init_device` would
     otherwise fix the visible devices before they are selected.
     """
-    jitted = None
+    jitted = None  # (top_level, nested), built on the first call
+
+    def build():
+        compiler_options = {
+            name: value
+            for name, value in (default_compiler_options or {}).items()
+            if _jax_compiler_option_supported(name, value)
+        }
+        compiler_options.update(jit_kwargs.get("compiler_options") or {})
+        # Leave the keyword out when empty: jax.jit only has it from JAX 0.4.36.
+        options = {k: v for k, v in jit_kwargs.items() if k != "compiler_options"}
+        nested = jax_mod.jit(func, **options)
+        if not compiler_options:
+            return nested, nested
+        return jax_mod.jit(func, **options, compiler_options=compiler_options), nested
 
     @functools.wraps(func)
     def call(*args, **kwargs):
         nonlocal jitted
         if jitted is None:
-            compiler_options = {
-                name: value
-                for name, value in default_compiler_options.items()
-                if _jax_compiler_option_supported(name, value)
-            }
-            compiler_options.update(jit_kwargs.get("compiler_options") or {})
-            # Leave the keyword out when empty: jax.jit only has it from JAX 0.4.36.
-            options = {k: v for k, v in jit_kwargs.items() if k != "compiler_options"}
-            if compiler_options:
-                options["compiler_options"] = compiler_options
-            jitted = jax_mod.jit(func, **options)
-        return jitted(*args, **kwargs)
+            jitted = build()
+        top_level, nested = jitted
+        if top_level is nested:
+            return nested(*args, **kwargs)
+        try:
+            return top_level(*args, **kwargs)
+        except ValueError as exc:
+            if "compiler_options" not in str(exc):
+                raise
+            return nested(*args, **kwargs)
 
     return call
 

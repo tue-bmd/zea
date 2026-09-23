@@ -101,6 +101,22 @@ def _summarize_inputs(inputs: Dict[str, Any]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
+# jit_kwargs that refer to the arguments of one specific function (static or donated
+# arguments, shardings, TensorFlow's input_signature). A pipeline applies them to its own
+# call only; the operations inside it never inherit them.
+_NON_INHERITED_JIT_KWARGS = frozenset(
+    {
+        "static_argnames",
+        "static_argnums",
+        "donate_argnames",
+        "donate_argnums",
+        "in_shardings",
+        "out_shardings",
+        "input_signature",
+    }
+)
+
+
 @ops_registry("pipeline")
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of
@@ -140,10 +156,13 @@ class Pipeline:
 
             jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
                 Operations and nested pipelines that compile themselves (for example with
-                ``jit_options="ops"``) inherit them, except ``static_argnames``, with
-                their own ``jit_kwargs`` taking precedence. ``compiler_options`` are
-                merged per option, and also override the XLA options that operations
-                declare themselves (see :attr:`compiler_options`).
+                ``jit_options="ops"``) inherit them, with their own ``jit_kwargs`` taking
+                precedence. Keywords that refer to specific arguments are not inherited
+                (``static_argnames``, ``static_argnums``, ``donate_argnames``,
+                ``donate_argnums``, ``in_shardings``, ``out_shardings`` and
+                ``input_signature``). ``compiler_options`` are merged per option, and
+                also override the XLA options that operations declare themselves (see
+                :attr:`compiler_options`).
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
             validate (bool, optional): Whether to validate the pipeline. Defaults to True.
             timed (bool, optional): Whether to time each operation. Defaults to False.
@@ -268,9 +287,10 @@ class Pipeline:
     def _jit_kwargs_for_children(self) -> dict:
         """jit_kwargs that operations compiling themselves inside this pipeline inherit.
 
-        ``static_argnames`` is left out: every operation derives its own.
+        Keywords tied to the signature of one function (``_NON_INHERITED_JIT_KWARGS``)
+        are left out: they only apply to this pipeline's own call.
         """
-        own = {k: v for k, v in self._user_jit_kwargs.items() if k != "static_argnames"}
+        own = {k: v for k, v in self._user_jit_kwargs.items() if k not in _NON_INHERITED_JIT_KWARGS}
         return merge_jit_kwargs(self._inherited_jit_kwargs, own)
 
     def _compile(self, func):
