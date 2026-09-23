@@ -50,6 +50,7 @@ from .tensor import (
 from .ultrasound import (
     apply_aligned_apodization,
     apply_receive_apodization,
+    apply_receive_chain,
     channels_to_analytic,
     channels_to_complex,
     complex_to_channels,
@@ -68,6 +69,8 @@ from .ultrasound import (
     log_compress,
     make_tgc_curve,
     square_wave_apodization,
+    straight_ray_mean,
+    straight_ray_slowness,
     suppress_tissue,
     upmix,
 )
@@ -122,6 +125,7 @@ __all__ = [
     # Ultrasound functions
     "apply_aligned_apodization",
     "apply_receive_apodization",
+    "apply_receive_chain",
     "channels_to_analytic",
     "channels_to_complex",
     "complex_to_channels",
@@ -139,6 +143,8 @@ __all__ = [
     "log_compress",
     "make_tgc_curve",
     "square_wave_apodization",
+    "straight_ray_mean",
+    "straight_ray_slowness",
     "suppress_tissue",
     "decode_hadamard",
     "construct_acquisition_from_synthetic_aperture",

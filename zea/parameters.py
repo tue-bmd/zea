@@ -117,8 +117,10 @@ from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
 from zea.func.ultrasound import compute_time_to_peak_stack
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
-from zea.internal.utils import deprecated
+from zea.internal.utils import deprecated, renamed_items
 from zea.probes import Probe, fit_curved_probe_radius
+from zea.simulator import fft_length
+from zea.simulator.record import _shift_np
 
 
 class Parameters(BaseParameters):
@@ -225,6 +227,10 @@ class Parameters(BaseParameters):
     attenuation_coef: float
     """Attenuation coefficient [dB/(MHz*cm)]. Defaults to 0.0."""
 
+    attenuation_power: float
+    """Frequency power of the attenuation in :func:`zea.simulator.simulate_rf`, which then
+    grows as ``attenuation_coef * f**attenuation_power``. Defaults to 1.0 (linear)."""
+
     apply_lens_correction: bool
     """Whether to apply lens correction to the transmit delays. Defaults to False."""
 
@@ -321,8 +327,10 @@ class Parameters(BaseParameters):
         "n_el": {"dtype": np.int32},
         "n_tx": {"dtype": np.int32},
         "n_ax": {"dtype": int},  # native dtype on purpose
+        "n_fft": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
+        "attenuation_power": {"dtype": np.float32, "default": 1.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
         "theta_range": {"dtype": np.float32, "shape": (2,)},
@@ -331,10 +339,25 @@ class Parameters(BaseParameters):
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
+        # Sound speed map of zea.simulator.simulate_rf: (Nz, Nx), or (Nz, Nx, Ny) with map_grid_y.
+        "sos_map": {"dtype": (np.float32, type(None)), "default": None},
+        "map_grid_x": {"dtype": (np.float32, type(None)), "default": None},
+        "map_grid_y": {"dtype": (np.float32, type(None)), "default": None},
+        "map_grid_z": {"dtype": (np.float32, type(None)), "default": None},
+        # Attenuation map [dB/cm/MHz] of zea.simulator.simulate_rf, on the grid of sos_map.
+        "attenuation_map": {"dtype": (np.float32, type(None)), "default": None},
         "element_normals": {"dtype": (type(None), np.ndarray), "default": None},
+        # Sampling frequency [Hz] of waveforms_two_way (Verasonics stores them at 250 MHz).
+        "waveform_sampling_frequency": {"dtype": np.float32, "default": 250e6},
     }
 
     # Add some defaults that are not stored in a file
+    _RENAMED_PARAMS: ClassVar[dict[str, str]] = {
+        "sos_grid_x": "map_grid_x",
+        "sos_grid_y": "map_grid_y",
+        "sos_grid_z": "map_grid_z",
+    }
+
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
     VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
     # Give these a default of None (rather than leaving them unset) so that they can be
@@ -927,8 +950,8 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("selected_transmits", "n_el", "n_tx")
     def t0_delays(self):
-        """Transmit delays in seconds of
-        shape (n_tx, n_el), shifted such that the smallest delay is 0."""
+        """Transmit delays in seconds of shape (n_tx, n_el), shifted such that the smallest
+        delay is 0. (n_tx, n_mpt, n_el) for the multi-plane transmits of the simulator."""
         value = self._params.get("t0_delays")
         if value is None:
             log.warning_once(
@@ -1057,7 +1080,9 @@ class Parameters(BaseParameters):
 
         return 1
 
-    @cache_with_dependencies("center_frequency", "selected_transmits", "waveforms_two_way")
+    @cache_with_dependencies(
+        "center_frequency", "selected_transmits", "waveforms_two_way", "waveform_sampling_frequency"
+    )
     def t_peak(self):
         """The time of the peak of the pulse in seconds of shape (n_tx,).
 
@@ -1074,10 +1099,52 @@ class Parameters(BaseParameters):
         waveforms = self.waveforms_two_way
         if waveforms is None:
             return np.full(self.n_tx, 1 / self.center_frequency)
-        t_peak = ops.convert_to_numpy(compute_time_to_peak_stack(waveforms, self.center_frequency))
+        t_peak = ops.convert_to_numpy(
+            compute_time_to_peak_stack(
+                waveforms, self.center_frequency, self.waveform_sampling_frequency
+            )
+        )
         if t_peak.shape[0] == 1:
             t_peak = np.repeat(t_peak, self.n_tx)
         return t_peak
+
+    @cache_with_dependencies(
+        "n_ax",
+        "sampling_frequency",
+        "center_frequency",
+        "sound_speed",
+        "probe_geometry",
+        "t0_delays",
+        "initial_times",
+        "t_peak",
+        "waveforms_two_way",
+        "waveform_sampling_frequency",
+        "sos_map",
+    )
+    def n_fft(self):
+        """FFT length of :func:`zea.simulator.simulate_rf` for this scan.
+
+        Sized with :func:`zea.simulator.fft_length` so that no echo of a scatterer in the record
+        wraps into it, for any cloud and up to twice the length of the transmit pulse (the
+        ``waveforms_two_way`` of the scan, or the simulator's default pulse), through the sound
+        speed map ``sos_map`` when there is one. Set it explicitly to override.
+        """
+        n_fft = self._params.get("n_fft")
+        if n_fft is not None:
+            return n_fft
+        shift = _shift_np(self.t0_delays, self.initial_times, self.t_peak)  # rank-aware (mpt)
+        return fft_length(
+            self.n_ax,
+            self.sampling_frequency,
+            self.center_frequency,
+            self.sound_speed,
+            self.probe_geometry,
+            shift.min(),
+            shift.max(),
+            waveforms_two_way=self.waveforms_two_way,
+            waveform_sampling_frequency=self.waveform_sampling_frequency,
+            sos_map=self.sos_map,
+        )
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):
@@ -1281,7 +1348,28 @@ class Parameters(BaseParameters):
             if field in self._params and self._params[field] is not None
         }
 
+    def __init__(self, **kwargs):
+        super().__init__(**self._renamed_items(kwargs))
+
+    def update(self, params=None, *, force=False, **kwargs):
+        merged = dict(params) if params else {}
+        merged.update(kwargs)
+        return super().update(self._renamed_items(merged), force=force)
+
+    @classmethod
+    def _renamed(cls, name):
+        new = cls._RENAMED_PARAMS.get(name)
+        if new is None:
+            return name
+        log.warning_once(f"Parameter {name} was renamed to {new}.", key=name)
+        return new
+
+    @classmethod
+    def _renamed_items(cls, items):
+        return renamed_items(items, cls._RENAMED_PARAMS)
+
     def __setattr__(self, name: str, value):
+        name = self._renamed(name)
         if name == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)

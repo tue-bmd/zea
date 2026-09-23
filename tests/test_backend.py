@@ -173,6 +173,26 @@ class TestJit:
         assert jit(func, torch=False) is func
 
 
+@pytest.mark.torch
+class TestCheckpoint:
+    """Tests for ``zea.backend.checkpoint``."""
+
+    @staticmethod
+    @run_in_backend("torch")
+    def test_torch_forwards_keyword_arguments():
+        import keras
+        import numpy as np
+
+        from zea.backend import checkpoint
+
+        def func(x, scale=1.0):
+            return keras.ops.sum(scale * x**2)
+
+        x = keras.ops.convert_to_tensor(np.array([1.0, 2.0, 3.0], dtype="float32"))
+        result = keras.ops.convert_to_numpy(checkpoint(func)(x, scale=2.0))
+        np.testing.assert_allclose(result, 28.0, rtol=1e-6)
+
+
 class TestAdam:
     """Tests for the backend-agnostic Adam optimizer in ``zea.backend.optimizer``."""
 
