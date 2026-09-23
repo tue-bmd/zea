@@ -1833,11 +1833,16 @@ class ScanSpec(Spec):
             sample in the raw_data of shape (n_ax,). Divide by this curve to
             undo the TGC.
         waveforms_one_way: One-way waveforms of shape (n_tx, .) as simulated
-            by the Verasonics system. This is the waveform after being filtered
-            by the transducer bandwidth once.
+            by the Verasonics system (``TW.Wvfm1Wy``, sampled at 250 MHz): the
+            tri-state pulser burst (with its equalisation pulses) through a
+            2nd-order Butterworth band-pass with -3 dB edges at the transducer
+            bandwidth. Not normalised; sample 0 is the transmit trigger.
         waveforms_two_way: Two-way waveforms of shape (n_tx, .) as simulated
-            by the Verasonics system. This is the waveform after being filtered
-            by the transducer bandwidth twice.
+            by the Verasonics system (``TW.Wvfm2Wy``): the one-way waveform
+            through the same band-pass again, so -6 dB two-way at the edges of
+            the transducer bandwidth. No radiation factor is applied. See
+            :func:`zea.simulator.measured_pulse`, which uses it as the
+            transmit pulse of the simulators.
     """
 
     sampling_frequency: np.ndarray | float
@@ -2033,6 +2038,7 @@ class ProbeSpec(Spec):
             automatically as read-only properties from this array.
         element_width: Width of a single transducer element in metres.
         element_height: Height (elevation aperture) of a single element in metres.
+        elevation_focus: Focal distance of the fixed elevation lens in metres.
         lens_sound_speed: Speed of sound in the acoustic lens in m/s.
         lens_thickness: Thickness of the acoustic lens in metres.
     """
@@ -2044,6 +2050,7 @@ class ProbeSpec(Spec):
     probe_geometry: np.ndarray | None = None
     element_width: Scalar | None = None
     element_height: Scalar | None = None
+    elevation_focus: Scalar | None = None
     lens_sound_speed: Scalar | None = None
     lens_thickness: Scalar | None = None
 
@@ -2055,6 +2062,7 @@ class ProbeSpec(Spec):
         "probe_geometry": {"dtype": np.float32, "shape": ("n_el", 3)},
         "element_width": {"dtype": np.float32, "shape": ()},
         "element_height": {"dtype": np.float32, "shape": ()},
+        "elevation_focus": {"dtype": np.float32, "shape": ()},
         "lens_sound_speed": {"dtype": np.float32, "shape": ()},
         "lens_thickness": {"dtype": np.float32, "shape": ()},
     }
@@ -2081,6 +2089,11 @@ class ProbeSpec(Spec):
         "element_height": {
             "unit": "m",
             "description": "Height (elevation aperture) of a single transducer element.",
+            "rare": True,
+        },
+        "elevation_focus": {
+            "unit": "m",
+            "description": "Focal distance of the fixed elevation lens.",
             "rare": True,
         },
         "lens_sound_speed": {
@@ -2131,6 +2144,13 @@ class ProbeSpec(Spec):
         if self.element_height is not None and self.element_height <= 0:
             raise ValueError(
                 f"ProbeSpec: element_height must be positive, got {self.element_height}"
+            )
+        if self.elevation_focus is not None and not (
+            np.isfinite(self.elevation_focus) and self.elevation_focus > 0
+        ):
+            raise ValueError(
+                "ProbeSpec: elevation_focus must be finite and positive, "
+                f"got {self.elevation_focus}"
             )
         if self.lens_sound_speed is not None and self.lens_sound_speed <= 0:
             raise ValueError(

@@ -36,20 +36,20 @@ Example usage
 
 """
 
-import numpy as np
 from keras import ops
 
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 from zea.simulator import (
     _apply_elevation_slab,
+    _resolve_element_height,
     _resolve_element_width,
     _validate_scatter_exponent,
     _warn_if_elevation_extent,
     attenuate,
-    hann_unnormalized,
     spread,
-    apply_receive_chain,
+    min_distance,
+    transmit_pulses,
 )
 
 
@@ -70,14 +70,13 @@ def simulate_rf_td(
     attenuation_coef,
     tx_apodizations,
     t_peak,
-    elevation_lens=False,
+    *,
+    elevation_slab_2d=False,
     element_height=None,
     max_chunk_gb=10.0,
-    noise_level_db=None,
-    tgc_max_db=0.0,
-    noise_seed=0,
-    noise_reference=None,
     scatter_exponent=2.0,
+    waveforms_two_way=None,
+    waveform_sampling_frequency=250e6,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -108,43 +107,48 @@ def simulate_rf_td(
         attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
         tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
         t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        elevation_lens (bool): Whether the probe has an elevation lens: drop scatterers outside
-            the elevation slab, and focus transmit energy directly downwards (i.e. cylindrical
-            instead of spherical spread). For efficient pruning scatterers outside the slab,
-            use :class:`zea.ops.Simulate` rather than calling `simulate_rf_td` directly.
+        elevation_slab_2d (bool): Reduce the elevation dimension to a 2D slab: drop the
+            scatterers outside it, and spread the transmit cylindrically rather than
+            spherically, as an ideal elevation lens focusing to that slab would. This is a
+            cheap approximation, not a modelled lens; for the physical lens in 3D use
+            ``elevation_focus``, which is exclusive with it. For efficient pruning of the
+            scatterers outside the slab, use :class:`zea.ops.Simulate` rather than calling
+            `simulate_rf_td` directly.
         element_height (float): The elevation height of the elements [m], used for the
-            elevation directivity and the elevation slab. If None, defaults to element_width.
+            elevation directivity and the elevation slab. If None, an eighth of the width of a
+            1D probe (at least ``element_width``), or ``element_width`` for a 2D probe.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
             tensors held at once while iterating over scatterers. Scatterers are processed
             in chunks sized to this budget, so peak memory no longer scales with the total
             scatterer count. Must be a static (Python) value, not a traced array.
-        noise_level_db (float): Electronic noise level in dB relative to the noiseless RF
-            maximum. None disables the noise. Must be static under jit.
-        tgc_max_db (float): Time gain compensation in dB at the last axial sample, ramped
-            linearly in dB from 0 at the first. 0 disables it. Must be static under jit.
-        noise_seed (int | SeedGenerator | jax.random.key, optional): Seed for the noise. Vary it
-            across transmit batches to keep the realisations independent.
-        noise_reference (float): Reference amplitude for the noise level. If None, defaults to the
-            noiseless RF maximum. Pass a fixed reference to avoid the noise level changing per
-            transmit batch. See :func:`zea.simulator.apply_receive_chain`.
         scatter_exponent (float): Weigh the scattered waveform spectrum by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
+        waveforms_two_way (array-like, optional): Two-way transmit waveforms of shape
+            (n_tx, n_samples) or (n_samples,), as in :func:`zea.simulator.simulate_rf`; None is
+            the default pulse of :func:`zea.simulator.transmit_pulse`. Must be static under jit.
+        waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``.
+            Must be static under jit.
 
     Returns:
-        rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
+        rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1), noiseless:
+            the receive chain is :func:`zea.simulator.apply_receive_chain`.
     """
     element_width = _resolve_element_width(probe_geometry, element_width)
-    if element_height is None:
-        element_height = element_width
+    element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     n_ax = int(n_ax)
     n_tx = t0_delays.shape[0]
     n_el = probe_geometry.shape[0]
     n_scat = scatterer_positions.shape[0]
 
-    pulse = get_pulse_waveform(
-        center_frequency, sampling_frequency, scatter_exponent=scatter_exponent
+    _validate_scatter_exponent(scatter_exponent)
+    pulses = transmit_pulses(
+        n_tx, center_frequency, sampling_frequency, waveforms_two_way, waveform_sampling_frequency
     )
+    waveforms = {}
+    for pulse in pulses:
+        if pulse not in waveforms:
+            waveforms[pulse] = _scattered_waveform(pulse, center_frequency, scatter_exponent)
 
     # Chunk so the (n_scat, n_el, n_el) tensors never materialize at once. The factor is
     # approximate memory use after jit fusion, not a count of intermediate tensors.
@@ -166,7 +170,7 @@ def simulate_rf_td(
             element_width,
             element_height,
             attenuation_coef,
-            elevation_lens,
+            elevation_slab_2d,
         )
         for tx in range(n_tx):
             spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
@@ -181,10 +185,12 @@ def simulate_rf_td(
                 n_el,
             )
 
-    parts = [_convolve_pulse_over_channels(spike_map, pulse) for spike_map in spike_maps]
+    parts = [
+        _convolve_pulse_over_channels(spike_map, waveforms[pulse])
+        for spike_map, pulse in zip(spike_maps, pulses)
+    ]
     rf_data = ops.stack(parts, axis=0)
-    rf_data = rf_data[..., None]
-    return apply_receive_chain(rf_data, noise_level_db, tgc_max_db, noise_seed, noise_reference)
+    return rf_data[..., None]
 
 
 def _simulate_transmit(
@@ -218,7 +224,7 @@ def _precompute_scatterer_response(
     element_width,
     element_height,
     attenuation_coef,
-    elevation_lens=False,
+    elevation_slab_2d=False,
 ):
     """Compute the transmit-independent gain and two-way travel time tensors.
 
@@ -229,7 +235,7 @@ def _precompute_scatterer_response(
             time [s], excluding transmit delays and initial times.
     """
     magnitudes = scatterer_magnitudes
-    if elevation_lens:
+    if elevation_slab_2d:
         _warn_if_elevation_extent(probe_geometry)
         scatterer_positions, magnitudes = _apply_elevation_slab(
             scatterer_positions, magnitudes, probe_geometry, element_height
@@ -239,7 +245,7 @@ def _precompute_scatterer_response(
     scatterer_positions = ops.cast(scatterer_positions, "float32")
     magnitudes = ops.cast(magnitudes, "float32")
 
-    one_way_distance = _one_way_distances(
+    physical_distance = _one_way_distances(
         probe_geometry,
         scatterer_positions,
         apply_lens_correction,
@@ -247,8 +253,12 @@ def _precompute_scatterer_response(
         lens_sound_speed,
         sound_speed,
     )
+    # Half a wavelength at least for the travel time and the spreading, as in simulate_rf.
+    # The attenuation keeps the physical path length, as there.
+    min_dist = min_distance(sound_speed, center_frequency)
+    one_way_distance = ops.maximum(physical_distance, min_dist)
     travel_time = one_way_distance / sound_speed
-    two_way_distance = one_way_distance[:, :, None] + one_way_distance[:, None, :]
+    two_way_distance = physical_distance[:, :, None] + physical_distance[:, None, :]
 
     element_directivity = _element_directivity(
         scatterer_positions,
@@ -260,8 +270,8 @@ def _precompute_scatterer_response(
     )
     directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
     spread_attenuation = (
-        spread(one_way_distance[:, :, None], 0.5 if elevation_lens else 1.0)
-        * spread(one_way_distance[:, None, :], 1.0)
+        spread(one_way_distance[:, :, None], 0.5 if elevation_slab_2d else 1.0, min_dist)
+        * spread(one_way_distance[:, None, :], 1.0, min_dist)
         * attenuate(center_frequency, attenuation_coef, two_way_distance)
     )
 
@@ -367,47 +377,16 @@ def _multiply_spectra(signals, kernel, n_full):
     return ops.irfft((product_real, product_imag), fft_length=n_full)
 
 
-def get_pulse_waveform(
-    center_frequency, sampling_frequency, n_period=4, n_samples=129, scatter_exponent=0.0
-):
-    """Generate a real, Hann-windowed sinusoidal transmit pulse in the time domain.
-
-    This is the time-domain counterpart of :func:`zea.simulator.get_pulse_spectrum_fn`: an even,
-    zero-centered pulse whose spectrum matches the windowed sine used by
-    :func:`zea.simulator.simulate_rf`. The pulse length ``n_samples`` is a fixed (static) sample
-    count so the pulse has a compile-time-known shape; the Hann window zeros any
-    samples beyond the ``n_period``-period support, so ``n_samples`` only needs to
-    be large enough (and odd, to keep the pulse symmetric and delay-aligned) to
-    contain that support.
-
-    Args:
-        center_frequency (float): The center frequency of the pulse [Hz].
-        sampling_frequency (float): The sampling frequency [Hz].
-        n_period (float): The number of periods spanned by the Hann window.
-        n_samples (int): The (odd) number of samples in the pulse.
-        scatter_exponent (float): Exponent applied to the pulse spectrum relative to
-            ``center_frequency``.
-
-    Returns:
-        array-like: The pulse waveform of shape (n_samples,).
-    """
-    _validate_scatter_exponent(scatter_exponent)
-    width = n_period / center_frequency
-    support_samples = width * sampling_frequency
-    if support_samples > n_samples:
-        raise ValueError(
-            f"Hann window support ({support_samples:.1f} samples) exceeds n_samples "
-            f"({n_samples}); the pulse would be truncated. Increase n_samples or "
-            "reduce sampling_frequency / n_period."
-        )
-    times = (ops.arange(n_samples, dtype="float32") - n_samples // 2) / sampling_frequency
-    window = hann_unnormalized(times, width)
-    pulse = window * ops.cos(2 * np.pi * center_frequency * times)
+def _scattered_waveform(pulse, center_frequency, scatter_exponent):
+    """The pulse sampled at the RF rate with an odd (static) length and its peak on the middle
+    sample, so a spike at the two-way delay convolves to the same record as the frequency-domain
+    simulator, weighted by ``(f / center_frequency)**scatter_exponent``."""
+    waveform = ops.convert_to_tensor(pulse.waveform())
     if not scatter_exponent:
-        return pulse
+        return waveform
 
-    n_freq = n_samples // 2 + 1
-    freqs = ops.arange(n_freq, dtype="float32") / n_samples * sampling_frequency
+    n_samples = pulse.n_samples
+    freqs = ops.arange(n_samples // 2 + 1, dtype="float32") / n_samples * pulse.sampling_frequency
     scatter_gain = (freqs / center_frequency) ** scatter_exponent
-    pulse_real, pulse_imag = ops.rfft(pulse)
+    pulse_real, pulse_imag = ops.rfft(waveform)
     return ops.irfft((pulse_real * scatter_gain, pulse_imag * scatter_gain), fft_length=n_samples)

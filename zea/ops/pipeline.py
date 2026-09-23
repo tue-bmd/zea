@@ -13,7 +13,13 @@ from zea import backend, log
 from zea.backend import func_on_device, jit
 from zea.config import Config
 from zea.func.tensor import vmap
-from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
+from zea.internal.core import (
+    DataTypes,
+    ZEADecoderJSON,
+    ZEAEncoderJSON,
+    dict_to_tensor,
+    python_constant,
+)
 from zea.internal.ops_list import OperationList
 from zea.internal.precision import LOW_PRECISION_DTYPES
 from zea.internal.registry import beamformer_registry, ops_registry
@@ -552,6 +558,12 @@ class Pipeline:
                 self._logged_difference_keys = True
 
         ## PROCESSING
+        if self.jit_options == "pipeline":
+            # Static arguments of the pipeline-level jit must be hashable.
+            inputs = {
+                key: python_constant(value) if key in self.static_params else value
+                for key, value in inputs.items()
+            }
         _device = device if device is not None else self.device
         if _device is not None:
             outputs = func_on_device(self._call_pipeline, _device, **inputs)
