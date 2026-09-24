@@ -55,13 +55,14 @@ class AppArgs:
                 "gradio is required for the zea app. Install with: pip install 'zea[app]'"
             ) from exc
 
-        from zea.data.app import CSS, build_interface, build_theme
+        from zea.data.app import CSS, JS, build_interface, build_theme
 
         build_interface().launch(
             share=self.share,
             server_port=self.server_port,
             theme=build_theme(),
             css=CSS,
+            js=JS,
         )
 
 

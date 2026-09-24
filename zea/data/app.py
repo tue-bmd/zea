@@ -233,6 +233,7 @@ PRESETS.update(
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
 CSS = """
+:root { color-scheme: dark; }
 footer { display: none !important; }
 .run-status { min-height: 1.6em; font-size: 0.9em; margin-top: -8px; }
 .status-box { max-height: 320px; overflow-y: auto; scroll-behavior: smooth; }
@@ -263,6 +264,21 @@ footer { display: none !important; }
 .zea-path input, .zea-path textarea { font-family: var(--font-mono) !important;
   font-size: 0.9em !important; }
 @keyframes zea-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+"""
+
+# Dark mode only: the colours above assume a dark background. Gradio toggles a `dark`
+# class to follow the OS preference, so pin it on and put it back if Gradio removes it.
+# Gradio runs launch(js=...) as a <script>, not as a function, hence the IIFE.
+JS = """
+(() => {
+    const container = document.querySelector('.gradio-container');
+    const targets = [document.body, container && container.parentElement].filter(Boolean);
+    const pin = () => targets.forEach((el) => {
+        if (!el.classList.contains('dark')) el.classList.add('dark');
+    });
+    pin();
+    targets.forEach((el) => new MutationObserver(pin).observe(el, { attributeFilter: ['class'] }));
+})();
 """
 
 _SCROLL_JS = """

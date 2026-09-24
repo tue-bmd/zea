@@ -32,6 +32,10 @@ def test_zea_app_main_calls_build_interface(monkeypatch):
 
     assert launched.get("share") is False
     assert launched.get("server_port") is None
+    # Dark mode only: the JS that pins Gradio's dark class must reach launch().
+    from zea.data.app import JS
+
+    assert launched.get("js") == JS
 
 
 def test_zea_app_passes_share_flag(monkeypatch):
