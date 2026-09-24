@@ -1705,6 +1705,48 @@ def test_common_midpoint_phase_error_coherent_data():
     return phase_error
 
 
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"subaperture_half_elements": -1}, "non-negative"),
+        ({"subaperture_stride": 0}, "positive"),
+        ({"subaperture_stride": -1}, "positive"),
+    ],
+)
+def test_common_midpoint_phase_error_invalid_params(kwargs, match):
+    """Negative half-widths and non-positive strides are rejected at construction."""
+    with pytest.raises(ValueError, match=match):
+        ops.CommonMidpointPhaseError(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "half_elements, stride, raises",
+    [
+        (15, 1, False),  # 2 * 15 + 1 < 32: exactly two subapertures
+        (16, 1, True),  # 2 * 16 + 1 >= 32: one subaperture
+        (14, 4, True),  # 2 * 14 + 4 >= 32: one subaperture
+    ],
+)
+def test_common_midpoint_phase_error_too_few_subapertures(half_elements, stride, raises):
+    """Settings that leave fewer than two subapertures for the aperture are rejected."""
+    n_tx, n_pix, n_rx = 32, 10, 32
+    data = np.ones((n_tx, n_pix, n_rx, 2), dtype=np.float32)
+    cmpe = ops.CommonMidpointPhaseError(
+        with_batch_dim=False,
+        subaperture_half_elements=half_elements,
+        subaperture_stride=stride,
+    )
+    if raises:
+        with pytest.raises(ValueError, match="fewer than two subapertures"):
+            cmpe(data=keras.ops.convert_to_tensor(data))
+    else:
+        phase_error = keras.ops.convert_to_numpy(
+            cmpe(data=keras.ops.convert_to_tensor(data))["data"]
+        )
+        assert phase_error.shape == (n_pix,)
+        assert np.all(np.isfinite(phase_error))
+
+
 @pytest.mark.parametrize("with_batch_dim", [False, True])
 @backend_equality_check(decimal=5)
 def test_apply_aligned_apodization(with_batch_dim):

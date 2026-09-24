@@ -179,7 +179,12 @@ class TOFCorrection(Operation):
     """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
+    STATIC_PARAMS = [
+        "f_number",
+        "apply_lens_correction",
+        "focal_region_length",
+        "transmit_f_number_mask",
+    ]
 
     # Compiled together with the beamformer that sums its output, XLA's GPU fusion
     # autotuner can take minutes on large inputs without making the result any faster
@@ -215,6 +220,7 @@ class TOFCorrection(Operation):
         sos_grid_x=None,
         sos_grid_z=None,
         focal_region_length=None,
+        transmit_f_number_mask=False,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -245,6 +251,9 @@ class TOFCorrection(Operation):
                 last-arrival delays are linearly blended. This smooths the
                 focal-plane transition while preserving the same model outside
                 the region. ``None`` or ``0`` disables it.
+            transmit_f_number_mask (bool): Also apply the f-number mask on the
+                transmit leg (multistatic data only). See
+                :func:`zea.beamform.beamformer.tof_correction`.
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -273,6 +282,7 @@ class TOFCorrection(Operation):
             "sos_grid_x": sos_grid_x,
             "sos_grid_z": sos_grid_z,
             "focal_region_length": focal_region_length,
+            "transmit_f_number_mask": bool(transmit_f_number_mask),
         }
 
         if not self.with_batch_dim:
@@ -1324,8 +1334,36 @@ class CommonMidpointPhaseError(Operation):
     def __init__(
         self,
         reshape_grid=True,
+        subaperture_half_elements=8,
+        subaperture_stride=1,
+        patch_size=1,
+        coherence_threshold=0.0,
         **kwargs,
     ):
+        """
+        Args:
+            reshape_grid (bool): Reshape the flat pixel axis back onto the grid.
+            subaperture_half_elements (int): Subaperture half-width, in
+                elements. Both this and the stride are element counts, so the
+                aperture they span scales with pitch; set them from the pitch
+                to compare probes at a fixed physical size. Defaults to 8.
+            subaperture_stride (int): Spacing, in elements, between the
+                neighbouring subapertures whose phases are differenced.
+                Defaults to 1.
+            patch_size (int): Number of consecutive pixels on the flat pixel
+                axis that form one estimation patch. The cross-correlation of
+                each common-midpoint pair is summed over the patch before its
+                phase is taken, and one value is returned per patch, so the
+                pixel axis must be laid out as ``(n_patches, patch_size)``.
+                DBUA uses a 5x5 kernel at half-wavelength spacing
+                (``patch_size=25``). Defaults to 1 (per-pixel estimate).
+            coherence_threshold (float): Only pairs whose correlation
+                coefficient over the patch exceeds this value contribute, as
+                in DBUA (which uses 0.9). A single-pixel patch always has a
+                correlation coefficient of 1, so the threshold only acts
+                with ``patch_size > 1``. Patches where no pair survives
+                return NaN. Defaults to 0.0 (keep every pair).
+        """
         super().__init__(
             input_data_type=None,
             # DataTypes.IMAGE, because we have an image of the phase map
@@ -1333,20 +1371,39 @@ class CommonMidpointPhaseError(Operation):
             **kwargs,
         )
         self.reshape_grid = reshape_grid
+        subaperture_half_elements = int(subaperture_half_elements)
+        subaperture_stride = int(subaperture_stride)
+        if subaperture_half_elements < 0:
+            raise ValueError(
+                f"subaperture_half_elements must be non-negative, got {subaperture_half_elements}"
+            )
+        if subaperture_stride < 1:
+            raise ValueError(f"subaperture_stride must be positive, got {subaperture_stride}")
+        self.subaperture_half_elements = subaperture_half_elements
+        self.subaperture_stride = subaperture_stride
+        self.patch_size = int(patch_size)
+        self.coherence_threshold = float(coherence_threshold)
 
     def create_subapertures(self, data, halfsa, dx):
         """Create subapertures from the data.
 
         Args:
             data (ops.Tensor): The data to create subapertures from.
-            halfsa (int): Half of the subaperture.
-            dx (float): The spacing between the subapertures.
+            halfsa (int): Subaperture half-width, in elements.
+            dx (int): Spacing, in elements, between neighbouring subapertures.
 
         Returns:
             transmit_subap (ops.Tensor): The transmit subapertures.
             receive_subap (ops.Tensor): The receive subapertures.
         """
         n_tx, n_pix, n_rx, n_ch = data.shape
+        # Phase differences need at least two neighbouring subapertures,
+        # otherwise the CMPE reduces to 0 / 0.
+        if 2 * halfsa + dx >= n_rx:
+            raise ValueError(
+                f"Subaperture half-width {halfsa} and stride {dx} leave fewer than two "
+                f"subapertures for {n_rx} receive elements; need 2 * halfsa + dx < n_rx."
+            )
         receive_subaps = ops.zeros((n_rx, n_tx))
         for diag in range(-halfsa, halfsa + 1):
             receive_subaps = receive_subaps + ops.diag(ops.ones((n_rx - abs(diag),)), diag)
@@ -1364,7 +1421,9 @@ class CommonMidpointPhaseError(Operation):
             phase_error_map (ops.Tensor): The phase error map.
         """
 
-        transmit_subaps, receive_subaps = self.create_subapertures(data, 8, 1)
+        transmit_subaps, receive_subaps = self.create_subapertures(
+            data, self.subaperture_half_elements, self.subaperture_stride
+        )
         complex_data = ops.view_as_complex(data)  # [n_tx, n_pix, n_rx, n_ch] -> [n_rtx, n_pix, r_x]
         complex_data = ops.transpose(complex_data, (2, 0, 1))  # [n_rx, n_tx, n_pix]
         rx_zero_count = ops.matmul(receive_subaps, ops.cast(complex_data == 0, "int32"))
@@ -1392,6 +1451,27 @@ class CommonMidpointPhaseError(Operation):
         # This only works if the array is regularly spaced
         xy = a * ops.conj(b)
         xy = ops.where(valid, xy, 0)
+
+        if self.patch_size > 1 or self.coherence_threshold > 0:
+            # DBUA: sum the correlation of each pair over a patch of pixels, and
+            # keep only pairs that are coherent over it. Decorrelated pairs carry
+            # an essentially random phase that would otherwise set the floor.
+            n_pix = xy.shape[-1]
+            assert n_pix % self.patch_size == 0, (
+                f"n_pix={n_pix} is not a multiple of patch_size={self.patch_size}"
+            )
+            patch_shape = (*xy.shape[:2], n_pix // self.patch_size, self.patch_size)
+            xx = ops.where(valid, ops.real(a * ops.conj(a)), 0)
+            yy = ops.where(valid, ops.real(b * ops.conj(b)), 0)
+            xy = ops.sum(ops.reshape(xy, patch_shape), -1)
+            xx = ops.sum(ops.reshape(xx, patch_shape), -1)
+            yy = ops.sum(ops.reshape(yy, patch_shape), -1)
+            valid = ops.any(ops.reshape(valid, patch_shape), -1)
+            xy_power = ops.square(ops.abs(xy))
+            coherent = xy_power > (self.coherence_threshold**2) * xx * yy
+            valid = valid & coherent
+            xy = ops.where(valid, xy, 0)
+
         dphi = ops.angle(xy)
         dphi = ops.abs(dphi)
 
