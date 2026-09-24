@@ -1366,8 +1366,16 @@ class CommonMidpointPhaseError(Operation):
             **kwargs,
         )
         self.reshape_grid = reshape_grid
-        self.subaperture_half_elements = int(subaperture_half_elements)
-        self.subaperture_stride = int(subaperture_stride)
+        subaperture_half_elements = int(subaperture_half_elements)
+        subaperture_stride = int(subaperture_stride)
+        if subaperture_half_elements < 0:
+            raise ValueError(
+                f"subaperture_half_elements must be non-negative, got {subaperture_half_elements}"
+            )
+        if subaperture_stride < 1:
+            raise ValueError(f"subaperture_stride must be positive, got {subaperture_stride}")
+        self.subaperture_half_elements = subaperture_half_elements
+        self.subaperture_stride = subaperture_stride
         self.patch_size = int(patch_size)
         self.coherence_threshold = float(coherence_threshold)
 
@@ -1376,14 +1384,21 @@ class CommonMidpointPhaseError(Operation):
 
         Args:
             data (ops.Tensor): The data to create subapertures from.
-            halfsa (int): Half of the subaperture.
-            dx (float): The spacing between the subapertures.
+            halfsa (int): Subaperture half-width, in elements.
+            dx (int): Spacing, in elements, between neighbouring subapertures.
 
         Returns:
             transmit_subap (ops.Tensor): The transmit subapertures.
             receive_subap (ops.Tensor): The receive subapertures.
         """
         n_tx, n_pix, n_rx, n_ch = data.shape
+        # Phase differences need at least two neighbouring subapertures,
+        # otherwise the CMPE reduces to 0 / 0.
+        if 2 * halfsa + dx >= n_rx:
+            raise ValueError(
+                f"Subaperture half-width {halfsa} and stride {dx} leave fewer than two "
+                f"subapertures for {n_rx} receive elements; need 2 * halfsa + dx < n_rx."
+            )
         receive_subaps = ops.zeros((n_rx, n_tx))
         for diag in range(-halfsa, halfsa + 1):
             receive_subaps = receive_subaps + ops.diag(ops.ones((n_rx - abs(diag),)), diag)
