@@ -1,5 +1,27 @@
 """Frequency-domain RF simulator: the superposition of the scatterer responses on the rfft grid
-of the record, with the one-way responses shared by every transmit."""
+of the record, with the one-way responses shared by every transmit.
+
+:func:`simulate_rf`, top to bottom:
+
+1. :func:`~zea.simulator.pulse.transmit_pulses` builds the two-way pulse of every transmit.
+2. :func:`~zea.simulator.response.medium_model` and :func:`~zea.simulator.response.probe_model`
+   validate the medium and the probe and freeze them.
+3. :func:`~zea.simulator.response._scene_positions` casts the scatterers and, in 2D, moves them
+   into the imaging plane.
+4. ``n_fft`` is taken as given or bounded from the concrete inputs
+   (:func:`~zea.simulator.record._fft_bound`, :func:`~zea.simulator.record.smooth_size`).
+5. :func:`~zea.simulator.record.band_bins` keeps the bins the pulses and the scattering reach.
+6. Scatterers are chunked to the memory budget. Per chunk,
+   :func:`~zea.simulator.response._ray_means` takes the mean slowness and attenuation of every
+   ray once, then :func:`_band_spectrum` loops over frequency blocks calling :func:`_rf_block`:
+   the element responses, the record gate, and the two einsums that sum the transmit and receive
+   sides into a spectrum per transmit and element.
+7. :func:`_band_to_time` inverse-transforms the band times the pulse spectra, per group of
+   transmits.
+
+:func:`pressure_field` runs steps 1 to 6 on grid points with only the transmit side
+(:func:`_pressure_block`). :func:`~zea.simulator.time_domain.simulate_rf_td` shares steps 1 to
+3, and :func:`~zea.simulator.record.in_record` is the gate of step 6 on its own."""
 
 import functools
 from dataclasses import dataclass
@@ -11,12 +33,13 @@ from keras import ops
 from zea import log
 from zea.backend import checkpoint, highest_matmul_precision
 from zea.internal.core import concrete, ndim
-from zea.simulator.element import (
+from zea.simulator.response import (
     _ray_means,
     _scene_positions,
     _validate_maps,
-    element_model,
     element_responses,
+    medium_model,
+    probe_model,
 )
 from zea.simulator.pulse import _pulse_spectra, _pulse_tail, transmit_pulses
 from zea.simulator.record import (
@@ -247,14 +270,14 @@ def simulate_rf(
     n_ax = int(n_ax)
     n_tx, n_el = (int(ops.shape(t0_delays)[i]) for i in (0, -1))
     pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
-    model = element_model(
+    medium = medium_model(sound_speed, fc, attenuation_coef, attenuation_power)
+    probe = probe_model(
         probe_geometry,
-        sound_speed,
+        medium,
         fc,
         pulses,
         element_width=element_width,
         element_height=element_height,
-        attenuation_coef=attenuation_coef,
         apply_lens_correction=apply_lens_correction,
         lens_thickness=lens_thickness,
         lens_sound_speed=lens_sound_speed,
@@ -264,10 +287,9 @@ def simulate_rf(
         n_sub_elements=n_sub_elements,
         elevation_focus=elevation_focus,
         lens_attenuation_coef=lens_attenuation_coef,
-        attenuation_power=attenuation_power,
         simplified_directivity=simplified_directivity,
     )
-    positions = _scene_positions(scatterer_positions, model)
+    positions = _scene_positions(scatterer_positions, probe)
     magnitudes = ops.cast(scatterer_magnitudes, "float32")
     n_scat = int(ops.shape(positions)[0])
     _validate_scatter_exponent(scatter_exponent, n_scat)
@@ -333,7 +355,8 @@ def simulate_rf(
         # The straight-ray slowness and attenuation of every path, once for all frequency blocks.
         slowness, attenuation = _ray_means(
             positions[part],
-            model,
+            probe,
+            medium,
             sos_map,
             attenuation_map,
             map_grid_x,
@@ -345,7 +368,8 @@ def simulate_rf(
             _rf_block,
             positions=positions[part],
             magnitudes=magnitudes[part],
-            model=model,
+            probe=probe,
+            medium=medium,
             slowness=slowness,
             attenuation=attenuation,
             shift=shift,
@@ -435,7 +459,8 @@ def _rf_block(
     freqs,
     positions,
     magnitudes,
-    model,
+    probe,
+    medium,
     slowness,
     attenuation,
     shift,
@@ -453,7 +478,7 @@ def _rf_block(
     or None for a homogeneous medium (see :func:`_ray_means`).
     """
     tx_response, rx_response, tau = element_responses(
-        positions, model, freqs, slowness=slowness, attenuation=attenuation
+        positions, probe, medium, freqs, slowness=slowness, attenuation=attenuation
     )
     keep = _record_keep(tau, ops.min(shift), gate_time)
     weight = ops.where(keep, magnitudes, 0.0)
@@ -557,14 +582,14 @@ def pressure_field(
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_tx, n_el = (int(ops.shape(t0_delays)[i]) for i in (0, -1))
     pulses = transmit_pulses(n_tx, fc, fs, waveforms_two_way, waveform_sampling_frequency)
-    model = element_model(
+    medium = medium_model(sound_speed, fc, attenuation_coef, attenuation_power)
+    probe = probe_model(
         probe_geometry,
-        sound_speed,
+        medium,
         fc,
         pulses,
         element_width=element_width,
         element_height=element_height,
-        attenuation_coef=attenuation_coef,
         apply_lens_correction=apply_lens_correction,
         lens_thickness=lens_thickness,
         lens_sound_speed=lens_sound_speed,
@@ -574,16 +599,15 @@ def pressure_field(
         n_sub_elements=n_sub_elements,
         elevation_focus=elevation_focus,
         lens_attenuation_coef=lens_attenuation_coef,
-        attenuation_power=attenuation_power,
         simplified_directivity=simplified_directivity,
     )
     grid_shape = tuple(int(d) for d in ops.shape(grid)[:-1])
-    positions = _scene_positions(ops.reshape(grid, (-1, 3)), model)
+    positions = _scene_positions(ops.reshape(grid, (-1, 3)), probe)
     n_points = int(ops.shape(positions)[0])
     shift = _transmit_shift(t0_delays, initial_times, t_peak)
 
     if n_fft is None or n_ax is None:
-        raw = [concrete(x) for x in (positions, model.geometry, shift, sound_speed)]
+        raw = [concrete(x) for x in (positions, probe.geometry, shift, sound_speed)]
         bounds = _sound_speed_minmax(sound_speed, sos_map)
         if any(x is None for x in raw) or bounds is None:
             raise ValueError(
@@ -609,7 +633,8 @@ def pressure_field(
     tx_apodizations = ops.cast(tx_apodizations, "float32")
     rays = _ray_means(
         positions,
-        model,
+        probe,
+        medium,
         sos_map,
         attenuation_map,
         map_grid_x,
@@ -625,7 +650,8 @@ def pressure_field(
             positions=points,
             slowness=rays[0],
             attenuation=rays[1],
-            model=model,
+            probe=probe,
+            medium=medium,
             shift=shift,
             tx_apodizations=tx_apodizations,
         )
@@ -674,10 +700,10 @@ def pressure_field(
     return ops.reshape(field, lead + grid_shape)
 
 
-def _pressure_block(freqs, positions, slowness, attenuation, model, shift, tx_apodizations):
+def _pressure_block(freqs, positions, slowness, attenuation, probe, medium, shift, tx_apodizations):
     """Incident field spectrum [f, t, p] of one frequency block, without the pulse."""
     tx_response, _, _ = element_responses(
-        positions, model, freqs, slowness=slowness, attenuation=attenuation
+        positions, probe, medium, freqs, slowness=slowness, attenuation=attenuation
     )
     tx_weights = _transmit_weights(freqs, shift, tx_apodizations)
     with highest_matmul_precision():

@@ -6,7 +6,7 @@ import numpy as np
 from keras import ops
 
 from zea.internal.core import concrete, ndim, round_up_to_power_of_two
-from zea.simulator.element import (
+from zea.simulator.response import (
     _as_f32,
     _one_way_time,
     _ray_slowness,

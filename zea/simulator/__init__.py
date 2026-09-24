@@ -37,48 +37,45 @@ power of two, so jit only triggers once or twice.
 be a more accurate version of the pfield code used in the beamformer. It will likely be integrated
 with the beamformer in the future, but currently only included for visualization purposes.
 
-The package is layered: :mod:`~zea.simulator.pulse` builds the transmit pulse,
-:mod:`~zea.simulator.element` the element model and its responses,
-:mod:`~zea.simulator.record` the record with its gates and band, and
-:mod:`~zea.simulator.frequency_domain` and :mod:`~zea.simulator.time_domain` are the two
-simulators on top of them.
-
 Example usage
 ^^^^^^^^^^^^^
 
-A simple example of simulating RF data with a single scatterer at the center of the probe. For a
-more in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_example`.
+A single plane wave on a single scatterer, through :class:`zea.ops.Simulate` in a
+:class:`zea.Pipeline`. The :class:`zea.Parameters` takes the probe from a :class:`zea.Probe`
+(its geometry, element size, band and lens, when recorded) and adds the transmit scheme and the
+medium; what the probe does not record is inferred, see :class:`zea.ops.Simulate`. For a more
+in depth example see the notebook: :doc:`../notebooks/data/zea_simulation_example`.
 
 .. doctest::
 
-    >>> from zea.simulator import simulate_rf
     >>> import numpy as np
+    >>> import zea
 
-    >>> raw_data = simulate_rf(
+    >>> probe = zea.Probe.from_name("verasonics_l11_4v")
+    >>> parameters = zea.Parameters(
+    ...     **probe.get_parameters(),
+    ...     n_tx=1,
+    ...     n_ax=1024,
+    ...     center_frequency=probe.probe_center_frequency,
+    ...     sampling_frequency=4 * probe.probe_center_frequency,
+    ...     sound_speed=1540,
+    ...     t0_delays=np.zeros((1, probe.n_el)),
+    ...     tx_apodizations=np.ones((1, probe.n_el)),
+    ...     initial_times=np.zeros(1),
+    ...     attenuation_coef=0.5,
+    ... )
+    >>> pipeline = zea.Pipeline([zea.ops.Simulate()], with_batch_dim=False)
+    >>> outputs = pipeline(
     ...     scatterer_positions=np.array([[0, 0, 20e-3]]),
     ...     scatterer_magnitudes=np.array([1.0]),
-    ...     probe_geometry=np.stack(
-    ...         [np.linspace(-20e-3, 20e-3, 64), np.zeros(64), np.zeros(64)], axis=-1
-    ...     ),
-    ...     apply_lens_correction=True,
-    ...     lens_thickness=1e-3,
-    ...     lens_sound_speed=1000,
-    ...     sound_speed=1540,
-    ...     n_ax=1024,
-    ...     center_frequency=5e6,
-    ...     sampling_frequency=20e6,
-    ...     t0_delays=np.zeros((1, 64)),
-    ...     initial_times=np.zeros(1),
-    ...     element_width=0.2e-3,
-    ...     attenuation_coef=0.5,
-    ...     tx_apodizations=np.ones((1, 64)),
-    ...     t_peak=np.full(1, 1 / 5e6),
+    ...     **pipeline.prepare_parameters(parameters),
     ... )
+    >>> outputs[pipeline.output_key].shape
+    (1, 1024, 128, 1)
 
 """
 
 from zea.func.ultrasound import apply_receive_chain
-from zea.simulator.element import attenuate, min_distance, obliquity_factor, spread
 from zea.simulator.frequency_domain import pressure_field, simulate_rf
 from zea.simulator.pulse import (
     PULSE_MODELS,
@@ -105,6 +102,7 @@ from zea.simulator.record import (
     scatter_exponent_bounds,
     smooth_size,
 )
+from zea.simulator.response import attenuate, min_distance, obliquity_factor, spread
 from zea.simulator.time_domain import simulate_rf_td
 
 __all__ = [
@@ -127,7 +125,7 @@ __all__ = [
     "gaussian_transfer",
     "generalized_normal_transfer",
     "butterworth_transfer",
-    # Elements
+    # Responses
     "attenuate",
     "spread",
     "obliquity_factor",

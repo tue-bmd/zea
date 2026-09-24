@@ -1,7 +1,7 @@
-"""The transducer elements of the simulators: their resolved geometry and physics
-(:class:`ElementModel`), the one-way transmit and receive responses of every element to every
-scatterer (:func:`element_responses`), and the straight rays through the sound speed and
-attenuation maps."""
+"""The one-way response of the simulators: the resolved probe (:class:`ProbeModel`) and
+medium (:class:`MediumModel`), the transmit and receive responses of every element to every
+scatterer through them (:func:`element_responses`), and the straight rays through the sound
+speed and attenuation maps."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -17,17 +17,17 @@ from zea.internal.core import concrete
 def min_distance(sound_speed, center_frequency):
     """Half a wavelength: the simulators clamp the element-scatterer distance to it for the
     phase and the spreading, as SIMUS does, so that the 1 / r of a scatterer on an element stays
-    finite. The angles keep the true geometry."""
+    finite."""
     return sound_speed / (2.0 * center_frequency)
 
 
 def attenuate(f, attenuation_coef, dist, power=1.0):
-    """Amplitude left after attenuation in the frequency domain.
+    """Amplitude factor after attenuation for each frequency bin.
 
     Args:
         f (array-like): The input frequencies.
         attenuation_coef (float): The attenuation coefficient in dB/cm/MHz^power.
-        dist (float): The distance the signal has traveled.
+        dist (float): The distance the signal has traveled (m).
         power (float): Exponent of the frequency dependence: ``attenuation_coef * f**power``
             dB/cm with ``f`` in MHz.
 
@@ -47,8 +47,8 @@ def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):
         exponent (float): 1 for spherical, 0.5 for cylindrical. An elevation lens focuses the
             transmitted energy to a slab, resulting in a cylindrical transmit and a spherical
             receive path.
-        mindist (float): Distances below it are clamped to it. The simulators pass half a
-            wavelength, :func:`min_distance`.
+        mindist (float): Clamped minimum distance to avoid very high amplitudes in the first pixel.
+            The simulators pass half a wavelength, :func:`min_distance`.
         reference (float): Distance of unit gain.
 
     Returns:
@@ -61,10 +61,8 @@ def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):
 def obliquity_factor(cos_angle, baffle_impedance_ratio):
     """Obliquity factor of an element in a baffle of finite impedance, at the cosine of the
     angle to its normal: 1 in a rigid baffle (ratio 0), the cosine in a soft one (``inf``), and
-    cos / (cos + ratio) in between, with the ratio the medium impedance over the baffle's
-    (Selfridge et al. 1980, as in SIMUS). With a non-rigid baffle, directions behind the
-    element get 0, not a pole.
-    """
+    cos / (cos + ratio) in between, with the ratio the medium impedance over the baffle's. With a
+    non-rigid baffle, directions behind the element get 0, not a pole."""
     if baffle_impedance_ratio == 0:
         return ops.ones_like(cos_angle)
     cos_angle = ops.maximum(cos_angle, 0.0)
@@ -74,58 +72,88 @@ def obliquity_factor(cos_angle, baffle_impedance_ratio):
 
 
 # ---------------------------------------------------------------------------------------------
-# Element model
+# Medium and probe
 # ---------------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
-class ElementModel:
-    """The element positions and the physics of one element, with the defaults of
-    :func:`simulate_rf` resolved and the scalars cast to float32. Built once per simulator call
-    by :func:`element_model`, and read by :func:`element_responses` in every frequency block.
+class MediumModel:
+    """The background medium of the simulators, as float32: the values outside the sound speed
+    and attenuation maps, and the geometry of the straight rays through them. Built once per
+    simulator call by :func:`medium_model`.
+
+    Attributes:
+        sound_speed: [m/s], the speed outside a sound speed map.
+        attenuation_coef: [dB/cm/MHz^power], the coefficient outside an attenuation map.
+        attenuation_power: Exponent of the frequency dependence, see :func:`attenuate`.
+        min_dist: Half a wavelength [m] (:func:`min_distance`), the floor on the element to
+            scatterer distance for the phase and the spreading.
+    """
+
+    sound_speed: Any
+    attenuation_coef: Any
+    attenuation_power: Any
+    min_dist: Any
+
+
+@dataclass(frozen=True)
+class ProbeModel:
+    """The probe of the simulators: its elements, their face and lens, and how their response
+    is modelled, with the defaults of :func:`simulate_rf` resolved and the scalars cast to
+    float32. Built once per simulator call by :func:`probe_model`, and read by
+    :func:`element_responses` in every frequency block. Distinct from :class:`zea.Probe`, the
+    user-facing description this is resolved from.
 
     Attributes:
         geometry: Element positions [m], (n_el, 3) float32.
-        sound_speed, element_width, element_height, attenuation_coef, attenuation_power,
-            lens_thickness, lens_sound_speed, lens_attenuation_coef, min_dist: The scalars of
-            :func:`simulate_rf` as float32 (a lens speed of None is 0, unused without the lens).
-        apply_lens_correction, two_dimensional: Static switches.
-        baffle_impedance_ratio: Static float, see :func:`obliquity_factor`.
+        element_width, element_height: Element size [m], float32.
         element_normals: Outward normals (n_el, 3) float32, or None for +z.
         n_sub_elements: Static (n_lateral, n_elevation), see :func:`_resolve_sub_elements`.
         elevation_focus: Static focal distance [m], or None.
+        apply_lens_correction: Static switch for the lens.
+        lens_thickness, lens_sound_speed, lens_attenuation_coef: The lens as float32 (a lens
+            speed of None is 0, unused without the lens).
+        baffle_impedance_ratio: Static float, see :func:`obliquity_factor`.
+        two_dimensional: Static switch: a 1D probe behind an ideal elevation lens.
         directivity_frequency: Frequency [Hz] the directivity is evaluated at, or None for
             every bin.
     """
 
     geometry: Any
-    sound_speed: Any
     element_width: Any
     element_height: Any
-    attenuation_coef: Any
-    attenuation_power: Any
-    lens_thickness: Any
-    lens_sound_speed: Any
-    apply_lens_correction: bool
-    two_dimensional: bool
-    baffle_impedance_ratio: float
     element_normals: Any
     n_sub_elements: tuple
     elevation_focus: float | None
+    apply_lens_correction: bool
+    lens_thickness: Any
+    lens_sound_speed: Any
     lens_attenuation_coef: Any
-    min_dist: Any
+    baffle_impedance_ratio: float
+    two_dimensional: bool
     directivity_frequency: Any = None
 
 
-def element_model(
+def medium_model(sound_speed, center_frequency, attenuation_coef, attenuation_power=1.0):
+    """The :class:`MediumModel` of :func:`simulate_rf`, with its distance floor at
+    ``center_frequency``."""
+    sound_speed = _as_f32(sound_speed)
+    return MediumModel(
+        sound_speed=sound_speed,
+        attenuation_coef=_as_f32(attenuation_coef),
+        attenuation_power=_as_f32(attenuation_power),
+        min_dist=min_distance(sound_speed, float(center_frequency)),
+    )
+
+
+def probe_model(
     probe_geometry,
-    sound_speed,
+    medium,
     center_frequency,
     pulses,
     *,
     element_width,
     element_height,
-    attenuation_coef,
     apply_lens_correction,
     lens_thickness,
     lens_sound_speed,
@@ -135,12 +163,11 @@ def element_model(
     n_sub_elements=None,
     elevation_focus=None,
     lens_attenuation_coef=0.0,
-    attenuation_power=1.0,
     simplified_directivity=False,
 ):
-    """Validate the element arguments of :func:`simulate_rf` and resolve their defaults: the
+    """Validate the probe arguments of :func:`simulate_rf` and resolve their defaults: the
     element width from the pitch, the height from the width, and the sub-element counts from
-    the top of the band of ``pulses``."""
+    the top of the band of ``pulses`` in ``medium``."""
     _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry)
     _validate_baffle(baffle_impedance_ratio)
     _validate_element_normals(element_normals, int(probe_geometry.shape[0]))
@@ -150,7 +177,7 @@ def element_model(
         apply_lens_correction,
         lens_thickness,
         lens_sound_speed,
-        sound_speed,
+        medium.sound_speed,
         elevation_focus,
         element_height,
     )
@@ -159,36 +186,32 @@ def element_model(
         elevation_focus,
         element_width,
         element_height,
-        sound_speed,
+        medium.sound_speed,
         max(pulse.band[1] for pulse in pulses),
         two_dimensional,
     )
-    return ElementModel(
+    return ProbeModel(
         geometry=ops.cast(probe_geometry, "float32"),
-        sound_speed=_as_f32(sound_speed),
         element_width=_as_f32(element_width),
         element_height=_as_f32(element_height),
-        attenuation_coef=_as_f32(attenuation_coef),
-        attenuation_power=_as_f32(attenuation_power),
-        lens_thickness=_as_f32(lens_thickness),
-        lens_sound_speed=_as_f32(lens_sound_speed),
-        apply_lens_correction=bool(apply_lens_correction),
-        two_dimensional=bool(two_dimensional),
-        baffle_impedance_ratio=float(baffle_impedance_ratio),
         element_normals=None if element_normals is None else _as_f32(element_normals),
         n_sub_elements=n_sub_elements,
         elevation_focus=None if elevation_focus is None else float(elevation_focus),
+        apply_lens_correction=bool(apply_lens_correction),
+        lens_thickness=_as_f32(lens_thickness),
+        lens_sound_speed=_as_f32(lens_sound_speed),
         lens_attenuation_coef=_as_f32(lens_attenuation_coef),
-        min_dist=min_distance(_as_f32(sound_speed), float(center_frequency)),
+        baffle_impedance_ratio=float(baffle_impedance_ratio),
+        two_dimensional=bool(two_dimensional),
         directivity_frequency=_as_f32(center_frequency) if simplified_directivity else None,
     )
 
 
-def _scene_positions(positions, model):
+def _scene_positions(positions, probe):
     """The positions (n, 3) as float32, moved into the imaging plane in 2D."""
     positions = ops.cast(positions, "float32")
-    if model.two_dimensional:
-        positions = _snap_elevation(positions, model.geometry)
+    if probe.two_dimensional:
+        positions = _snap_elevation(positions, probe.geometry)
     return positions
 
 
@@ -205,42 +228,43 @@ def _snap_elevation(positions, geometry):
 # ---------------------------------------------------------------------------------------------
 
 
-def element_responses(positions, model, freqs, slowness=None, attenuation=None):
-    """Transmit and receive one-way responses [f, s, e] of the elements of ``model`` to the
-    scatterers at ``positions``, and the one-way travel time [s, e] from the element centers.
+def element_responses(positions, probe, medium, freqs, slowness=None, attenuation=None):
+    """Transmit and receive one-way responses [f, s, e] of the elements of ``probe`` to the
+    scatterers at ``positions`` through ``medium``, and the one-way travel time [s, e] from the
+    element centers.
 
     Each element is the mean of its sub-elements, each with its own path, phase and sinc
     directivity, so the response holds in the near field. The path is clamped at
-    ``model.min_dist`` for the phase and the spreading only. ``slowness`` and ``attenuation``
+    ``medium.min_dist`` for the phase and the spreading only. ``slowness`` and ``attenuation``
     are the mean slowness and attenuation coefficient [s, e] of the straight rays through the
-    maps (:func:`_ray_means`), or None for the homogeneous medium of ``model``; they time and
-    attenuate the medium leg of every path, while the lens leg, the directivity and the
-    spreading keep the homogeneous geometry. In 2D the positions lie in the imaging plane
+    maps (:func:`_ray_means`), or None for a homogeneous ``medium``; they time and attenuate
+    the medium leg of every path, while the lens leg, the directivity and the spreading keep
+    the homogeneous geometry. In 2D the positions lie in the imaging plane
     (:func:`_scene_positions`): there is no elevation directivity, and the transmit spreads
     cylindrically, as behind an ideal lens.
     """
     dtype = positions.dtype
-    frame = _element_frame(model.element_normals, dtype)
+    frame = _element_frame(probe.element_normals, dtype)
     # A conformal lens on a curved probe: its face is normal to each element.
-    lens_normals = None if model.element_normals is None else frame.normal
-    sub = _sub_elements(model, frame, dtype)
+    lens_normals = None if probe.element_normals is None else frame.normal
+    sub = _sub_elements(probe, medium, frame, dtype)
     f3 = freqs[:, None, None]
-    min_time = model.min_dist / model.sound_speed
+    min_time = medium.min_dist / medium.sound_speed
 
     def response(j):
         """Receive response of sub-element ``j``, preceded by its transmit response in 2D,
         where the two differ."""
-        path = _sub_element_path(positions, sub, j, model, lens_normals, slowness)
-        amplitude = _sub_element_amplitude(f3, path, frame, sub, model, attenuation)
+        path = _sub_element_path(positions, sub, j, probe, medium, lens_normals, slowness)
+        amplitude = _sub_element_amplitude(f3, path, frame, sub, probe, medium, attenuation)
         delay = ops.maximum(path.time, min_time)[None] - sub.advance[j]
         phase = ops.exp(ops.array(-2j * np.pi, "complex64") * ops.cast(delay * f3, "complex64"))
 
         def with_spreading(exponent):
-            gain = spread(path.spread[None], exponent, model.min_dist)
+            gain = spread(path.spread[None], exponent, medium.min_dist)
             return ops.cast(amplitude * gain, "complex64") * phase
 
         rx = with_spreading(1.0)
-        if not model.two_dimensional:
+        if not probe.two_dimensional:
             return (rx,)
         # An ideal elevation lens: cylindrical spread on the way out, spherical back.
         return with_spreading(0.5), rx
@@ -248,12 +272,12 @@ def element_responses(positions, model, freqs, slowness=None, attenuation=None):
     responses = _mean_over_sub_elements(response, sub.n)
     tau = _one_way_time(
         positions,
-        model.geometry,
-        model.sound_speed,
-        model.apply_lens_correction,
-        model.lens_thickness,
-        model.lens_sound_speed,
-        model.element_normals,
+        probe.geometry,
+        medium.sound_speed,
+        probe.apply_lens_correction,
+        probe.lens_thickness,
+        probe.lens_sound_speed,
+        probe.element_normals,
         slowness,
     )
     return responses[0], responses[-1], tau
@@ -302,16 +326,16 @@ class _SubElements:
     thickness: Any
 
 
-def _sub_elements(model, frame, dtype):
-    """Sub-element geometry of ``model``, with the offsets laid out along the axes of ``frame``."""
-    n_lateral, n_elevation = model.n_sub_elements
-    u, v = _sub_element_offsets(n_lateral, n_elevation, model.element_width, model.element_height)
+def _sub_elements(probe, medium, frame, dtype):
+    """Sub-element geometry of ``probe``, with the offsets laid out along the axes of ``frame``."""
+    n_lateral, n_elevation = probe.n_sub_elements
+    u, v = _sub_element_offsets(n_lateral, n_elevation, probe.element_width, probe.element_height)
     u, v = ops.cast(u, dtype), ops.cast(v, dtype)
-    advance, thickness = _elevation_focusing(v, model)
+    advance, thickness = _elevation_focusing(v, probe, medium)
     return _SubElements(
         n=n_lateral * n_elevation,
-        width=model.element_width / n_lateral,
-        height=model.element_height / n_elevation,
+        width=probe.element_width / n_lateral,
+        height=probe.element_height / n_elevation,
         offsets=u[:, None, None] * frame.lateral_axis[None]
         + v[:, None, None] * frame.elevation_axis[None],
         advance=advance,
@@ -330,21 +354,21 @@ def _sub_element_offsets(n_lateral, n_elevation, element_width, element_height):
     return ops.reshape(ops.tile(u[:, None], (1, n_elevation)), (-1,)), ops.tile(v, (n_lateral,))
 
 
-def _elevation_focusing(v, model):
+def _elevation_focusing(v, probe, medium):
     """Focusing advance [s] and lens thickness [m] of the sub-elements at elevation offsets
     ``v``. Without the lens the focus is an ideal advance per sub-element and the thickness is
     None; with it the advance is zero and the thickness profile, thinned towards the edges,
     does the focusing."""
     advance = ops.zeros_like(v)
-    if not model.apply_lens_correction:
-        if model.elevation_focus is not None:
-            focus = ops.cast(model.elevation_focus, v.dtype)
-            advance = (ops.sqrt(focus**2 + v**2) - focus) / model.sound_speed
+    if not probe.apply_lens_correction:
+        if probe.elevation_focus is not None:
+            focus = ops.cast(probe.elevation_focus, v.dtype)
+            advance = (ops.sqrt(focus**2 + v**2) - focus) / medium.sound_speed
         return advance, None
-    if model.elevation_focus is None:
-        return advance, ops.full_like(v, model.lens_thickness)
-    sag = _lens_sag(v, model.elevation_focus, model.sound_speed, model.lens_sound_speed)
-    return advance, model.lens_thickness - sag
+    if probe.elevation_focus is None:
+        return advance, ops.full_like(v, probe.lens_thickness)
+    sag = _lens_sag(v, probe.elevation_focus, medium.sound_speed, probe.lens_sound_speed)
+    return advance, probe.lens_thickness - sag
 
 
 def _lens_sag(v, elevation_focus, sound_speed, lens_sound_speed):
@@ -370,31 +394,32 @@ class _Path:
     spread: Any
 
 
-def _sub_element_path(positions, sub, j, model, lens_normals, slowness):
+def _sub_element_path(positions, sub, j, probe, medium, lens_normals, slowness):
     """Path from sub-element ``j`` to every scatterer: straight, or refracted through the lens
     thickness under it. The medium leg runs at ``slowness`` when given."""
-    vector = positions[:, None] - model.geometry[None] - sub.offsets[j][None]
-    if not model.apply_lens_correction:
+    vector = positions[:, None] - probe.geometry[None] - sub.offsets[j][None]
+    if not probe.apply_lens_correction:
         distance = ops.linalg.norm(vector, axis=-1)
-        time = _medium_time(distance, model.sound_speed, slowness)
+        time = _medium_time(distance, medium.sound_speed, slowness)
         return _Path(vector=vector, medium=distance, lens=None, time=time, spread=distance)
     thickness = sub.thickness[j]
-    lens, medium = compute_lens_path_lengths(
-        model.geometry + sub.offsets[j],
+    lens_len, medium_len = compute_lens_path_lengths(
+        probe.geometry + sub.offsets[j],
         positions,
         lens_thickness=thickness,
-        c_lens=model.lens_sound_speed,
-        c_medium=model.sound_speed,
+        c_lens=probe.lens_sound_speed,
+        c_medium=medium.sound_speed,
         n_iter=3,
         element_normals=lens_normals,
     )
     return _Path(
         vector=vector,
-        medium=medium,
-        lens=lens,
-        time=lens / model.lens_sound_speed + _medium_time(medium, model.sound_speed, slowness),
+        medium=medium_len,
+        lens=lens_len,
+        time=lens_len / probe.lens_sound_speed
+        + _medium_time(medium_len, medium.sound_speed, slowness),
         spread=_lens_spread_distance(
-            lens, medium, thickness, model.sound_speed, model.lens_sound_speed
+            lens_len, medium_len, thickness, medium.sound_speed, probe.lens_sound_speed
         ),
     )
 
@@ -423,23 +448,23 @@ def _lens_spread_distance(lens_len, medium_len, thickness, sound_speed, lens_sou
     )
 
 
-def _sub_element_amplitude(f3, path, frame, sub, model, attenuation):
+def _sub_element_amplitude(f3, path, frame, sub, probe, medium, attenuation):
     """Real amplitude [f, s, e] along ``path`` at the frequencies ``f3`` (n_freq, 1, 1): the sinc
     directivity of the sub-element in the geometric direction, the attenuation of the lens and
     medium legs, and the baffle obliquity. ``attenuation`` is a per-ray coefficient [s, e] for
-    the medium leg, or None for the model's."""
+    the medium leg, or None for the medium's."""
     theta, phi, obliquity = _element_angles(path.vector, frame)
-    f_dir = f3 if model.directivity_frequency is None else model.directivity_frequency
-    amplitude = directivity(f_dir, theta[None], sub.width, model.sound_speed)
-    if not model.two_dimensional:
-        amplitude = amplitude * directivity(f_dir, phi[None], sub.height, model.sound_speed)
+    f_dir = f3 if probe.directivity_frequency is None else probe.directivity_frequency
+    amplitude = directivity(f_dir, theta[None], sub.width, medium.sound_speed)
+    if not probe.two_dimensional:
+        amplitude = amplitude * directivity(f_dir, phi[None], sub.height, medium.sound_speed)
     if path.lens is not None:
-        amplitude = amplitude * attenuate(f3, model.lens_attenuation_coef, path.lens[None])
-    attenuation_coef = model.attenuation_coef if attenuation is None else attenuation[None]
+        amplitude = amplitude * attenuate(f3, probe.lens_attenuation_coef, path.lens[None])
+    attenuation_coef = medium.attenuation_coef if attenuation is None else attenuation[None]
     amplitude = amplitude * attenuate(
-        f3, attenuation_coef, path.medium[None], model.attenuation_power
+        f3, attenuation_coef, path.medium[None], medium.attenuation_power
     )
-    return amplitude * obliquity_factor(obliquity, model.baffle_impedance_ratio)[None]
+    return amplitude * obliquity_factor(obliquity, probe.baffle_impedance_ratio)[None]
 
 
 def _element_angles(relative, frame):
@@ -518,7 +543,8 @@ def _one_way_time(
 
 def _ray_means(
     positions,
-    model,
+    probe,
+    medium,
     sos_map,
     attenuation_map,
     map_grid_x,
@@ -527,12 +553,12 @@ def _ray_means(
     n_samples,
 ):
     """Mean slowness and mean attenuation coefficient [s, e] of the straight rays from the
-    elements of ``model`` to the positions, each None without its map."""
+    elements of ``probe`` to the positions, each None without its map."""
     start = _ray_starts(
-        model.geometry, model.apply_lens_correction, model.lens_thickness, model.element_normals
+        probe.geometry, probe.apply_lens_correction, probe.lens_thickness, probe.element_normals
     )
     grids = (map_grid_x, map_grid_z, map_grid_y)
-    slowness = _ray_slowness(positions, start, model.sound_speed, sos_map, *grids, n_samples)
+    slowness = _ray_slowness(positions, start, medium.sound_speed, sos_map, *grids, n_samples)
     if attenuation_map is None:
         return slowness, None
     attenuation = straight_ray_mean(
@@ -541,7 +567,7 @@ def _ray_means(
         attenuation_map,
         map_grid_x,
         map_grid_z,
-        model.attenuation_coef,
+        medium.attenuation_coef,
         grid_y=map_grid_y,
         n_samples=int(n_samples),
     )
@@ -658,8 +684,8 @@ def _validate_lens(
     """Static checks of a focusing lens: distinct speeds, and a face above the elements."""
     if not apply_lens_correction:
         return
-    if lens_sound_speed is None:
-        raise ValueError("apply_lens_correction=True requires lens_sound_speed.")
+    if lens_sound_speed is None or lens_thickness is None:
+        raise ValueError("apply_lens_correction=True requires lens_thickness and lens_sound_speed.")
     if elevation_focus is None:
         return
     values = [concrete(x) for x in (lens_thickness, lens_sound_speed, sound_speed, element_height)]

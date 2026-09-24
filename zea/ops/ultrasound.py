@@ -142,8 +142,9 @@ class Simulate(Operation):
     Frequency-domain only arguments, which the time-domain simulator warns once about when one
     of them is set to something it cannot honor:
 
-    - Element model: ``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
-      ``elevation_focus``, ``lens_attenuation_coef``, ``band_db``.
+    - Probe model: ``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
+      ``elevation_focus``, ``lens_attenuation_coef``.
+    - ``band_db``: the bins below it, relative to the peak of the band, are not synthesised.
     - Sound speed map: ``sos_map`` with ``map_grid_x`` and ``map_grid_z`` (2D, extruded along
       y), plus ``map_grid_y`` for a 3D map. Each element-scatterer path is timed along its
       straight ray with ``n_sos_ray_samples`` samples, at ``sound_speed`` outside the map.
@@ -158,6 +159,7 @@ class Simulate(Operation):
       under jit without it; inside an outer jit take it from :attr:`zea.Parameters.n_fft`.
 
     ``element_height`` (both simulators) defaults to an eighth of the width of a 1D probe.
+    ``lens_thickness`` and ``lens_sound_speed`` are only needed with ``apply_lens_correction``.
 
     The simulators return noiseless RF; the receive chain (``noise_level_db``, ``tgc_max_db``,
     ``noise_seed``, ``noise_reference``) is :func:`zea.func.apply_receive_chain`, applied here
@@ -269,8 +271,6 @@ class Simulate(Operation):
         scatterer_magnitudes,
         probe_geometry,
         apply_lens_correction,
-        lens_thickness,
-        lens_sound_speed,
         sound_speed,
         n_ax,
         center_frequency,
@@ -281,6 +281,8 @@ class Simulate(Operation):
         attenuation_coef,
         tx_apodizations,
         t_peak,
+        lens_thickness=None,
+        lens_sound_speed=None,
         method="frequency_domain",
         two_dimensional=False,
         element_height=None,

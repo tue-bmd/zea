@@ -58,12 +58,12 @@ Example Usage
     >>> type(parameters).__name__
     'Parameters'
 
-    >>> # You can also build one from a Probe's parameters ...
+    >>> # You can also build one from a Probe's parameters (everything it records, except
+    >>> # its name and type; the transmit center_frequency is a scan parameter) ...
     >>> probe = Probe.from_name("verasonics_l11_4v")
     >>> parameters = Parameters(
-    ...     probe_geometry=probe.probe_geometry,
+    ...     **probe.get_parameters(),
     ...     center_frequency=probe.probe_center_frequency,
-    ...     element_width=probe.element_width,
     ...     grid_size_z=256,
     ...     n_tx=11,
     ... )

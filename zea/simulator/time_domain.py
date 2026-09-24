@@ -1,17 +1,20 @@
 """Time-domain RF simulator: every echo splat at its two-way delay, convolved once per channel
-with the transmit pulse."""
+with the transmit pulse. It shares the pulses, probe, medium and scene positions with
+:mod:`~zea.simulator.frequency_domain`, then evaluates directivity, spreading and attenuation
+at the center frequency instead of per bin."""
 
 from keras import ops
 
 from zea.func.ultrasound import directivity
 from zea.internal.core import ndim
-from zea.simulator.element import (
+from zea.simulator.response import (
     _element_angles,
     _element_frame,
     _one_way_time,
     _scene_positions,
     attenuate,
-    element_model,
+    medium_model,
+    probe_model,
     spread,
 )
 from zea.simulator.pulse import transmit_pulses
@@ -112,20 +115,20 @@ def simulate_rf_td(
     pulses = transmit_pulses(
         n_tx, center_frequency, sampling_frequency, waveforms_two_way, waveform_sampling_frequency
     )
-    model = element_model(
+    medium = medium_model(sound_speed, center_frequency, attenuation_coef)
+    probe = probe_model(
         probe_geometry,
-        sound_speed,
+        medium,
         center_frequency,
         pulses,
         element_width=element_width,
         element_height=element_height,
-        attenuation_coef=attenuation_coef,
         apply_lens_correction=apply_lens_correction,
         lens_thickness=lens_thickness,
         lens_sound_speed=lens_sound_speed,
         two_dimensional=two_dimensional,
     )
-    positions = _scene_positions(scatterer_positions, model)
+    positions = _scene_positions(scatterer_positions, probe)
     magnitudes = ops.cast(scatterer_magnitudes, "float32")
     n_scat = int(ops.shape(positions)[0])
     waveforms = {
@@ -141,7 +144,7 @@ def simulate_rf_td(
     for start in range(0, n_scat, chunk_size):
         stop = min(start + chunk_size, n_scat)
         base_gain, two_way_time = _scatterer_response(
-            positions[start:stop], magnitudes[start:stop], model, center_frequency
+            positions[start:stop], magnitudes[start:stop], probe, medium, center_frequency
         )
         for tx in range(n_tx):
             spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
@@ -182,7 +185,7 @@ def _simulate_transmit(
     return _scatter_spike_map(sample_positions, gain, n_ax, n_el)
 
 
-def _scatterer_response(positions, magnitudes, model, center_frequency):
+def _scatterer_response(positions, magnitudes, probe, medium, center_frequency):
     """Compute the transmit-independent gain and two-way travel time tensors.
 
     Returns:
@@ -192,26 +195,26 @@ def _scatterer_response(positions, magnitudes, model, center_frequency):
             time [s], excluding transmit delays and initial times.
     """
     # Through a lens, the medium distance with the travel time of the refracted path.
-    physical_distance = model.sound_speed * _one_way_time(
+    physical_distance = medium.sound_speed * _one_way_time(
         positions,
-        model.geometry,
-        model.sound_speed,
-        model.apply_lens_correction,
-        model.lens_thickness,
-        model.lens_sound_speed,
+        probe.geometry,
+        medium.sound_speed,
+        probe.apply_lens_correction,
+        probe.lens_thickness,
+        probe.lens_sound_speed,
     )
     # Half a wavelength at least for the travel time and the spreading, as in simulate_rf.
     # The attenuation keeps the physical path length, as there.
-    one_way_distance = ops.maximum(physical_distance, model.min_dist)
-    travel_time = one_way_distance / model.sound_speed
+    one_way_distance = ops.maximum(physical_distance, medium.min_dist)
+    travel_time = one_way_distance / medium.sound_speed
     two_way_distance = physical_distance[:, :, None] + physical_distance[:, None, :]
 
-    element_directivity = _element_directivity(positions, model, center_frequency)
+    element_directivity = _element_directivity(positions, probe, medium, center_frequency)
     directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
     spread_attenuation = (
-        spread(one_way_distance[:, :, None], 0.5 if model.two_dimensional else 1.0, model.min_dist)
-        * spread(one_way_distance[:, None, :], 1.0, model.min_dist)
-        * attenuate(center_frequency, model.attenuation_coef, two_way_distance)
+        spread(one_way_distance[:, :, None], 0.5 if probe.two_dimensional else 1.0, medium.min_dist)
+        * spread(one_way_distance[:, None, :], 1.0, medium.min_dist)
+        * attenuate(center_frequency, medium.attenuation_coef, two_way_distance)
     )
 
     base_gain = magnitudes[:, None, None] * directivity_pair * spread_attenuation
@@ -219,15 +222,15 @@ def _scatterer_response(positions, magnitudes, model, center_frequency):
     return base_gain, two_way_time
 
 
-def _element_directivity(positions, model, frequency):
+def _element_directivity(positions, probe, medium, frequency):
     """Directivity from each element to each scatterer, at the direction cosines of the
     frequency-domain simulator (:func:`_element_angles`); no elevation term in 2D."""
-    relative = positions[:, None] - model.geometry[None]
+    relative = positions[:, None] - probe.geometry[None]
     theta, phi, _ = _element_angles(relative, _element_frame(None, relative.dtype))
-    lateral = directivity(frequency, theta, model.element_width, model.sound_speed)
-    if model.two_dimensional:
+    lateral = directivity(frequency, theta, probe.element_width, medium.sound_speed)
+    if probe.two_dimensional:
         return lateral
-    return lateral * directivity(frequency, phi, model.element_height, model.sound_speed)
+    return lateral * directivity(frequency, phi, probe.element_height, medium.sound_speed)
 
 
 def _scatter_spike_map(sample_positions, weights, n_ax, n_el):
