@@ -49,19 +49,20 @@ class AppArgs:
     def run(self) -> None:
         """Launch the Gradio dataset visualizer."""
         try:
-            import gradio as gr
+            import gradio  # noqa: F401
         except ImportError as exc:
             raise ImportError(
                 "gradio is required for the zea app. Install with: pip install 'zea[app]'"
             ) from exc
 
-        from zea.data.app import CSS, build_interface
+        from zea.data.app import CSS, JS, build_interface, build_theme
 
         build_interface().launch(
             share=self.share,
             server_port=self.server_port,
-            theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
+            theme=build_theme(),
             css=CSS,
+            js=JS,
         )
 
 
