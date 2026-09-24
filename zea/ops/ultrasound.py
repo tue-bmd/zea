@@ -179,7 +179,12 @@ class TOFCorrection(Operation):
     """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
+    STATIC_PARAMS = [
+        "f_number",
+        "apply_lens_correction",
+        "focal_region_length",
+        "transmit_f_number_mask",
+    ]
 
     def __init__(self, **kwargs):
         super().__init__(
@@ -210,6 +215,7 @@ class TOFCorrection(Operation):
         sos_grid_x=None,
         sos_grid_z=None,
         focal_region_length=None,
+        transmit_f_number_mask=False,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -240,6 +246,9 @@ class TOFCorrection(Operation):
                 last-arrival delays are linearly blended. This smooths the
                 focal-plane transition while preserving the same model outside
                 the region. ``None`` or ``0`` disables it.
+            transmit_f_number_mask (bool): Also apply the f-number mask on the
+                transmit leg (multistatic data only). See
+                :func:`zea.beamform.beamformer.tof_correction`.
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -268,6 +277,7 @@ class TOFCorrection(Operation):
             "sos_grid_x": sos_grid_x,
             "sos_grid_z": sos_grid_z,
             "focal_region_length": focal_region_length,
+            "transmit_f_number_mask": bool(transmit_f_number_mask),
         }
 
         if not self.with_batch_dim:
@@ -1321,6 +1331,8 @@ class CommonMidpointPhaseError(Operation):
         reshape_grid=True,
         subaperture_half_elements=8,
         subaperture_stride=1,
+        patch_size=1,
+        coherence_threshold=0.0,
         **kwargs,
     ):
         """
@@ -1333,6 +1345,19 @@ class CommonMidpointPhaseError(Operation):
             subaperture_stride (int): Spacing, in elements, between the
                 neighbouring subapertures whose phases are differenced.
                 Defaults to 1.
+            patch_size (int): Number of consecutive pixels on the flat pixel
+                axis that form one estimation patch. The cross-correlation of
+                each common-midpoint pair is summed over the patch before its
+                phase is taken, and one value is returned per patch, so the
+                pixel axis must be laid out as ``(n_patches, patch_size)``.
+                DBUA uses a 5x5 kernel at half-wavelength spacing
+                (``patch_size=25``). Defaults to 1 (per-pixel estimate).
+            coherence_threshold (float): Only pairs whose correlation
+                coefficient over the patch exceeds this value contribute, as
+                in DBUA (which uses 0.9). A single-pixel patch always has a
+                correlation coefficient of 1, so the threshold only acts
+                with ``patch_size > 1``. Patches where no pair survives
+                return NaN. Defaults to 0.0 (keep every pair).
         """
         super().__init__(
             input_data_type=None,
@@ -1343,6 +1368,8 @@ class CommonMidpointPhaseError(Operation):
         self.reshape_grid = reshape_grid
         self.subaperture_half_elements = int(subaperture_half_elements)
         self.subaperture_stride = int(subaperture_stride)
+        self.patch_size = int(patch_size)
+        self.coherence_threshold = float(coherence_threshold)
 
     def create_subapertures(self, data, halfsa, dx):
         """Create subapertures from the data.
@@ -1404,6 +1431,27 @@ class CommonMidpointPhaseError(Operation):
         # This only works if the array is regularly spaced
         xy = a * ops.conj(b)
         xy = ops.where(valid, xy, 0)
+
+        if self.patch_size > 1 or self.coherence_threshold > 0:
+            # DBUA: sum the correlation of each pair over a patch of pixels, and
+            # keep only pairs that are coherent over it. Decorrelated pairs carry
+            # an essentially random phase that would otherwise set the floor.
+            n_pix = xy.shape[-1]
+            assert n_pix % self.patch_size == 0, (
+                f"n_pix={n_pix} is not a multiple of patch_size={self.patch_size}"
+            )
+            patch_shape = (*xy.shape[:2], n_pix // self.patch_size, self.patch_size)
+            xx = ops.where(valid, ops.real(a * ops.conj(a)), 0)
+            yy = ops.where(valid, ops.real(b * ops.conj(b)), 0)
+            xy = ops.sum(ops.reshape(xy, patch_shape), -1)
+            xx = ops.sum(ops.reshape(xx, patch_shape), -1)
+            yy = ops.sum(ops.reshape(yy, patch_shape), -1)
+            valid = ops.any(ops.reshape(valid, patch_shape), -1)
+            xy_power = ops.square(ops.abs(xy))
+            coherent = xy_power > (self.coherence_threshold**2) * xx * yy
+            valid = valid & coherent
+            xy = ops.where(valid, xy, 0)
+
         dphi = ops.angle(xy)
         dphi = ops.abs(dphi)
 

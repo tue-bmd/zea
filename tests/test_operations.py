@@ -1705,6 +1705,42 @@ def test_common_midpoint_phase_error_coherent_data():
     return phase_error
 
 
+def test_common_midpoint_phase_error_coherence_gate():
+    """With DBUA's patch and coherence gate, a patch whose common-midpoint pairs
+    are coherent keeps exactly its per-pixel phase error, while a patch of
+    independent random phases is rejected (NaN) instead of reading ~pi/2.
+
+    Single-element subapertures (halfsa=0): wider ones overlap their neighbours,
+    which correlates the pairs even for random data."""
+    n, halfsa, patch = 24, 0, 16
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    # An element-level phase screen: every pixel of the patch sees the same one.
+    screen = rng.normal(0.0, 0.3, n)
+    coherent = np.exp(1j * (screen[:, None, None] + screen[None, None, :]))
+    coherent = np.broadcast_to(coherent, (n, patch, n))
+    incoherent = np.exp(2j * np.pi * rng.random((n, patch, n)))
+    iq = np.concatenate([coherent, incoherent], axis=1)
+    data = np.stack([iq.real, iq.imag], axis=-1).astype(np.float32)
+
+    per_pixel = ops.CommonMidpointPhaseError(
+        with_batch_dim=False, subaperture_half_elements=halfsa
+    )(data=keras.ops.convert_to_tensor(data))["data"]
+    gated = ops.CommonMidpointPhaseError(
+        with_batch_dim=False,
+        subaperture_half_elements=halfsa,
+        patch_size=patch,
+        coherence_threshold=0.9,
+    )(data=keras.ops.convert_to_tensor(data))["data"]
+    per_pixel = keras.ops.convert_to_numpy(per_pixel)
+    gated = keras.ops.convert_to_numpy(gated)
+
+    assert gated.shape == (2,)
+    np.testing.assert_allclose(gated[0], per_pixel[0], rtol=1e-4)
+    assert np.isnan(gated[1])
+    assert np.mean(per_pixel[patch:]) > 1.0, "ungated random phases should read ~pi/2"
+
+
 @pytest.mark.parametrize("with_batch_dim", [False, True])
 @backend_equality_check(decimal=5)
 def test_apply_aligned_apodization(with_batch_dim):
