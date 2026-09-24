@@ -20,6 +20,7 @@ fast and parallel (see :mod:`zea.data.chunk_reader`).
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from zea import log
@@ -31,6 +32,27 @@ ENABLED = os.environ.get("ZEA_CHUNK_CACHE", "1") != "0"
 
 #: Byte budget for the whole cache. Overrun is pruned oldest-first (by access time).
 MAX_BYTES = int(os.environ.get("ZEA_CHUNK_CACHE_SIZE", 10 << 30))  # 10 GiB
+
+# Process-wide count of bytes fetched over the network by the streaming read paths (metadata
+# blocks through CachedFile, chunks through chunk_reader.HTTPFetcher). Cache hits do not count.
+_network_bytes = 0
+_network_lock = threading.Lock()
+
+
+def network_bytes() -> int:
+    """Bytes fetched over the network by streamed ``hf://`` reads since the process started.
+
+    Take the difference of two readings to measure a single operation, e.g. to drive a
+    progress display. Reads served from this cache are not counted.
+    """
+    return _network_bytes
+
+
+def _count_network_bytes(n: int) -> None:
+    global _network_bytes
+    with _network_lock:
+        _network_bytes += n
+
 
 #: Prune this often (in writes) rather than on every one — the check has to stat the tree.
 PRUNE_EVERY = 64
@@ -122,6 +144,7 @@ class CachedFile:
             return hit
         self._file.seek(offset)
         data = self._file.read(size)
+        _count_network_bytes(len(data))
         self._cache.put(offset, size, data)
         return data
 

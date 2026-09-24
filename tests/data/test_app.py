@@ -243,7 +243,32 @@ def test_read_file_info_valid_file(tmp_path):
 def test_read_file_info_nonexistent_path():
     from zea.data.app import _read_file_info
 
-    assert _read_file_info("/nonexistent/path.hdf5") == {}
+    info = _read_file_info("/nonexistent/path.hdf5")
+    assert list(info) == ["error"]
+
+
+def test_file_load_updates_reports_unreadable_file():
+    from zea.data.app import _file_load_updates
+
+    meta = _file_load_updates("/nonexistent/path.hdf5", None, "data/raw_data")[2]
+    assert "Cannot read file" in meta
+
+
+def test_loading_meta_html_mentions_streaming():
+    from zea.data.app import _html_progress, _loading_meta_html
+
+    card = _loading_meta_html(3_400_000, 5_750_000_000)
+    assert "Streaming" in card and "3.4 MB" in card and "5.8 GB" in card
+    assert "streamed" in _html_progress(1, 2, 12_000_000)
+
+
+def test_presets_are_well_formed():
+    from zea.data.app import PRESETS
+
+    for name, p in PRESETS.items():
+        assert p["dataset"].startswith("hf://"), name
+        if "file" in p:
+            assert p["file"].startswith(p["dataset"] + "/"), name
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -304,3 +329,65 @@ def test_run_checks_raw_fallback_success(tmp_path):
     images = [img for _, img in results if img is not None]
     assert len(images) > 0
     assert isinstance(images[0], _PILImage.Image)
+
+
+# ── Path normalisation / config discovery ─────────────────────────────────────
+
+
+def test_normalize_path_repairs_hf_scheme():
+    from zea.data.app import _normalize_path
+
+    for raw in (
+        "hf:://owner/repo/sub",
+        "hf:/owner/repo/sub",
+        "HF://owner/repo/sub/",
+        "  'hf://owner/repo/sub'  ",
+        '"hf://owner/repo/sub"',
+    ):
+        assert _normalize_path(raw) == "hf://owner/repo/sub"
+    assert _normalize_path(None) == ""
+    assert _normalize_path(" /local/data ") == "/local/data"
+
+
+def test_display_names_relative_to_root(tmp_path):
+    from zea.data.app import _display_names
+
+    hf = ["hf://o/r/data/a/x.hdf5", "hf://o/r/data/b/x.hdf5"]
+    assert _display_names("hf://o/r", hf) == ["data/a/x.hdf5", "data/b/x.hdf5"]
+    local = [str(tmp_path / "a" / "x.hdf5"), str(tmp_path / "b" / "x.hdf5")]
+    assert _display_names(str(tmp_path), local) == ["a/x.hdf5", "b/x.hdf5"]
+    # A single file is labelled by its basename
+    assert _display_names(local[0], local[:1]) == ["x.hdf5"]
+
+
+def test_list_dataset_files_missing_local_path_message(tmp_path):
+    from zea.data.app import _list_dataset_files
+
+    errors = []
+    _list_dataset_files(str(tmp_path / "nonexistent"), _errors=errors)
+    assert isinstance(errors[0], FileNotFoundError)
+    assert "Path not found" in str(errors[0])
+
+
+def test_find_config_local(tmp_path):
+    from zea.data.app import _find_config
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    generate_example_dataset(data_dir / "scan.hdf5")
+    assert _find_config(str(data_dir)) is None
+    (tmp_path / "pipeline.yaml").write_text("pipeline: []")
+    assert _find_config(str(data_dir / "scan.hdf5")) == str(tmp_path / "pipeline.yaml")
+    (data_dir / "config.yaml").write_text("pipeline: []")
+    assert _find_config(str(data_dir)) == str(data_dir / "config.yaml")
+
+
+def test_find_config_hf_walks_up_to_repo_root():
+    from zea.data.app import _find_config
+
+    files = ["pipeline.yaml", "data/PAT01/a.hdf5", "other/config.yaml"]
+    with patch("zea.data.app._hf_list_files", return_value=files):
+        assert _find_config("hf:://o/r/data/PAT01/a.hdf5") == "hf://o/r/pipeline.yaml"
+        assert _find_config("hf://o/r/other") == "hf://o/r/other/config.yaml"
+    with patch("zea.data.app._hf_list_files", return_value=["data/a.hdf5"]):
+        assert _find_config("hf://o/r") is None
