@@ -10,9 +10,6 @@ from zea.beamform.lens_correction import compute_lens_path_lengths
 from zea.ops import Simulate
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
 from zea.simulator import (
-    _element_responses,
-    _resolve_element_height,
-    _resolve_sub_elements,
     butterworth_transfer,
     gaussian_transfer,
     generalized_normal_transfer,
@@ -23,6 +20,11 @@ from zea.simulator import (
     square_burst_spectrum,
     transmit_pulse,
     transmit_pulses,
+)
+from zea.simulator.element import (
+    _element_responses,
+    _resolve_element_height,
+    _resolve_sub_elements,
 )
 from zea.simulator_time_domain import simulate_rf_td
 
