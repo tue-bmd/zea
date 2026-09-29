@@ -1,7 +1,7 @@
 """Time-domain RF simulator: every echo splat at its two-way delay, convolved once per channel
 with the transmit pulse. It shares the pulses, probe, medium and scene positions with
-:mod:`~zea.simulator.frequency_domain`, then evaluates directivity, spreading and attenuation
-at the center frequency instead of per bin."""
+:func:`~zea.simulator.simulate_rf` (:mod:`~zea.simulator.frequency_domain`), then evaluates
+directivity, spreading and attenuation at the center frequency instead of per bin."""
 
 from keras import ops
 
@@ -50,54 +50,33 @@ def simulate_rf_td(
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
-    An approximation of :func:`simulate_rf` without the per-frequency synthesis. Each scatterer
-    contribution is splatted, with linear sub-sample interpolation, into an ``(n_ax, n_el)``
-    spike map at its two-way sample delay; the spike map is then convolved once per receive
-    channel with a real transmit pulse.
+    An approximation of :func:`simulate_rf` without the per-frequency synthesis, faster for 2D
+    probes with few transmits. Each scatterer contribution is splatted, with linear sub-sample
+    interpolation, into an ``(n_ax, n_el)`` spike map at its two-way sample delay; the spike map
+    is then convolved once per receive channel with the transmit pulse. Directivity, geometric
+    spreading and attenuation are evaluated at the center frequency (a broadband approximation
+    appropriate for the time domain), with the same probe and medium as :func:`simulate_rf`.
 
-    Directivity, geometric spreading, and attenuation are evaluated at the pulse center
-    frequency (a broadband approximation appropriate for the time domain), reusing the same
-    helpers as :func:`simulate_rf`.
+    Takes the required arguments of :func:`simulate_rf` with the same meaning, without the
+    multi-plane transmits: ``t0_delays`` and ``tx_apodizations`` are (n_tx, n_el) only. Of its
+    options it takes ``two_dimensional``, ``element_height``, ``waveforms_two_way`` and
+    ``waveform_sampling_frequency`` as there, plus:
 
     Args:
-        scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
-        scatterer_magnitudes (array-like): The magnitudes of the scatterers of shape (n_scat,).
-        probe_geometry (array-like): The geometry of the probe [m] of shape (n_el, 3).
-        apply_lens_correction (bool): Whether to apply lens correction.
-        lens_thickness (float): The thickness of the lens [m].
-        lens_sound_speed (float): The speed of sound in the lens [m/s].
-        sound_speed (float): The speed of sound in the medium [m/s].
-        n_ax (int): The number of samples in the RF data.
-        center_frequency (float): The center frequency of the transmit pulse [Hz].
-        sampling_frequency (float): The sampling frequency of the RF data [Hz].
-        t0_delays (array-like): The transmit delays [s] of shape (n_tx, n_el).
-        initial_times (array-like): The initial times [s] of shape (n_tx,).
-        element_width (float): The width of the elements [m].
-        attenuation_coef (float): The attenuation coefficient [dB/cm/MHz].
-        tx_apodizations (array-like): The transmit apodizations of shape (n_tx, n_el).
-        t_peak (array-like): The time of the peak of the transmit pulse [s] of shape (n_tx,).
-        two_dimensional (bool): Simulate in the imaging plane, as a 1D probe behind an ideal
-            elevation lens: the scatterers are moved to the probe's elevation center, there is
-            no elevation directivity, and the transmit spreads cylindrically rather than
-            spherically. Rejects a probe with elevation extent.
-        element_height (float): The elevation height of the elements [m], used for the
-            elevation directivity. If None, an eighth of the width of a 1D probe (at least
-            ``element_width``), or ``element_width`` for a 2D probe.
         max_chunk_gb (float): Approximate memory budget [GB] for the (chunk, n_el, n_el)
-            tensors held at once while iterating over scatterers. Scatterers are processed
-            in chunks sized to this budget, so peak memory no longer scales with the total
-            scatterer count. Must be a static (Python) value, not a traced array.
+            tensors held at once while iterating over scatterers, which bounds the peak memory
+            instead of the scatterer count. Not comparable with the budget of
+            :func:`simulate_rf`, which bounds a different block of work. Static under jit.
         scatter_exponent (float): Weigh the scattered waveform spectrum by
-            ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
-            myocardium is approximately 1.5, soft tissue 0.6-0.8. Must be static under jit.
-            One shared exponent only: the whole medium is splatted into a single spike map and
-            convolved with one pulse, so a per-scatterer vector is rejected. Use
-            :func:`simulate_rf` for that.
-        waveforms_two_way (array-like, optional): Two-way transmit waveforms of shape
-            (n_tx, n_samples) or (n_samples,), as in :func:`simulate_rf`; None is the default
-            pulse of :func:`transmit_pulse`. Must be static under jit.
-        waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``.
-            Must be static under jit.
+            ``(f / center_frequency)**scatter_exponent``, as in :func:`simulate_rf`, but one
+            shared exponent only: the whole medium is splatted into a single spike map and
+            convolved with one pulse, so a per-scatterer vector is rejected. Static under jit.
+
+    The probe model options of :func:`simulate_rf` (``element_normals``,
+    ``baffle_impedance_ratio``, ``n_sub_elements``, ``elevation_focus``,
+    ``lens_attenuation_coef``, ``simplified_directivity``), its heterogeneous media (the maps)
+    and its spectrum and jit options (``band_db``, ``n_fft``, ``scatter_exponent_range``) do
+    not apply here.
 
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1), noiseless:

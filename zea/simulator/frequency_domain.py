@@ -1,27 +1,25 @@
 """Frequency-domain RF simulator: the superposition of the scatterer responses on the rfft grid
 of the record, with the one-way responses shared by every transmit.
 
-:func:`simulate_rf`, top to bottom:
+:func:`~zea.simulator.simulate_rf`, top to bottom:
 
-1. :func:`~zea.simulator.pulse.transmit_pulses` builds the two-way pulse of every transmit.
-2. :func:`~zea.simulator.response.medium_model` and :func:`~zea.simulator.response.probe_model`
-   validate the medium and the probe and freeze them.
-3. :func:`~zea.simulator.response._scene_positions` casts the scatterers and, in 2D, moves them
-   into the imaging plane.
-4. ``n_fft`` is taken as given or bounded from the concrete inputs
-   (:func:`~zea.simulator.record._fft_bound`, :func:`~zea.simulator.record.smooth_size`).
-5. :func:`~zea.simulator.record.band_bins` keeps the bins the pulses and the scattering reach.
-6. Scatterers are chunked to the memory budget. Per chunk,
-   :func:`~zea.simulator.response._ray_means` takes the mean slowness and attenuation of every
-   ray once, then :func:`_band_spectrum` loops over frequency blocks calling :func:`_rf_block`:
-   the element responses, the record gate, and the two einsums that sum the transmit and receive
-   sides into a spectrum per transmit and element.
-7. :func:`_band_to_time` inverse-transforms the band times the pulse spectra, per group of
+1. :func:`~zea.simulator.transmit_pulses` builds the two-way pulse of every transmit.
+2. ``medium_model`` and ``probe_model`` (:mod:`~zea.simulator.response`) validate the medium
+   and the probe and freeze them.
+3. ``_scene_positions`` casts the scatterers and, in 2D, moves them into the imaging plane.
+4. ``n_fft`` is taken as given or bounded from the concrete inputs (``_fft_bound`` and
+   :func:`~zea.simulator.smooth_size` of :mod:`~zea.simulator.record`).
+5. :func:`~zea.simulator.band_bins` keeps the bins the pulses and the scattering reach.
+6. Scatterers are chunked to the memory budget. Per chunk, ``_ray_means`` takes the mean
+   slowness and attenuation of every ray once, then ``_band_spectrum`` loops over frequency
+   blocks calling ``_rf_block``: the element responses, the record gate, and the two einsums
+   that sum the transmit and receive sides into a spectrum per transmit and element.
+7. ``_band_to_time`` inverse-transforms the band times the pulse spectra, per group of
    transmits.
 
-:func:`pressure_field` runs steps 1 to 6 on grid points with only the transmit side
-(:func:`_pressure_block`). :func:`~zea.simulator.time_domain.simulate_rf_td` shares steps 1 to
-3, and :func:`~zea.simulator.record.in_record` is the gate of step 6 on its own."""
+:func:`~zea.simulator.pressure_field` runs steps 1 to 6 on grid points with only the transmit
+side (``_pressure_block``). :func:`~zea.simulator.simulate_rf_td` shares steps 1 to 3, and
+:func:`~zea.simulator.in_record` is the gate of step 6 on its own."""
 
 import functools
 from dataclasses import dataclass
@@ -98,6 +96,25 @@ def simulate_rf(
 ):
     """Simulates RF data for a given set of scatterers.
 
+    Every scatterer of the cloud echoes the field of every transmit back to every element, with
+    the directivity and obliquity of the elements, geometric spreading, and attenuation and
+    scattering that depend on frequency; the echoes are summed into the RF of the transmit.
+    The two-way (pulse-echo) transmit pulse is ``waveforms_two_way``: the waveform of a zea file
+    (the Verasonics ``TW.Wvfm2Wy``), a measured one, or one built with :func:`transmit_pulse`,
+    which has the parametric models. Without it the default pulse of :func:`transmit_pulse` is
+    used: a one-cycle burst at ``center_frequency`` through a 70 % Butterworth transducer. A
+    scatterer is simulated when its earliest echo still has pulse support inside the record
+    (:func:`in_record`); echoes that run past the record are truncated. The RF is noiseless:
+    electronic noise and time gain compensation are :func:`zea.func.apply_receive_chain`, which
+    :class:`zea.ops.Simulate` applies. Differentiable on jax.
+
+    Under ``jax.jit`` the scene, the probe geometry and element sizes, the transmit scheme, the
+    medium, the lens, the maps and ``scatter_exponent`` may be traced; every other argument is
+    a static Python value. ``n_fft`` must then be given (:class:`zea.ops.Simulate` and
+    :attr:`zea.Parameters.n_fft` derive it outside the jit), ``n_sub_elements`` as a pair when
+    it would be derived from a traced element size, and ``scatter_exponent_range`` or
+    ``band_db=None`` for a traced exponent.
+
     The RF is synthesised in the frequency domain, on the rfft grid of ``n_fft`` samples, as the
     superposition of the scatterer echoes:
 
@@ -108,17 +125,22 @@ def simulate_rf(
 
     The one-way responses ``R_tx`` and ``R_rx`` (directivity, obliquity, spreading, attenuation
     and the travel phase) do not depend on the transmit, so they are generated once per
-    frequency block and shared across all transmits through the two matrix products. The
-    two-way (pulse-echo) transmit pulse ``waveforms_two_way`` multiplies the spectrum of each
-    transmit: the waveform of a zea file (the Verasonics ``TW.Wvfm2Wy``), a measured one, or
-    one built with :func:`transmit_pulse`, which has the parametric models. Without it the
-    default pulse of :func:`transmit_pulse` is used: a one-cycle burst at ``center_frequency``
-    through a 70 % Butterworth transducer. Only the bins where the pulse spectrum and the
-    scattering gain together exceed ``band_db`` are computed. A scatterer is kept when its
-    earliest echo still has pulse support inside the record, and the FFT length is sized so
-    that no kept echo wraps into the record; echoes that run past the record are truncated.
-    The RF is noiseless: electronic noise and time gain compensation are
-    :func:`zea.func.apply_receive_chain`, which :class:`zea.ops.Simulate` applies.
+    frequency block and shared across all transmits through the two matrix products. The pulse
+    spectrum multiplies the spectrum of each transmit, and only the bins where the pulse and
+    the scattering gain together exceed ``band_db`` are computed. The FFT length is sized so
+    that no kept echo wraps into the record (:func:`fft_length`).
+
+    .. admonition:: Reproducing other simulators
+
+        The Verasonics Vantage simulator applies no frequency-dependent scattering, evaluates
+        its attenuation at the centre frequency only, and its default element sensitivity is
+        cos times sinc: ``scatter_exponent=0``, ``attenuation_coef=0`` and
+        ``baffle_impedance_ratio=inf`` reproduce its spectrum, with the ``"realistic"`` pulse of
+        :func:`transmit_pulse` as its waveform. It applies no geometric spreading, which zea
+        always does. For SIMUS (MUST), ``n_sub_elements="auto"`` follows its sub-element rule
+        (SIMUS takes the transducer band, a little wider than that of a one-cycle burst
+        through it), the ``"simus"`` pulse model is its pulse, and its multi-plane transmits
+        are the (n_tx, n_mpt, n_el) delays.
 
     Args:
         scatterer_positions (array-like): The positions of the scatterers [m] of shape (n_scat, 3).
@@ -128,11 +150,7 @@ def simulate_rf(
             in front of the elements. Every sub-element's path refracts through it (Fermat), so
             the lens delay depends on the direction to the scatterer, and the lens attenuates
             with ``lens_attenuation_coef``. With ``elevation_focus`` the layer is a cylindrical
-            lens: ``lens_thickness`` at the element center, thinned (``lens_sound_speed`` below
-            ``sound_speed``) or thickened towards the elevation edges so that the normal-incidence
-            delay focuses at ``elevation_focus``. The lens face is taken locally flat under each
-            sub-element, for the delay and for the spreading of the refracted wave, and the sinc
-            directivity uses the geometric angle to the scatterer.
+            lens, see there.
         lens_thickness (float): The thickness of the lens [m] at the element center.
         lens_sound_speed (float): The speed of sound in the lens [m/s].
         sound_speed (float): The speed of sound in the medium [m/s].
@@ -169,17 +187,11 @@ def simulate_rf(
             myocardium is approximately 1.5, soft tissue 0.6-0.8. A float sets a global value, an
             array of shape (n_scat,) gives each its own coefficient. If gradients are needed to
             the exponent(s), either pass ``scatter_exponent_range=(min, max)`` or ``band_db=None``.
-            The Verasonics simulator applies no frequency dependence at all: 0 here, with
-            ``attenuation_coef=0`` (its attenuation is evaluated at the centre frequency only)
-            and ``baffle_impedance_ratio=inf`` (its default element sensitivity is cos times
-            sinc), reproduces its spectrum. It also applies no geometric spreading, which zea
-            always does.
         baffle_impedance_ratio (float): Impedance of the medium over that of the baffle the
             elements are mounted in, which sets the obliquity factor applied on transmit and on
             receive next to the sinc directivity: 1 for a rigid baffle (0, the default),
             cos(angle to the element normal) for a soft one (``inf``), and in general
             cos / (cos + ratio). Scatterers behind the element plane get no obliquity factor.
-            Must be static under jit.
         element_normals (array-like, optional): Outward normal of each element of shape
             (n_el, 3), for curved or tilted arrays. The directivity and the obliquity are
             evaluated in each element's own frame: the elevation axis is the projection of
@@ -191,51 +203,47 @@ def simulate_rf(
             sampled at ``waveform_sampling_frequency``. The envelope peak of the waveform is
             placed at the two-way travel time plus ``t_peak``, wherever it is in the waveform;
             see :func:`measured_pulse`. None is the default pulse of :func:`transmit_pulse`.
-            Must be static under jit.
         waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``,
-            250 MHz in zea files and in :meth:`Pulse.waveform`. Must be static under jit.
+            250 MHz in zea files and in :meth:`Pulse.waveform`.
         n_sub_elements (optional): Sub-elements per element, summed coherently with their own
             distance and sinc directivity so the response holds in the near field. A pair
             (n_lateral, n_elevation), an int for the lateral count, or ``"auto"`` for the SIMUS
             rule ceil(size / lambda_min) in both directions, with lambda_min at the top of the
-            -6 dB band of the transmit pulse (SIMUS takes the transducer band, which is a
-            little wider than that of a one-cycle burst through it). None is a single
-            sub-element, except in elevation when ``elevation_focus`` is set, which then
-            follows the auto rule. Must be static under jit.
+            -6 dB band of the transmit pulse. None is a single sub-element, except in elevation
+            when ``elevation_focus`` is set, which then follows the auto rule.
         elevation_focus (float, optional): Focal distance [m] of a fixed elevation lens, modelled
             on transmit and on receive through the elevation sub-elements: an ideal focusing
             advance per sub-element, or with ``apply_lens_correction`` the refracted path through
-            the lens thickness profile. Exclusive with ``two_dimensional``, the ideal lens of
-            the imaging plane. Must be static under jit.
+            a cylindrical lens of ``lens_thickness`` at the element center, thinned
+            (``lens_sound_speed`` below ``sound_speed``) or thickened towards the elevation edges
+            so that the normal-incidence delay focuses at ``elevation_focus``. The lens face is
+            taken locally flat under each sub-element, for the delay and for the spreading of
+            the refracted wave, and the sinc directivity uses the geometric angle to the
+            scatterer. Exclusive with ``two_dimensional``, the ideal lens of the imaging plane.
         lens_attenuation_coef (float): Attenuation in the lens [dB/cm/MHz], applied over each
             sub-element's path inside the lens when ``apply_lens_correction`` is set. Apodizes
             the aperture where the lens is thick and lowers the center frequency.
         simplified_directivity (bool): Evaluate the directivity at the center frequency only.
-            Less accurate, but slightly faster. Must be static under jit.
+            Less accurate, but slightly faster.
         band_db (float, optional): Bins where the pulse spectrum and the scattering gain
             together are below this many dB of their peak are not synthesised. None disables
             filtering. With per-transmit waveforms the band is the union over the pulses, and
             with per-scatterer exponents the union of the smallest and the largest exponent.
-            With traced ``scatter_exponent``, either set ``band_db`` to None or provide an
-            explicit ``scatter_exponent_range``.
         n_fft (int, optional): FFT length. Derived when None from ``n_ax``, the aperture, the
             transmit shifts and the pulse (and the scatterer positions when concrete) so that
             no echo wraps into the record, see :func:`fft_length`. Must be given when the
-            geometry, the delays or the sound speed are traced, e.g. under ``jax.jit`` without
-            closing over them; :class:`zea.ops.Simulate` and :attr:`zea.Parameters.n_fft`
-            derive it. ``center_frequency`` and ``sampling_frequency`` must be static.
+            geometry, the delays or the sound speed are traced.
         scatter_exponent_range (tuple, optional): ``(min, max)`` exponent spanned by
             ``scatter_exponent``, used to pick the band instead of reading the exponents.
             Only needed when ``scatter_exponent`` is traced and ``band_db`` is set; for one
             traced shared exponent it is ``(p, p)``, or the range swept over if the compiled
             kernel is reused. :func:`scatter_exponent_bounds` derives it from a concrete
             exponent, and :class:`zea.ops.Simulate` does so before the jitted call. A range
-            that does not cover the exponents in play truncates their band. Must be static
-            under jit.
+            that does not cover the exponents in play truncates their band.
         sos_map (array-like, optional): Sound speed map [m/s] of shape (Nz, Nx) in the x-z
             plane, extruded along y, or (Nz, Nx, Ny) with ``map_grid_y``. Every path from an
             element to a scatterer then runs at the mean slowness along the straight ray between
-            them (:func:`zea.func.ultrasound.straight_ray_slowness`), sampled at
+            them (:func:`zea.func.straight_ray_slowness`), sampled at
             ``n_sos_ray_samples`` points with ``sound_speed`` outside the map; the
             sub-elements of an element share its center ray. The lens, the directivity, the
             spreading and the attenuation keep the geometry of the homogeneous medium at
@@ -246,12 +254,12 @@ def simulate_rf(
             shape (Nz,).
         map_grid_y (array-like, optional): Uniform, ascending y coordinates [m] of 3D maps,
             shape (Ny,). None for 2D maps.
-        n_sos_ray_samples (int): Samples of the maps along each ray. Must be static under jit.
+        n_sos_ray_samples (int): Samples of the maps along each ray.
         attenuation_map (array-like, optional): Attenuation map [dB/cm/MHz] on the grid of
             ``sos_map`` (the same ``map_grid_*`` arguments, with or without a ``sos_map``).
             :class:`zea.data.spec.AttenuationMap` stores dB/m/Hz: multiply a stored map by 1e4.
             The medium part of every path is then attenuated by the mean coefficient along its
-            straight ray (:func:`zea.func.ultrasound.straight_ray_mean`), with
+            straight ray (:func:`zea.func.straight_ray_mean`), with
             ``attenuation_coef`` outside the map. The lens part keeps ``lens_attenuation_coef``.
             None attenuates every path with ``attenuation_coef``. Differentiable on jax.
         attenuation_power (float): Exponent ``y`` of the power-law attenuation
@@ -545,14 +553,15 @@ def pressure_field(
     attenuation_map=None,
     attenuation_power=1.0,
 ):
-    """Transmit pressure field of :func:`simulate_rf` on a grid.
+    """Transmit pressure field of :func:`simulate_rf` on a grid, for visualising a transmit.
 
     The incident field the simulator scatters, evaluated at the grid points instead of at
     scatterers: the same directivity, obliquity, attenuation, spread and transmit weights, times
     the two-way transmit pulse ``waveforms_two_way``. The pulse (which carries the transducer
     response) enters once, here, so a unit scatterer at a grid point returns exactly this field
     through the receive response. In 2D the grid is moved into the imaging plane, as the
-    simulator moves its scatterers.
+    simulator moves its scatterers. Not part of the simulation itself: :class:`zea.ops.Simulate`
+    does not call it.
 
     Takes the arguments of :func:`simulate_rf` with the same meaning, except that
     ``attenuation_coef``, ``apply_lens_correction`` and the lens have defaults, plus:

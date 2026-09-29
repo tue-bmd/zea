@@ -133,43 +133,64 @@ def _derived_fft_length(kwargs):
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
-    """Simulate RF data.
+    """Simulate RF data from a cloud of point scatterers.
+
+    The scene is the data: ``scatterer_positions`` [m] of shape (n_scat, 3) and
+    ``scatterer_magnitudes`` of shape (n_scat,), with a leading batch axis when the pipeline
+    has ``with_batch_dim``. The acquisition comes from a :class:`zea.Parameters` through
+    :meth:`zea.Pipeline.prepare_parameters`: the probe (``probe_geometry``, ``element_width``),
+    the transmit scheme (``t0_delays``, ``tx_apodizations``, ``initial_times``, ``t_peak``),
+    the record (``n_ax``, ``sampling_frequency``, ``center_frequency``) and the medium
+    (``sound_speed``, ``attenuation_coef``). The output is RF of shape (n_tx, n_ax, n_el, 1)
+    under ``raw_data``, with ``n_ch=1``. Nothing else is required.
+
+    .. code-block:: python
+
+        pipeline = zea.Pipeline([zea.ops.Simulate()], with_batch_dim=False)
+        rf = pipeline(
+            scatterer_positions=positions,
+            scatterer_magnitudes=magnitudes,
+            **pipeline.prepare_parameters(parameters),
+        )["raw_data"]
+
+    Optional inputs, by what they add to the model:
+
+    - **Receive chain.** The simulators return noiseless RF; ``noise_level_db`` (dB below the
+      peak, None for no noise), ``tgc_max_db`` (gain at the last sample), ``noise_seed`` and
+      ``noise_reference`` are applied afterwards by :func:`zea.func.apply_receive_chain`.
+    - **Transmit pulse.** ``waveforms_two_way`` with ``waveform_sampling_frequency``: the
+      pulse-echo waveform of a zea file or :class:`zea.Parameters`, or one built with
+      :func:`zea.simulator.transmit_pulse`. Without it, the default one-cycle burst at
+      ``center_frequency`` through a 70 % Butterworth transducer.
+    - **Probe.** ``element_height`` (default: an eighth of the width of a 1D probe),
+      ``two_dimensional`` to simulate in the imaging plane only, ``element_normals`` for
+      curved or tilted arrays, ``baffle_impedance_ratio`` for the obliquity factor,
+      ``n_sub_elements`` for near-field accuracy, ``elevation_focus`` for a fixed elevation
+      lens, and ``apply_lens_correction`` with ``lens_thickness``, ``lens_sound_speed`` and
+      ``lens_attenuation_coef`` for a refracting acoustic lens.
+    - **Medium.** ``scatter_exponent``: frequency dependence of the scattering amplitude,
+      2 (Rayleigh) by default, one value or a vector of shape (n_scat,). ``attenuation_power``
+      for a power-law attenuation. Heterogeneous media: ``sos_map`` [m/s] and/or
+      ``attenuation_map`` [dB/cm/MHz] on a uniform grid ``map_grid_x``, ``map_grid_z``
+      (and ``map_grid_y`` for 3D), sampled along straight rays with ``n_sos_ray_samples``
+      points; outside the map the scalar values apply.
+    - **Multi-plane transmits.** ``t0_delays`` and ``tx_apodizations`` of shape
+      (n_tx, n_mpt, n_el) fire several delay sets per transmit.
 
     ``method`` selects the simulator. ``"frequency_domain"`` (default) is
-    :func:`zea.simulator.simulate_rf`, the full model. ``"time_domain"`` is
-    :func:`zea.simulator.simulate_rf_td`, which evaluates the geometry-dependent
-    factors at the center frequency: less accurate, faster in some settings. The transmit
-    pulse is ``waveforms_two_way`` (the one of a
-    :class:`zea.Parameters` or zea file, or built with :func:`zea.simulator.transmit_pulse`),
-    and the default pulse of that function without. The old names ``"exact"``,
-    ``"frequency_approximation"`` and ``"time_approximation"`` are deprecated aliases, accepted
-    with a warning.
+    :func:`zea.simulator.simulate_rf`, the full model, documented there. ``"time_domain"``
+    is :func:`zea.simulator.simulate_rf_td`, faster for 2D probes with few transmits: it
+    evaluates the probe at the center frequency, so it warns once and ignores the probe
+    options except ``element_height`` and ``two_dimensional``, and rejects the maps and
+    multi-plane transmits. The old names ``"exact"``, ``"frequency_approximation"`` and
+    ``"time_approximation"`` are deprecated aliases.
 
-    Frequency-domain only arguments, which the time-domain simulator warns once about when one
-    of them is set to something it cannot honor:
-
-    - Probe model: ``baffle_impedance_ratio``, ``element_normals``, ``n_sub_elements``,
-      ``elevation_focus``, ``lens_attenuation_coef``.
-    - ``band_db``: the bins below it, relative to the peak of the band, are not synthesised.
-    - Sound speed map: ``sos_map`` with ``map_grid_x`` and ``map_grid_z`` (2D, extruded along
-      y), plus ``map_grid_y`` for a 3D map. Each element-scatterer path is timed along its
-      straight ray with ``n_sos_ray_samples`` samples, at ``sound_speed`` outside the map.
-    - Attenuation map: ``attenuation_map`` [dB/cm/MHz] on the same grid, with or without a
-      ``sos_map``; each path is attenuated with the mean coefficient along its straight ray,
-      at ``attenuation_coef`` outside the map. ``attenuation_power`` sets the frequency power
-      of both (1, linear, by default).
-    - Per-scatterer ``scatter_exponent``: a vector of shape (n_scat,) instead of one shared
-      value. Pass ``scatter_exponent_range`` (or ``band_db=None``) when the exponent is
-      traced, for example inside an outer jit.
-    - ``n_fft``: derived from the scan (and the map) when not given, so the simulator runs
-      under jit without it; inside an outer jit take it from :attr:`zea.Parameters.n_fft`.
-
-    ``element_height`` (both simulators) defaults to an eighth of the width of a 1D probe.
-    ``lens_thickness`` and ``lens_sound_speed`` are only needed with ``apply_lens_correction``.
-
-    The simulators return noiseless RF; the receive chain (``noise_level_db``, ``tgc_max_db``,
-    ``noise_seed``, ``noise_reference``) is :func:`zea.func.apply_receive_chain`, applied here
-    for every method.
+    Performance and jit. ``max_chunk_gb`` bounds the memory of one block of work. The
+    frequency-domain simulator runs on an FFT of ``n_fft`` samples and only the bins above
+    ``band_db`` of the pulse peak; both are derived from the scan when not given, so the op
+    jits without them. Inside an outer jit the scan is traced, so pass ``n_fft`` from
+    :attr:`zea.Parameters.n_fft`, and with a traced ``scatter_exponent`` pass
+    ``scatter_exponent_range=(min, max)`` or ``band_db=None``. Differentiable on jax.
     """
 
     # Define operation-specific static parameters
@@ -466,7 +487,7 @@ class TOFCorrection(Operation):
             lens_sound_speed (float): Sound speed in the lens
             sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s. 2D only;
                 TODO: 3D maps (``map_grid_y``) as in :func:`zea.simulator.simulate_rf`,
-                by delegating to :func:`zea.func.ultrasound.straight_ray_slowness`.
+                by delegating to :func:`zea.func.straight_ray_slowness`.
             map_grid_x (Tensor): x-coordinates of the ``sos_map`` columns.
             map_grid_z (Tensor): z-coordinates of the ``sos_map`` rows.
             focal_region_length (float): Full length in meters of the region

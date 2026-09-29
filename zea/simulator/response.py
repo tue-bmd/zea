@@ -1,7 +1,7 @@
-"""The one-way response of the simulators: the resolved probe (:class:`ProbeModel`) and
-medium (:class:`MediumModel`), the transmit and receive responses of every element to every
-scatterer through them (:func:`element_responses`), and the straight rays through the sound
-speed and attenuation maps."""
+"""The one-way response of the simulators: the resolved probe (``ProbeModel``) and medium
+(``MediumModel``), the transmit and receive responses of every element to every scatterer
+through them (``element_responses``), and the straight rays through the sound speed and
+attenuation maps (:func:`~zea.func.straight_ray_slowness`)."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -43,13 +43,13 @@ def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):
     """Geometric spreading of the wavefront.
 
     Args:
-        dist (array-like): The distance the wave has traveled.
+        dist (array-like): The distance the wave has traveled [m].
         exponent (float): 1 for spherical, 0.5 for cylindrical. An elevation lens focuses the
             transmitted energy to a slab, resulting in a cylindrical transmit and a spherical
             receive path.
-        mindist (float): Clamped minimum distance to avoid very high amplitudes in the first pixel.
-            The simulators pass half a wavelength, :func:`min_distance`.
-        reference (float): Distance of unit gain.
+        mindist (float): Clamped minimum distance [m] to avoid very high amplitudes in the
+            first pixel. The simulators pass half a wavelength, :func:`min_distance`.
+        reference (float): Distance of unit gain [m].
 
     Returns:
         array-like: An amplitude factor in the shape of `dist`.

@@ -70,9 +70,10 @@ def record_reach(
     simulates a scatterer.
 
     A scatterer is simulated while its earliest echo has pulse support inside the record, that
-    is while its nearest element is within this distance (see :func:`in_record`). Through a
-    lens the distance holds along the element normal, and is high off the normal by a fraction
-    of the lens thickness. If a sound speed map is provided, uses the fastest speed in the map.
+    is while its nearest element is within this distance (see :func:`in_record`), taken at the
+    fastest speed of the medium when a sound speed map is given. Through a lens the distance
+    holds along the element normal and overestimates the reach off the normal, by at most a
+    fraction of the lens thickness.
 
     Args:
         sound_speed (float): Speed of sound [m/s].
@@ -271,6 +272,10 @@ def band_bins(
     The pulse spectrum (the largest over the transmits) and the scattering gain together exceed
     ``band_db`` there. If ``scatter_exponent`` is a vector of per-scatterer exponents, the band
     is calculated from the union of the min and max exponents.
+
+    Returns:
+        tuple: ``(k0, k1)``, the bins ``k0`` up to but not including ``k1`` of the rfft grid of
+        ``n_fft`` samples; every bin when ``band_db`` is None.
     """
     freqs = np.fft.rfftfreq(n_fft, 1 / sampling_frequency)
     if band_db is None:
@@ -286,7 +291,7 @@ def band_bins(
 
 
 def smooth_size(n):
-    """Smallest 2^a 3^b 5^c >= n."""
+    """Smallest 2^a 3^b 5^c >= n, for a fast FFT."""
     best = round_up_to_power_of_two(max(n, 1))
     a = 0
     while 2**a < 2 * n:
@@ -317,11 +322,12 @@ def fft_length(
 ):
     """Smooth FFT length whose echoes never wrap into the first ``n_ax`` samples.
 
-    A kept scatterer has its earliest echo inside the record, so its last one is at most the
-    aperture round trip, the spread of the transmit shifts and one pulse later. When the
-    positions are given the bound from the farthest scatterer is used if smaller. When using a
-    sound speed map, uses the worst case based on the min/max speeds in the map. Every input
-    must be concrete; :class:`zea.ops.Simulate` and :attr:`zea.Parameters.n_fft` call this.
+    A kept scatterer has its earliest echo inside the record, so its last one arrives at most
+    the aperture round trip, the spread of the transmit shifts and two pulse supports later.
+    When the positions are given the bound from the farthest scatterer is used if smaller. With
+    a sound speed map the bound takes the fastest speed for the earliest echo and the slowest
+    for the last one. Every input must be concrete; :class:`zea.ops.Simulate` and
+    :attr:`zea.Parameters.n_fft` call this.
 
     Args:
         n_ax (int): Number of axial samples in the record.
@@ -464,7 +470,7 @@ def scatter_exponent_bounds(scatter_exponent):
     Both edges of the band move monotonically with the exponent, so the union of the bands of
     the min and max exponents covers every scatterer. :func:`simulate_rf` derives them from a
     concrete exponent; a caller that traces the exponent should pass the pair as
-    ``scatter_exponent_range``.
+    ``scatter_exponent_range``. None or an empty vector give ``(0, 0)``.
     """
     if scatter_exponent is None:
         return 0.0, 0.0

@@ -1,7 +1,7 @@
 Getting Started
 ===============
 
-``zea`` provides a framework for cognitive ultrasound imaging. At the heart of ``zea`` are :doc:`data-acquisition` (``zea.File``, ``zea.Dataset``, ``zea.Dataloader``), :doc:`pipeline` (``zea.Pipeline``), and :doc:`models` (``zea.Models``) classes. These provide the necessary tools to load, process, and analyze ultrasound data.
+``zea`` provides a framework for cognitive ultrasound imaging. At the heart of ``zea`` are :doc:`data-acquisition` (``zea.File``, ``zea.Dataset``, ``zea.Dataloader``), :doc:`pipeline` (``zea.Pipeline``), and :doc:`models` (``zea.Models``) classes. These provide the necessary tools to load, process, and analyze ultrasound data. ``zea`` also includes a fast :doc:`simulator` (``zea.ops.Simulate``) for generating RF data.
 
 .. tip::
 

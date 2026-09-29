@@ -1085,10 +1085,15 @@ class Parameters(BaseParameters):
     def t_peak(self):
         """The time of the peak of the pulse in seconds of shape (n_tx,).
 
-        If not set explicitly and ``waveforms_two_way`` (the two-way,
-        pulse-echo transmit waveform) is available, this is estimated from it
-        via :func:`~zea.func.ultrasound.compute_time_to_peak_stack`. Otherwise
-        it defaults to ``1 / center_frequency``.
+        The time from the transmit trigger to the envelope peak of the two-way pulse. The
+        beamformer expects each echo that long after its two-way travel time, and the
+        simulators place the pulse peak there, so an image of simulated data is consistent for
+        any value. If not set explicitly and ``waveforms_two_way`` (the two-way, pulse-echo transmit
+        waveform) is available, this is estimated from it via
+        :func:`~zea.func.compute_time_to_peak_stack`, as for a waveform of a zea file, which
+        starts at the trigger. Otherwise it defaults to ``1 / center_frequency``, a convention:
+        the peak of the default simulator pulse is later, at
+        :attr:`~zea.simulator.Pulse.time_to_peak` of :func:`~zea.simulator.transmit_pulse`.
         """
         t_peak = self._params.get("t_peak")
         if t_peak is not None:

@@ -1,5 +1,6 @@
-"""The two-way transmit pulse of the simulators: the parametric models of :func:`transmit_pulse`,
-a measured waveform through :func:`measured_pulse`, and the spectra behind them."""
+"""The two-way transmit pulse of the simulators: the parametric models of
+:func:`~zea.simulator.transmit_pulse`, a measured waveform through
+:func:`~zea.simulator.measured_pulse`, and the spectra behind them."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -89,6 +90,15 @@ def transmit_pulse(
         pulse = transmit_pulse(5e6, pulse_model="simus", bandwidth_percent=75.0)
         rf = simulate_rf(..., waveforms_two_way=pulse.waveform())
 
+    or, through a pipeline, on the :class:`zea.Parameters`, which then derives ``t_peak`` from
+    the waveform when it starts at the transmit trigger::
+
+        parameters = zea.Parameters(
+            ...,
+            waveforms_two_way=pulse.waveform(from_trigger=True),
+            waveform_sampling_frequency=pulse.sampling_frequency,
+        )
+
     The radiation factor of a baffled piston (jω) is absorbed into the transducer response, as
     in MUST, so that ``bandwidth_percent`` is the -6 dB pulse-echo bandwidth for every model.
     For a measured pulse see :func:`measured_pulse`.
@@ -103,9 +113,10 @@ def transmit_pulse(
 
     Args:
         center_frequency (float): Centre frequency of the excitation [Hz].
-        sampling_frequency (float): Sampling frequency [Hz] of :meth:`Pulse.waveform`; 250 MHz
-            like the ``waveforms_two_way`` of a zea file, or the sampling frequency of the RF
-            data for the pulse the simulators use internally.
+        sampling_frequency (float): Sampling frequency [Hz] of :meth:`Pulse.waveform`. Keep
+            the default of 250 MHz, that of the ``waveforms_two_way`` of a zea file and the
+            default ``waveform_sampling_frequency`` of the simulators, for a waveform that is
+            passed to them.
         pulse_model (str): ``"realistic"``: a pulser's tri-state square burst of ``n_period``
             periods (:func:`square_burst_spectrum`) through a causal Butterworth band-pass on
             transmit and on receive (:func:`butterworth_transfer`), so the pulse rises fast and
@@ -192,15 +203,9 @@ def measured_pulse(waveform_two_way, sampling_frequency, waveform_sampling_frequ
     sample 0 to the peak; for a waveform that starts at the transmit trigger, as the
     ``waveforms_two_way`` of a zea file (the Verasonics two-way waveform, sampled at 250 MHz),
     that is the ``t_peak`` of :func:`simulate_rf` which puts the waveform back at the travel
-    time (:attr:`zea.Parameters.t_peak` derives the same).
-
-    The Verasonics waveform (``TW.Wvfm2Wy``) is not measured but modelled, by the ``"realistic"``
-    model of :func:`transmit_pulse` with its equalisation pulses: the burst through a 2nd-order
-    Butterworth band-pass twice, -6 dB two-way at ``Trans.Bandwidth``, without a radiation
-    factor or normalisation. Its sample 0 is the trigger and the Vantage simulator places that
-    sample at the two-way travel time, so the envelope peak of the waveform is its ``t_peak``.
-    The Vantage simulator applies no frequency-dependent scattering to it; see
-    ``scatter_exponent`` of :func:`simulate_rf`.
+    time (:attr:`zea.Parameters.t_peak` derives it from the waveform too). The Verasonics
+    waveform is not measured but modelled: the ``"realistic"`` model of :func:`transmit_pulse`
+    reproduces it.
 
     Args:
         waveform_two_way (array-like): The waveform of shape (n_samples,).
