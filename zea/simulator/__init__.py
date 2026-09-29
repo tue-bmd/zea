@@ -8,21 +8,14 @@ not 4. :func:`simulate_rf` works in the frequency domain and is the reference;
 :func:`simulate_rf_td` is its time-domain approximation, less accurate but faster for 2D probes
 with few transmits.
 
-Sound speed is one value for the medium, or a map: ``sos_map`` with its grid ``map_grid_x``,
-``map_grid_z`` (and ``map_grid_y`` for a 3D map) makes every element-scatterer path run at the mean
-slowness along the straight ray between them (:func:`zea.func.ultrasound.straight_ray_slowness`),
-with ``sound_speed`` outside the map. Straight rays keep the geometry, so the directivity and the
-spreading are those of the homogeneous medium; only the travel times change. Attenuation likewise
-is one coefficient, or ``attenuation_map`` on the same grid: each path is then attenuated by the
-mean coefficient along its straight ray (:func:`zea.func.ultrasound.straight_ray_mean`), with
-``attenuation_coef`` outside the map. Either map can be given on its own. The attenuation grows
-as ``f**attenuation_power``, linearly by default.
+Sound speed is one value for the medium, or a map ``sos_map`` with its grid ``map_grid_x``,
+``map_grid_z`` (and ``map_grid_y`` for a 3D map), sampling using straight ray assumptions.
+Attenuation works the same way (one coefficient, or ``attenuation_map``) on the same grid.
+Either map can be given on its own. The attenuation grows ``f**attenuation_power``, 1 by default.
 
-To use it, you can call :func:`simulate_rf` with the desired transmit scheme parameters and
-scatterers directly, but the recommended path is to use :class:`zea.ops.Simulate`, which wraps the
-simulators for pipelines, derives the FFT length automatically, and applies the receive chain
-(electronic noise and time gain compensation, :func:`zea.func.apply_receive_chain`) to the
-noiseless RF the simulators return.
+Use :class:`zea.ops.Simulate`, which wraps the simulators for pipelines, derives the FFT length
+automatically, and applies the receive chain (electronic noise and time gain compensation,
+:func:`zea.func.apply_receive_chain`) to the raw simulator output.
 
 :func:`record_reach`, :func:`record_bounds` and :func:`in_record` show which scatterers are
 in-record for ``n_ax`` samples; use these to pre-prune your scatterer cloud to avoid wasting compute
@@ -32,10 +25,11 @@ scenes with varying scatterer numbers, consider padding your scatterer clouds to
 power of two, so jit only triggers once or twice.
 
 ``two_dimensional`` simulates in the imaging plane, as a 1D probe behind an ideal elevation lens.
+Less realistic, but useful for comparing results with 2D-only simulators.
 
-:func:`pressure_field` evaluates the transmit field of the simulator on a grid of points. Should
-be a more accurate version of the pfield code used in the beamformer. It will likely be integrated
-with the beamformer in the future, but currently only included for visualization purposes.
+:func:`pressure_field` evaluates the transmit field of the simulator on a grid. Should be a more
+accurate version of the pfield code used in the beamformer. It will likely be integrated with the
+beamformer in the future, but is currently only included for visualization purposes.
 
 Example usage
 ^^^^^^^^^^^^^
