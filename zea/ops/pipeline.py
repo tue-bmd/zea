@@ -722,7 +722,9 @@ class Pipeline:
                 operation.set_params(**params)
             elif isinstance(operation, Operation):
                 operation_params = {
-                    key: value for key, value in params.items() if key in operation.valid_keys
+                    key: value
+                    for key, value in params.items()
+                    if key in operation.valid_keys or key in operation._renames
                 }
                 if operation_params:
                     operation.set_input_cache(operation_params)

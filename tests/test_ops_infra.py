@@ -644,6 +644,19 @@ def test_pipeline_set_params():
     assert params["y"] == 3
 
 
+def test_pipeline_set_params_renamed_keywords(attach_caplog_warnings):
+    """set_params caches an old keyword name under its new one, with a warning."""
+    pipeline = ops.Pipeline([ops.TOFCorrection()], jit_options=None)
+    grid = np.linspace(-1e-2, 1e-2, 8).astype(np.float32)
+    sos_map = np.full((8, 8), 1540.0, np.float32)
+    pipeline.set_params(sos_map=sos_map, sos_grid_x=grid, sos_grid_z=grid)
+    params = pipeline.get_params()
+    assert set(params) == {"sos_map", "map_grid_x", "map_grid_z"}
+    assert np.array_equal(params["map_grid_x"], grid)
+    messages = [r.getMessage() for r in attach_caplog_warnings.records]
+    assert any("sos_grid_x was renamed to map_grid_x" in m for m in messages)
+
+
 def test_pipeline_get_params_per_operation():
     """Tests getting parameters per operation in the Pipeline."""
     operations = [MultiplyOperation(), AddOperation()]

@@ -216,6 +216,7 @@ def renamed_keywords(**renames):
         def wrapper(*args, **kwargs):
             return func(*args, **renamed_items(kwargs, renames, what="Keyword argument"))
 
+        setattr(wrapper, "renames", renames)  # lets callers that bypass the call rename too
         return wrapper
 
     return decorator

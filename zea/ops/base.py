@@ -13,6 +13,7 @@ from zea.internal.core import (
     DataTypes,
 )
 from zea.internal.registry import ops_registry
+from zea.internal.utils import renamed_items
 from zea.utils import (
     deep_compare,
     map_negative_indices,
@@ -274,6 +275,7 @@ class Operation(keras.Operation):
         """
         self._input_signature = inspect.signature(self.call)
         self._valid_keys = set(self._input_signature.parameters.keys()) | {self.key}
+        self._renames = getattr(self.call, "renames", {})
 
     @property
     def valid_keys(self) -> set:
@@ -314,7 +316,7 @@ class Operation(keras.Operation):
         Args:
             input_cache: A dictionary containing cached inputs.
         """
-        self._input_cache.update(input_cache)
+        self._input_cache.update(renamed_items(input_cache, self._renames))
         self._trace_signatures()  # Retrace after updating cache to ensure correctness.
 
     def set_output_cache(self, output_cache: Dict[str, Any]):
