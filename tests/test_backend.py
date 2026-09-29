@@ -294,6 +294,18 @@ class TestCheckpoint:
         np.testing.assert_allclose(result, 28.0, rtol=1e-6)
 
 
+@pytest.mark.tensorflow
+@run_in_backend("tensorflow")
+def test_checkpoint_is_a_no_op_on_tensorflow():
+    """``tf.recompute_grad`` drops the gradient to closed-over tensors, so nothing is wrapped."""
+    from zea.backend import checkpoint
+
+    def func(x):
+        return x
+
+    assert checkpoint(func) is func
+
+
 class TestAdam:
     """Tests for the backend-agnostic Adam optimizer in ``zea.backend.optimizer``."""
 

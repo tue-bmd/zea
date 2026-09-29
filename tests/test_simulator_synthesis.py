@@ -48,7 +48,7 @@ from .simulator_helpers import (
 )
 
 # Support of the default pulse after its peak [s]: how far past the record an echo peak may be.
-PULSE_TAIL = transmit_pulse(CENTER_FREQUENCY, SAMPLING_FREQUENCY).n_after / SAMPLING_FREQUENCY
+PULSE_HEAD = transmit_pulse(CENTER_FREQUENCY, SAMPLING_FREQUENCY).n_before / SAMPLING_FREQUENCY
 
 
 def _single_element(**overrides):
@@ -196,7 +196,7 @@ def test_record_prefix_does_not_depend_on_the_record_length():
     """Scatterers whose echo starts past a short record leave nothing in it, and those inside
     are not cut by the FFT length sized for that record."""
     kwargs = tensors(CASES["lens_correction"])
-    reach = (256 / SAMPLING_FREQUENCY + PULSE_TAIL) * SOUND_SPEED / 2
+    reach = (256 / SAMPLING_FREQUENCY + PULSE_HEAD) * SOUND_SPEED / 2
     depths = np.linalg.norm(to_np(kwargs["scatterer_positions"]), axis=1)
     assert depths.min() < reach < depths.max()
     long = to_np(simulate_rf(**{**kwargs, "n_ax": 1024}))[:, :256]
@@ -226,13 +226,13 @@ def _record_args(kwargs, geometry=True):
 
 def test_gate_keeps_a_scatterer_inside_the_record_and_drops_one_past_it():
     reach = record_reach(**_record_args(_single_element(), geometry=False))
-    assert abs(reach / ((N_AX / SAMPLING_FREQUENCY + PULSE_TAIL) * SOUND_SPEED / 2) - 1) < 1e-12
-    # A Hann tone has a compact support, so the reach puts its peak just inside the record.
+    assert abs(reach / ((N_AX / SAMPLING_FREQUENCY + PULSE_HEAD) * SOUND_SPEED / 2) - 1) < 1e-12
+    # A Hann tone has a compact support, so the reach puts its head just inside the record.
     waveform = hann_waveform()
-    tail = transmit_pulses(1, CENTER_FREQUENCY, SAMPLING_FREQUENCY, waveform)[0].n_after
+    head = transmit_pulses(1, CENTER_FREQUENCY, SAMPLING_FREQUENCY, waveform)[0].n_before
     kwargs = _single_element(waveforms_two_way=waveform)
     reach = record_reach(**_record_args(kwargs, geometry=False))
-    expected = (N_AX / SAMPLING_FREQUENCY + tail / SAMPLING_FREQUENCY) * SOUND_SPEED / 2
+    expected = (N_AX / SAMPLING_FREQUENCY + head / SAMPLING_FREQUENCY) * SOUND_SPEED / 2
     assert abs(reach / expected - 1) < 1e-12
     # An echo peaking a few samples before the end of the record straddles it: energy in the
     # last samples only.
@@ -530,6 +530,31 @@ def test_scatter_exponent_accepts_a_python_list():
     assert_close(reference, simulate_rf(**kwargs, scatter_exponent=[exponent] * n_scat))
     with pytest.raises(ValueError, match="per scatterer"):
         simulate_rf(**kwargs, scatter_exponent=[exponent] * (n_scat + 1))
+    # The op makes the list an array before its jit traces it element by element.
+    op = Simulate(jit_compile=True, with_batch_dim=False)
+    result = op(**kwargs, scatter_exponent=[exponent] * n_scat)[op.output_key]
+    assert_close(reference, result, rel_tol=1e-3)
+
+
+def test_n_fft_shorter_than_the_record_is_rejected():
+    kwargs = tensors(CASES["linear"])
+    with pytest.raises(ValueError, match="at least n_ax"):
+        simulate_rf(**{**kwargs, "n_fft": N_AX // 2})
+
+
+def test_jitted_pipeline_keeps_a_per_scatterer_exponent_static():
+    """The pipeline's jit fixed its static arguments, so the op must not move the exponent out
+    of its own on seeing the vector: the pipeline would then stop hashing it."""
+    kwargs = tensors(CASES["linear"])
+    kwargs.pop("scatter_exponent")
+    kwargs["n_fft"] = 1024
+    n_scat = kwargs["scatterer_positions"].shape[0]
+    exponent = np.linspace(1.0, 2.0, n_scat).astype(np.float32)
+    reference = simulate_rf(**kwargs, scatter_exponent=exponent, scatter_exponent_range=(1.0, 2.0))
+    pipeline = Pipeline([Simulate()], with_batch_dim=False, jit_options="pipeline")
+    for _ in range(2):
+        outputs = pipeline(**kwargs, scatter_exponent=exponent, scatter_exponent_range=(1.0, 2.0))
+        assert_close(reference, outputs["data"], rel_tol=1e-3)
 
 
 def test_parameters_derive_n_fft_for_a_jitted_pipeline():
@@ -712,6 +737,14 @@ def test_time_domain_rejects_per_scatterer_scatter_exponent():
     n_scat = kwargs["scatterer_positions"].shape[0]
     with pytest.raises(ValueError, match="only supported in the frequency domain"):
         simulate_rf_td(**kwargs, scatter_exponent=np.full(n_scat, 1.5, np.float32))
+
+
+def test_time_domain_rejects_multi_plane_transmits():
+    """A delay-set axis would otherwise broadcast against the scatterers."""
+    kwargs = dict(CASES["linear"])
+    kwargs["t0_delays"] = np.stack([kwargs["t0_delays"]] * 2, axis=1)
+    with pytest.raises(ValueError, match="multi-plane"):
+        simulate_rf_td(**kwargs)
 
 
 def _jitted_simulate_rf():

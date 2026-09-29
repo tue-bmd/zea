@@ -108,6 +108,11 @@ def simulate_rf_td(
             "per-scatterer backscatter coefficients are only supported in the frequency "
             "domain simulator"
         )
+    if ndim(t0_delays) != 2:
+        raise ValueError(
+            "simulate_rf_td takes t0_delays of shape (n_tx, n_el); multi-plane transmits are "
+            "only supported in the frequency domain simulator"
+        )
     _validate_scatter_exponent(scatter_exponent)
     n_ax = int(n_ax)
     n_tx = int(ops.shape(t0_delays)[0])

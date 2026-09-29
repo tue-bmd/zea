@@ -299,11 +299,16 @@ def test_fft_length_grows_with_the_map_and_keeps_the_echoes_from_wrapping():
     assert mapped == fft_length(*common, *delays, sos_map=[[1000.0, 1540.0]])
 
     # The derived length holds every echo, up to the faint tail of the synthesis that a longer
-    # record also shows for a homogeneous medium; the homogeneous bound wraps the late echoes.
+    # record also shows for a homogeneous medium; the length sized for these scatterers without
+    # the map wraps the late echoes.
     derived = simulate_rf(**tensors(kwargs))
     reference = simulate_rf(**tensors({**kwargs, "n_fft": 4 * mapped}))
     assert_close(reference, derived, rel_tol=5e-4)
-    assert rel_err(reference, simulate_rf(**tensors({**kwargs, "n_fft": homogeneous}))) > 5e-3
+    tight = fft_length(*common, *delays, scatterer_positions=positions)
+    with_map = fft_length(*common, *delays, scatterer_positions=positions, sos_map=trio["sos_map"])
+    assert tight < with_map <= mapped
+    assert_close(reference, simulate_rf(**tensors({**kwargs, "n_fft": with_map})), rel_tol=5e-4)
+    assert rel_err(reference, simulate_rf(**tensors({**kwargs, "n_fft": tight}))) > 5e-3
 
 
 def test_short_explicit_fft_length_warns_with_a_map(caplog):

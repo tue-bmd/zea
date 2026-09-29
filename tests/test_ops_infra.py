@@ -589,6 +589,15 @@ def test_prepare_parameters_leaves_unset_parameters_to_the_caller():
     assert "sos_map" in pipeline.prepare_parameters(parameters, sos_map=None)
 
 
+def test_prepare_parameters_keeps_required_none_parameters():
+    """A None parameter without a default in the operations (polar_angles) is still prepared."""
+    pipeline = ops.Pipeline([ops.TOFCorrection()], jit_options=None)
+    parameters = get_parameters(get_probe(), grid_size_x=4, grid_size_z=4)
+    parameters._params.pop("polar_angles")
+    inputs = pipeline.prepare_parameters(parameters)
+    assert "polar_angles" in inputs and inputs["polar_angles"] is None
+
+
 def test_make_operation_chain_passthrough_and_bad_type():
     """make_operation_chain keeps pre-built instances as-is and rejects unsupported types."""
     from zea.ops.pipeline import make_operation_chain
@@ -1294,6 +1303,14 @@ def test_simulate_two_dimensional_under_jax_jit():
         f"Simulation with two_dimensional crashed with jax jit.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+
+
+def test_time_domain_reports_ignored_attenuation_power():
+    """The time-domain simulator attenuates linearly, so another power is reported."""
+    from zea.ops.ultrasound import _ignored_by_time_domain
+
+    assert _ignored_by_time_domain({"attenuation_power": 1.5}) == ["attenuation_power"]
+    assert _ignored_by_time_domain({"attenuation_power": 1.0}) == []
 
 
 @pytest.mark.heavy

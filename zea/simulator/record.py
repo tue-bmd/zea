@@ -14,7 +14,7 @@ from zea.simulator.response import (
     _snap_elevation,
     _validate_maps,
 )
-from zea.simulator.pulse import _pulse_span, _pulse_tail, _unique_pulses, transmit_pulses
+from zea.simulator.pulse import _pulse_head, _pulse_span, _unique_pulses, transmit_pulses
 
 
 def _transmit_shift(t0_delays, initial_times, t_peak):
@@ -37,10 +37,10 @@ def _shift_np(t0_delays, initial_times, t_peak):
 # ---------------------------------------------------------------------------------------------
 
 
-def _record_gate_time(n_ax, sampling_frequency, pulse_tail):
+def _record_gate_time(n_ax, sampling_frequency, pulse_head):
     """Latest arrival [s] of an echo peak with pulse support inside the record, for a pulse
-    with ``pulse_tail`` [s] of support after its peak (:func:`_pulse_tail`)."""
-    return n_ax / sampling_frequency + pulse_tail
+    with ``pulse_head`` [s] of support before its peak (:func:`_pulse_head`)."""
+    return n_ax / sampling_frequency + pulse_head
 
 
 def _record_keep(tau, shift_min, gate_time):
@@ -83,7 +83,7 @@ def record_reach(
         initial_times (array-like): Record start times [s] of shape (n_tx,).
         t_peak (array-like): Pulse peak times [s] of shape (n_tx,).
         waveforms_two_way (array-like, optional): The transmit waveforms of
-            :func:`simulate_rf`; None is its default pulse. The pulse support after the peak
+            :func:`simulate_rf`; None is its default pulse. The pulse support before the peak
             sets how far past the record an echo peak may arrive and still be simulated.
         waveform_sampling_frequency (float): Sampling frequency [Hz] of ``waveforms_two_way``.
         apply_lens_correction (bool): Whether the simulation models the lens.
@@ -105,7 +105,7 @@ def record_reach(
     c_max = minmax[1]
     shift = _shift_np(*raw)
     pulses = transmit_pulses(None, fc, fs, waveforms_two_way, waveform_sampling_frequency)
-    gate_time = _record_gate_time(int(n_ax), fs, _pulse_tail(pulses))
+    gate_time = _record_gate_time(int(n_ax), fs, _pulse_head(pulses))
     time = (gate_time - float(shift.min())) / 2
     if not apply_lens_correction or lens_sound_speed is None:
         return c_max * time
@@ -248,7 +248,7 @@ def in_record(
         waveforms_two_way,
         waveform_sampling_frequency,
     )
-    gate_time = _record_gate_time(int(n_ax), float(sampling_frequency), _pulse_tail(pulses))
+    gate_time = _record_gate_time(int(n_ax), float(sampling_frequency), _pulse_head(pulses))
     return _record_keep(tau, ops.min(shift), gate_time)
 
 
@@ -386,7 +386,7 @@ def _fft_bound(
     aperture = 2 * np.linalg.norm(geometry - geometry.mean(0), axis=1).max()
     # A kept scatterer is within c_max * (gate - shift_min) / 2 of its nearest element, and
     # that path may run at c_max while its farthest runs at c_min.
-    gate = _record_gate_time(n_ax, fs, _pulse_tail(pulses))
+    gate = _record_gate_time(n_ax, fs, _pulse_head(pulses))
     spread = (c_max / c_min - 1) * max(gate - shift_min, 0.0)
     n = n_ax + int(np.ceil((2 * aperture / c_min + spread + shift_max - shift_min + pulse) * fs))
     if scatterer_positions is not None and len(scatterer_positions):

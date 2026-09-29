@@ -188,14 +188,13 @@ def _jit_compile(func, jax=True, tensorflow=True, torch=True, **kwargs):
 def checkpoint(func):
     """Re-compute ``func`` in the backward pass instead of storing intermediates.
 
-    Wraps ``jax.checkpoint``, ``tf.recompute_grad`` or ``torch.utils.checkpoint``. Returns
-    ``func`` unchanged on other backends. Used if backprop doesn't fit in VRAM.
+    Wraps ``jax.checkpoint`` or ``torch.utils.checkpoint``. Returns ``func`` unchanged on other
+    backends, TensorFlow included: ``tf.recompute_grad`` silently drops the gradient to anything
+    ``func`` closes over. Used if backprop doesn't fit in VRAM.
     """
     backend = keras.backend.backend()
     if backend == "jax" and jax_mod is not None:
         return jax_mod.checkpoint(func)
-    if backend == "tensorflow" and tf_mod is not None:
-        return tf_mod.recompute_grad(func)
     if backend == "torch" and torch_mod is not None:
         import torch.utils.checkpoint
 

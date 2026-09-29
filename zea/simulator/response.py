@@ -648,11 +648,11 @@ def _validate_maps(sos_map, attenuation_map, map_grid_x, map_grid_z, map_grid_y=
     grids = [("map_grid_z", map_grid_z), ("map_grid_x", map_grid_x)]
     if map_grid_y is not None:
         grids.append(("map_grid_y", map_grid_y))
-    expected = tuple(int(ops.shape(grid)[0]) for _, grid in grids)
+    expected = tuple(int(np.shape(grid)[0]) for _, grid in grids)
     for name, m in maps:
         if m is None:
             continue
-        shape = tuple(int(d) for d in ops.shape(m))
+        shape = tuple(int(d) for d in np.shape(m))
         if shape != expected:
             raise ValueError(
                 f"{name} of shape {shape} does not match its grids: expected (Nz, Nx) for a "

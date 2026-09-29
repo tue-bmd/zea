@@ -54,12 +54,13 @@ _deprecated_methods = {
     "time_approximation": "time_domain",
 }
 
-# Element options of the frequency-domain simulator, with the value the time-domain one behaves as.
+# Options of the frequency-domain simulator, with the value the time-domain one behaves as.
 _frequency_domain_only = {
     "baffle_impedance_ratio": 0.0,
     "n_sub_elements": None,
     "elevation_focus": None,
     "lens_attenuation_coef": 0.0,
+    "attenuation_power": 1.0,
 }
 
 
@@ -78,7 +79,7 @@ def _resolve_method(method):
 
 
 def _ignored_by_time_domain(kwargs):
-    """The frequency-domain-only element options that ``kwargs`` set to something the time-domain
+    """The frequency-domain-only options that ``kwargs`` set to something the time-domain
     simulator cannot honor, element normals other than +z included. Traced values are skipped."""
     ignored = []
     for name, default in _frequency_domain_only.items():
@@ -109,6 +110,11 @@ def _derived_fft_length(kwargs):
         sos_map = concrete(sos_map)
         if sos_map is None:
             return None
+    waveforms = kwargs.get("waveforms_two_way")
+    if waveforms is not None:
+        waveforms = concrete(waveforms)
+        if waveforms is None:
+            return None
     t0, t_init, t_peak, geometry, sound_speed = raw
     return fft_length(
         int(kwargs["n_ax"]),
@@ -119,7 +125,7 @@ def _derived_fft_length(kwargs):
         t0,
         t_init,
         t_peak,
-        kwargs.get("waveforms_two_way"),
+        waveforms,
         kwargs.get("waveform_sampling_frequency", 250e6),
         sos_map=sos_map,
     )
@@ -211,6 +217,9 @@ class Simulate(Operation):
     def _track_scatter_exponent(self, scatter_exponent):
         """Rebuild the jit when the exponent switches between a concrete scalar and anything
         else, since that moves it between the static and the traced arguments."""
+        if self._inside_outer_jit:
+            # The enclosing jit fixed its static arguments; a vector arrives as a tuple.
+            return
         static = ndim(scatter_exponent) == 0 and concrete(scatter_exponent) is not None
         if static == self._scatter_exponent_static:
             return
@@ -231,6 +240,9 @@ class Simulate(Operation):
             )
         if "elevation_slab_2d" in merged:
             raise TypeError("`elevation_slab_2d` was renamed to `two_dimensional`.")
+        if isinstance(merged.get("scatter_exponent"), (list, tuple)):
+            # As an array it is traced whole; jit would trace a list element by element.
+            merged["scatter_exponent"] = np.asarray(merged["scatter_exponent"])
         self._track_scatter_exponent(merged.get("scatter_exponent", 2.0))
         method = _resolve_method(merged.get("method", "frequency_domain"))
         if method == "time_domain":

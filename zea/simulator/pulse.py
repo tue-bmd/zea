@@ -272,6 +272,11 @@ def _pulse_tail(pulses):
     return max(pulse.n_after for pulse in pulses) / pulses[0].sampling_frequency
 
 
+def _pulse_head(pulses):
+    """Longest support before the envelope peak [s] over the pulses."""
+    return max(pulse.n_before for pulse in pulses) / pulses[0].sampling_frequency
+
+
 def _pulse_span(pulses):
     """Support [s] that holds every pulse, from the earliest start to the latest end."""
     before, after = (max(getattr(p, k) for p in pulses) for k in ("n_before", "n_after"))

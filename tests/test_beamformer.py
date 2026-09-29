@@ -10,6 +10,8 @@ from zea.beamform.beamformer import (
     calculate_delays_heterogeneous_medium,
     complex_rotate,
     compute_receive_distances,
+    fnum_window_fn_rect,
+    fnumber_mask,
     tof_correction,
     transmit_delays,
 )
@@ -119,7 +121,7 @@ def _make_multistatic_inputs(probe_geometry, flatgrid, n_ax=N_AX):
     t0_delays = compute_t0_delays_planewave(
         probe_geometry, polar_angles, sound_speed=SOUND_SPEED
     ).astype(np.float32)
-    tx_apodizations = np.ones((n_tx, n_el), dtype=np.float32)
+    tx_apodizations = np.eye(n_el, dtype=np.float32)
     initial_times = np.zeros(n_tx, dtype=np.float32)
     focus_distances = np.zeros(n_tx, dtype=np.float32)
     t_peak = np.zeros(n_tx, dtype=np.float32)
@@ -864,7 +866,9 @@ def test_tof_correction_flat_map_grid_keeps_the_receive_aperture_only(probe_geom
     assert np.mean(np.abs(homogeneous - heterogeneous)) < 1e-2 * np.mean(np.abs(homogeneous))
 
 
-def test_tof_correction_accepts_the_old_grid_names(probe_geometry, flatgrid, caplog):
+def test_tof_correction_accepts_the_old_grid_names(
+    probe_geometry, flatgrid, caplog, reset_warning_once
+):
     import logging
 
     inputs = _make_tof_inputs(probe_geometry, flatgrid)
@@ -904,6 +908,51 @@ def test_tof_correction_op_accepts_the_old_grid_names(probe_geometry, flatgrid):
         op.output_key
     ]
     np.testing.assert_array_equal(keras.ops.convert_to_numpy(old), keras.ops.convert_to_numpy(new))
+
+
+def test_pipeline_does_not_take_the_old_grid_names_for_typos(
+    probe_geometry, flatgrid, caplog, reset_warning_once
+):
+    import logging
+
+    from zea import ops
+
+    inputs = _make_tof_inputs(probe_geometry, flatgrid)
+    nx_sos, nz_sos = 16, 16
+    inputs["sos_map"] = np.full((nz_sos, nx_sos), SOUND_SPEED, dtype=np.float32)
+    inputs["apply_lens_correction"] = False
+    grids = {
+        "sos_grid_x": np.linspace(-12e-3, 12e-3, nx_sos).astype(np.float32),
+        "sos_grid_z": np.linspace(0.0, 25e-3, nz_sos).astype(np.float32),
+    }
+    pipeline = ops.Pipeline([ops.TOFCorrection()], jit_options=None, with_batch_dim=False)
+    with caplog.at_level(logging.WARNING, logger="zea"):
+        pipeline(**inputs, **grids)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("sos_grid_x was renamed to map_grid_x" in m for m in messages)
+    assert not any("typo" in m for m in messages)
+
+
+def test_tof_correction_masks_a_single_element_transmit_with_its_own_aperture(
+    probe_geometry, flatgrid
+):
+    """With a map, a one-hot transmit only reaches the pixels its element receives from; a
+    full-aperture transmit gets no transmit mask."""
+    inputs = _make_multistatic_inputs(probe_geometry, flatgrid)
+    inputs["f_number"] = 1.0
+    result = keras.ops.convert_to_numpy(tof_correction(**inputs))[..., 0]  # (n_tx, n_pix, n_el)
+    mask = fnumber_mask(flatgrid, probe_geometry, 1.0, fnum_window_fn=fnum_window_fn_rect)
+    mask = keras.ops.convert_to_numpy(mask)[..., 0]  # (n_pix, n_el)
+    support = mask[None, :, :] * mask.T[:, :, None]  # (n_tx, n_pix, n_el)
+    assert support.any() and not support.all()
+    assert np.all(result[support == 0] == 0)
+    assert np.mean(result[support == 1] != 0) > 0.99
+
+    inputs["tx_apodizations"] = np.ones_like(inputs["tx_apodizations"])
+    general = keras.ops.convert_to_numpy(tof_correction(**inputs))[..., 0]
+    receive_only = np.broadcast_to(mask[None], general.shape)
+    assert np.all(general[receive_only == 0] == 0)
+    assert np.mean(general[receive_only == 1] != 0) > 0.99
 
 
 # Delays reach ~650 samples; float32 round-off across backends is up to ~7e-4 samples.

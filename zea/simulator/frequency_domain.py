@@ -41,7 +41,7 @@ from zea.simulator.response import (
     medium_model,
     probe_model,
 )
-from zea.simulator.pulse import _pulse_spectra, _pulse_tail, transmit_pulses
+from zea.simulator.pulse import _pulse_head, _pulse_spectra, _pulse_tail, transmit_pulses
 from zea.simulator.record import (
     _fft_bound,
     _record_gate_time,
@@ -330,6 +330,8 @@ def simulate_rf(
             "needs to keep every echo from wrapping into the record; see fft_length."
         )
     n_fft = int(n_fft)
+    if n_fft < int(n_ax):
+        raise ValueError(f"n_fft ({n_fft}) must be at least n_ax ({int(n_ax)}).")
 
     if n_scat == 0:
         return ops.zeros((n_tx, n_ax, n_el, 1), "float32")
@@ -374,7 +376,7 @@ def simulate_rf(
             shift=shift,
             tx_apodizations=ops.cast(tx_apodizations, "float32"),
             center_frequency=fc,
-            gate_time=_record_gate_time(n_ax, fs, _pulse_tail(pulses)),
+            gate_time=_record_gate_time(n_ax, fs, _pulse_head(pulses)),
             scatter_exponent=scatter_exponent[part] if per_scatterer_exponent else scatter_exponent,
         )
         spectrum = spectrum + _band_spectrum(block, blocks, (n_tx, n_el))

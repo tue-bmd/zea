@@ -352,10 +352,11 @@ def tof_correction(
     # f-number mask of the firing element on the transmit side for single-element transmits
     # (multistatic data): one element's directivity bounds the insonified region like a
     # receive element's. Other transmit schemes get no transmit mask, as in the homogeneous path.
-    active = ops.cast(ops.not_equal(tx_apodizations, 0.0), mask.dtype)  # (n_tx, n_el)
-    one_hot = ops.all(ops.sum(active, axis=-1) == 1)
-    mask_tx = ops.max(mask[None, :, :, 0] * active[:, None, :], axis=-1)  # (n_tx, n_pix)
-    mask_tx = ops.where(one_hot, mask_tx, ops.ones_like(mask_tx))[..., None]
+    active = ops.cast(ops.not_equal(tx_apodizations, 0.0), "int32")  # (n_tx, n_el)
+    one_hot = ops.sum(active, axis=-1) == 1  # (n_tx,)
+    firing = ops.argmax(active, axis=-1)  # (n_tx,)
+    mask_tx = ops.transpose(ops.take(mask[:, :, 0], firing, axis=1))  # (n_tx, n_pix)
+    mask_tx = ops.where(one_hot[:, None], mask_tx, ops.ones_like(mask_tx))[..., None]
     _correct_single_tx_ckpt = keras.remat(_correct_single_tx)
     return vmap(_correct_single_tx_ckpt)(data, txdel, mask_tx)
 

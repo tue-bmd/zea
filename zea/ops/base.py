@@ -286,6 +286,16 @@ class Operation(keras.Operation):
         return self.valid_keys
 
     @property
+    def required_keys(self) -> set:
+        """Input keys of the `call` method without a default value."""
+        variadic = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        return {
+            name
+            for name, param in self._input_signature.parameters.items()
+            if param.default is param.empty and param.kind not in variadic
+        }
+
+    @property
     def jittable(self):
         """Check if the operation can be JIT compiled."""
         return self._jittable
