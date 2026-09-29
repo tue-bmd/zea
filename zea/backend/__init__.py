@@ -180,7 +180,7 @@ def checkpoint(func):
     """Re-compute ``func`` in the backward pass instead of storing intermediates.
 
     Wraps ``jax.checkpoint``, ``tf.recompute_grad`` or ``torch.utils.checkpoint``. Returns
-    ``func`` unchanged on other backends. Use if backprop doesn't fit in VRAM.
+    ``func`` unchanged on other backends. Used if backprop doesn't fit in VRAM.
     """
     backend = keras.backend.backend()
     if backend == "jax" and jax_mod is not None:
