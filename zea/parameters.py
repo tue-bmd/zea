@@ -859,11 +859,21 @@ class Parameters(BaseParameters):
         ``probe_bandwidth_percent``, its 200 % default makes this ``2 * center_frequency``,
         which may be too wide for these filters. Set ``bandwidth`` (or
         ``probe_bandwidth_percent``) explicitly in that case.
+
+        The filter operations design one set of taps, so they need a scalar. A per-transmit
+        ``center_frequency`` that is the same for every transmit gives a scalar bandwidth; when
+        it varies across transmits, the derived bandwidth is per transmit as well, and
+        ``bandwidth`` should be set explicitly for these filters.
         """
         if self._params.get("bandwidth") is not None:
             return self._params["bandwidth"]
 
-        return self.center_frequency * self.probe_bandwidth_percent / 100
+        bandwidth = self.center_frequency * self.probe_bandwidth_percent / 100
+        if np.ndim(bandwidth) > 0:
+            per_transmit = np.asarray(bandwidth)
+            if per_transmit.size > 0 and np.all(per_transmit == per_transmit.flat[0]):
+                return per_transmit.flat[0]
+        return bandwidth
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):

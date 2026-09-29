@@ -853,6 +853,17 @@ def test_bandwidth_explicit_value_wins():
     assert parameters.bandwidth == pytest.approx(4.2e6)
 
 
+def test_bandwidth_per_transmit_center_frequency():
+    """A per-transmit center_frequency that is the same everywhere gives a scalar bandwidth."""
+    uniform = Parameters(center_frequency=np.full(3, 5e6), probe_bandwidth_percent=60.0)
+    assert np.ndim(uniform.bandwidth) == 0
+    assert uniform.bandwidth == pytest.approx(3e6)
+
+    # Varying per transmit: the derived bandwidth stays per transmit.
+    varying = Parameters(center_frequency=np.array([4e6, 5e6]), probe_bandwidth_percent=50.0)
+    np.testing.assert_allclose(varying.bandwidth, [2e6, 2.5e6])
+
+
 # --- distance_to_apex ---
 
 
