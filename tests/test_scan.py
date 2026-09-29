@@ -821,6 +821,38 @@ def test_custom_parameters_passthrough_to_tensor():
     assert parameters.wavelength == parameters.sound_speed / parameters.center_frequency
 
 
+def test_bandwidth_derived_from_probe():
+    """Left unset, the bandwidth is center_frequency * probe_bandwidth_percent / 100."""
+    parameters = Parameters(center_frequency=5e6, probe_bandwidth_percent=60.0)
+    assert parameters.bandwidth == pytest.approx(3e6)
+
+    # Changing a dependency invalidates the cached value.
+    parameters.probe_bandwidth_percent = 80.0
+    assert parameters.bandwidth == pytest.approx(4e6)
+
+    # Without probe_bandwidth_percent in the file, its 200 % default applies.
+    assert Parameters(center_frequency=5e6).bandwidth == pytest.approx(10e6)
+
+    assert "bandwidth" in Parameters(**scan_args).to_tensor(include=["bandwidth"])
+
+
+def test_bandwidth_explicit_value_wins():
+    """An explicit bandwidth overrides the derived one, and unsetting it falls back."""
+    parameters = Parameters(center_frequency=5e6, probe_bandwidth_percent=60.0, bandwidth=1e6)
+    assert parameters.bandwidth == pytest.approx(1e6)
+
+    # Dependencies do not affect an explicit value.
+    parameters.center_frequency = 7e6
+    assert parameters.bandwidth == pytest.approx(1e6)
+
+    parameters.update(bandwidth=2e6)
+    assert parameters.bandwidth == pytest.approx(2e6)
+    assert "bandwidth" in parameters._params
+
+    parameters.bandwidth = None
+    assert parameters.bandwidth == pytest.approx(4.2e6)
+
+
 # --- distance_to_apex ---
 
 

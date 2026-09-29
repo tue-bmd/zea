@@ -327,6 +327,7 @@ class Parameters(BaseParameters):
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
+        "bandwidth": {"dtype": np.float32},
     }
 
     # Add some defaults that are not stored in a file
@@ -847,6 +848,22 @@ class Parameters(BaseParameters):
             return self._params["demodulation_frequency"]
 
         return self.center_frequency
+
+    @cache_with_dependencies("center_frequency", "probe_bandwidth_percent")
+    def bandwidth(self):
+        """The signal bandwidth in Hz, used by filter operations such as
+        :class:`~zea.ops.LowPassFilterIQ` and :class:`~zea.ops.BandPassFilter`.
+
+        If not set explicitly, it is derived from the probe metadata as
+        ``center_frequency * probe_bandwidth_percent / 100``. When the file does not store
+        ``probe_bandwidth_percent``, its 200 % default makes this ``2 * center_frequency``,
+        which may be too wide for these filters. Set ``bandwidth`` (or
+        ``probe_bandwidth_percent``) explicitly in that case.
+        """
+        if self._params.get("bandwidth") is not None:
+            return self._params["bandwidth"]
+
+        return self.center_frequency * self.probe_bandwidth_percent / 100
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
