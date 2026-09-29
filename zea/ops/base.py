@@ -235,6 +235,16 @@ class Operation(keras.Operation):
         return getattr(self.__class__, "STATIC_PARAMS", [])
 
     @property
+    def compiler_options(self) -> dict:
+        """XLA options this operation needs in any JIT-compiled function that contains it.
+
+        Declared per class through ``COMPILER_OPTIONS``. They only apply on the JAX
+        backend, and an explicit ``compiler_options`` entry in ``jit_kwargs`` overrides
+        them.
+        """
+        return dict(getattr(self.__class__, "COMPILER_OPTIONS", {}))
+
+    @property
     def jit_compile(self):
         """Get the JIT compilation flag."""
         return self._jit_compile
@@ -252,7 +262,9 @@ class Operation(keras.Operation):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile
         if self._jit_compile and self.jittable:
-            self._call = jit(self.call, **self.jit_kwargs)
+            self._call = jit(
+                self.call, **self.jit_kwargs, default_compiler_options=self.compiler_options
+            )
         else:
             self._call = self.call
 
