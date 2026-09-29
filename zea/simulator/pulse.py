@@ -1,14 +1,16 @@
-"""The two-way transmit pulse of the simulators: parametric models, measured waveforms and
-their spectra, all in numpy."""
+"""The two-way transmit pulse of the simulators: the parametric models of :func:`transmit_pulse`,
+a measured waveform through :func:`measured_pulse`, and the spectra behind them."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import numpy as np
-from keras import ops
+from scipy.ndimage import maximum_filter1d
 from scipy.signal import hilbert
 from scipy.special import fresnel
 
+from zea import log
+from zea.internal.core import concrete, round_up_to_power_of_two
 
 PULSE_MODELS = ("realistic", "hann", "simus")
 
@@ -18,9 +20,9 @@ class Pulse:
     """Two-way transmit pulse of the simulators, with its envelope peak at ``t = 0``.
 
     Built by :func:`transmit_pulse` or :func:`measured_pulse`. ``spectrum_fn`` is the
-    continuous-time spectrum, scaled so
-    that ``irfft`` of its samples on an rfft grid of ``sampling_frequency`` recovers the waveform
-    with a unit peak. The support is where the envelope is above -80 dB.
+    continuous-time spectrum, scaled so that ``irfft`` of its samples on an rfft grid of
+    ``sampling_frequency`` recovers the waveform with a unit peak. The support is where the
+    envelope is above -80 dB.
     """
 
     spectrum_fn: Callable
@@ -60,7 +62,7 @@ class Pulse:
             n_after = self.n_after
         else:
             n_before = n_after = self.n_samples // 2
-        n_fft = int(_round_up_to_power_of_two(2 * (n_before + n_after + 1)))
+        n_fft = round_up_to_power_of_two(2 * (n_before + n_after + 1))
         freqs = np.fft.rfftfreq(n_fft, 1 / self.sampling_frequency)
         waveform = np.fft.irfft(self.spectrum_fn(freqs), n_fft)
         return np.roll(waveform, n_before)[: n_before + n_after + 1].astype(np.float32)
@@ -81,8 +83,8 @@ def transmit_pulse(
     """The parametric two-way (pulse-echo) transmit pulse: excitation times transducer response.
 
     Its :meth:`Pulse.waveform` is the ``waveforms_two_way`` of :func:`simulate_rf`,
-    :func:`zea.simulator_time_domain.simulate_rf_td` and :class:`zea.ops.Simulate`, which use
-    the default pulse of this function when none is given::
+    :func:`simulate_rf_td` and :class:`zea.ops.Simulate`, which use the default pulse of this
+    function when none is given::
 
         pulse = transmit_pulse(5e6, pulse_model="simus", bandwidth_percent=75.0)
         rf = simulate_rf(..., waveforms_two_way=pulse.waveform())
@@ -232,11 +234,14 @@ def transmit_pulses(
     The rows of ``waveforms_two_way`` when given, of shape (n_tx, n_samples), or (n_samples,)
     for the same waveform on every transmit (see :func:`measured_pulse`; identical rows share
     one :class:`Pulse`); otherwise the default pulse of :func:`transmit_pulse` at
-    ``center_frequency``, on every transmit.
+    ``center_frequency``, on every transmit. ``n_tx`` may be None for a helper that is not told
+    the transmit count: one pulse per row of the waveforms, or the single default pulse.
     """
     if waveforms_two_way is None:
-        return [transmit_pulse(center_frequency, sampling_frequency)] * n_tx
+        return [transmit_pulse(center_frequency, sampling_frequency)] * (n_tx or 1)
     waveforms = np.atleast_2d(np.asarray(waveforms_two_way, np.float64))
+    if n_tx is None:
+        n_tx = waveforms.shape[0]
     if waveforms.ndim != 2 or waveforms.shape[0] not in (1, n_tx):
         raise ValueError(
             f"waveforms_two_way must have shape (n_tx, n_samples) or (n_samples,), got "
@@ -250,6 +255,29 @@ def transmit_pulses(
     return [pulses[waveform.tobytes()] for waveform in waveforms] * (n_tx // len(waveforms))
 
 
+def _unique_pulses(pulses):
+    """The distinct :class:`Pulse` objects among ``pulses``, in order of first use."""
+    return list(dict.fromkeys(pulses))
+
+
+def _pulse_spectra(pulses, freqs):
+    """Spectrum of the pulse of every transmit at ``freqs`` [Hz], as complex64 of shape
+    (n_freq, n_tx). Each distinct pulse is evaluated once."""
+    spectra = {pulse: pulse.spectrum(freqs) for pulse in _unique_pulses(pulses)}
+    return np.stack([spectra[pulse] for pulse in pulses], axis=1)
+
+
+def _pulse_tail(pulses):
+    """Longest support after the envelope peak [s] over the pulses."""
+    return max(pulse.n_after for pulse in pulses) / pulses[0].sampling_frequency
+
+
+def _pulse_span(pulses):
+    """Support [s] that holds every pulse, from the earliest start to the latest end."""
+    before, after = (max(getattr(p, k) for p in pulses) for k in ("n_before", "n_after"))
+    return (before + after) / pulses[0].sampling_frequency
+
+
 def _calibrate(
     spectrum_fn,
     sampling_frequency,
@@ -261,26 +289,42 @@ def _calibrate(
 ):
     """Shift the envelope peak to t = 0, scale to a unit peak and measure the support, on a grid
     ``oversample`` times finer than ``sampling_frequency`` so that none of it depends on it.
-    ``trigger`` is the time [s] of the transmit trigger in the frame of ``spectrum_fn``."""
+    ``trigger`` is the time [s] of the transmit trigger in the frame of ``spectrum_fn``.
+
+    The support is where the running maximum of the waveform magnitude over one period of the
+    band centre is above ``threshold_db``. The Hilbert envelope would not do: for a pulse with
+    a DC component, such as a one-period Hann tone through a flat transducer, it decays as 1/t
+    and reaches -80 dB only after hundreds of periods.
+    """
     fs = oversample * sampling_frequency
-    n = int(_round_up_to_power_of_two(max(4 * duration * fs, 256)))
+    n = round_up_to_power_of_two(max(4 * duration * fs, 256))
     while True:
         freqs = np.fft.rfftfreq(n, 1 / fs)
+        magnitude = np.abs(spectrum_fn(freqs))
+        in_band = np.flatnonzero(magnitude >= 0.5 * magnitude.max())
+        band = (float(freqs[in_band[0]]), float(freqs[in_band[-1]]))
         waveform = np.fft.irfft(spectrum_fn(freqs), n)
-        envelope = np.abs(hilbert(waveform))
         shift = 0.0
         if shift_peak:
+            envelope = np.abs(hilbert(waveform))
             k = int(np.argmax(envelope))
             before, at, after = envelope[k - 1], envelope[k], envelope[(k + 1) % n]
             fraction = 0.5 * (before - after) / (before - 2 * at + after)  # sub-sample peak
             shift = ((k if k < n // 2 else k - n) + fraction) / fs
             waveform = np.fft.irfft(spectrum_fn(freqs) * np.exp(2j * np.pi * freqs * shift), n)
-            envelope = np.abs(hilbert(waveform))
+        period = int(np.ceil(2 * fs / (band[0] + band[1])))
+        envelope = maximum_filter1d(np.abs(waveform), period, mode="wrap")
         support = np.flatnonzero(envelope > 10 ** (threshold_db / 20) * envelope.max())
         positive, negative = support[support < n // 2], support[support >= n // 2]
         after = int(positive.max()) if len(positive) else 0
         before = int(n - negative.min()) if len(negative) else 0
-        if before + after < n // 4 or n >= 2**22:
+        if before + after < n // 4:
+            break
+        if n >= 2**22:
+            log.warning(
+                f"The transmit pulse does not decay to {threshold_db} dB within "
+                f"{n / fs * 1e6:.0f} us; its support is truncated."
+            )
             break
         n *= 2  # the pulse wraps around the grid
     scale = 1.0 / (oversample * np.abs(waveform).max())  # unit peak on the coarse grid
@@ -288,15 +332,12 @@ def _calibrate(
     def shifted(f):
         return scale * spectrum_fn(f) * np.exp(2j * np.pi * f * shift)
 
-    magnitude = np.abs(spectrum_fn(freqs))
-    in_band = np.flatnonzero(magnitude >= 0.5 * magnitude.max())
-    band = (float(freqs[in_band[0]]), float(freqs[in_band[-1]]))
     n_before, n_after = (int(np.ceil(k / oversample)) for k in (before, after))
     return Pulse(shifted, sampling_frequency, n_before, n_after, shift - trigger, band)
 
 
 def _static_float(x, name):
-    value = _concrete(x)
+    value = concrete(x)
     if value is None:
         raise ValueError(
             f"{name} must be static (not traced): the transmit pulse is built in numpy."
@@ -325,17 +366,42 @@ def sampled_spectrum(f, samples, times):
 
 
 def hann_burst_spectrum(f, fc, n_period, sweep=0.0):
-    """Spectrum of a Hann-windowed tone or linear chirp centred at t = 0.
+    """Spectrum of a Hann-windowed tone or linear chirp centred at t = 0, in closed form.
 
     The window spans ``n_period`` periods of ``fc``, over which the instantaneous frequency
-    runs linearly from ``fc - sweep / 2`` to ``fc + sweep / 2``. Evaluated from samples at 64
-    per period, so aliasing is far below the 1/f**3 tails of the window.
+    runs linearly from ``fc - sweep / 2`` to ``fc + sweep / 2``. The Hann window is a constant
+    and two complex exponentials at ``+-1 / width``, so the spectrum is the rectangular-window
+    spectrum of :func:`rect_chirp_spectrum` at ``f`` and shifted by ``+-1 / width``.
     """
     width = n_period / fc
-    times = np.linspace(-width / 2, width / 2, int(np.ceil(64 * n_period)) + 1)
-    window = np.cos(np.pi * times / width) ** 2
-    phase = 2 * np.pi * (fc * times + sweep / (2 * width) * times**2)
-    return sampled_spectrum(f, window * np.cos(phase), times)
+    f = np.asarray(f, np.float64)
+    rect = rect_chirp_spectrum
+    return (
+        rect(f, fc, width, sweep) / 2
+        + rect(f - 1 / width, fc, width, sweep) / 4
+        + rect(f + 1 / width, fc, width, sweep) / 4
+    )
+
+
+def rect_chirp_spectrum(f, fc, width, sweep=0.0):
+    """Spectrum of ``cos(phi(t))`` on ``|t| < width / 2`` and zero outside, centred at t = 0,
+    whose instantaneous frequency runs linearly from ``fc - sweep / 2`` to ``fc + sweep / 2``
+    (a tone when ``sweep`` is 0). In closed form: a sinc for the tone, and Fresnel integrals
+    for the chirp, as a cosine is half the sum of the two complex chirps."""
+    f = np.asarray(f, np.float64)
+    if not sweep or abs(sweep) * width < 1e-6:  # a tone, before the Fresnel form loses digits
+        return width / 2 * (np.sinc(width * (f - fc)) + np.sinc(width * (f + fc)))
+
+    def complex_chirp(f):
+        # Integral over the window of exp(i (a t^2 + b t)), a the chirp rate [rad/s^2].
+        a, b = np.pi * sweep / width, 2 * np.pi * (fc - f)
+        scale = np.sqrt(2 * abs(a) / np.pi)
+        v1, v2 = (scale * (t + b / (2 * a)) for t in (-width / 2, width / 2))
+        (s1, c1), (s2, c2) = fresnel(v1), fresnel(v2)
+        integral = (c2 - c1) + 1j * np.sign(a) * (s2 - s1)
+        return np.exp(-1j * b**2 / (4 * a)) * np.sqrt(np.pi / (2 * abs(a))) * integral
+
+    return (complex_chirp(f) + np.conj(complex_chirp(-f))) / 2
 
 
 def rect_burst_spectrum(f, fc, n_period, sweep=0.0):
@@ -438,18 +504,3 @@ def butterworth_transfer(f, fc, bandwidth_percent, order=2):
     q = np.asarray(1j * (w**2 - w0_squared) / (band * w_safe))
     poles = np.exp(1j * np.pi * (2 * np.arange(1, order + 1) + order - 1) / (2 * order))
     return np.where(w == 0, 0.0, np.prod(1 / (q[..., None] - poles), axis=-1))
-
-
-def _round_up_to_power_of_two(x):
-    """Rounds up to the next power of two."""
-    return 2 ** np.ceil(np.log2(x))
-
-
-def _concrete(x):
-    """numpy view of ``x``, or None when it is traced."""
-    if x is None:
-        return None
-    try:
-        return ops.convert_to_numpy(x)
-    except (RuntimeError, ValueError, TypeError, NotImplementedError):
-        return None
