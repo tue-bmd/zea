@@ -61,8 +61,10 @@ def spread(dist, exponent=1.0, mindist=1e-3, reference=1e-3):
 def obliquity_factor(cos_angle, baffle_impedance_ratio):
     """Obliquity factor of an element in a baffle of finite impedance, at the cosine of the
     angle to its normal: 1 in a rigid baffle (ratio 0), the cosine in a soft one (``inf``), and
-    cos / (cos + ratio) in between, with the ratio the medium impedance over the baffle's. With a
-    non-rigid baffle, directions behind the element get 0, not a pole."""
+    cos / (cos + ratio) in between, with the ratio the medium impedance over the baffle's
+    (Pesque et al., IEEE Ultrasonics Symposium 1984, as in SIMUS; the soft-baffle cosine is
+    Selfridge et al. 1980). With a non-rigid baffle, directions behind the element get 0, not
+    a pole."""
     if baffle_impedance_ratio == 0:
         return ops.ones_like(cos_angle)
     cos_angle = ops.maximum(cos_angle, 0.0)
