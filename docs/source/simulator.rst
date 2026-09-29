@@ -3,19 +3,19 @@
 Simulator
 =========
 
-``zea`` simulates ultrasound RF data from a cloud of point scatterers: a phantom of positions
-and magnitudes in front of a probe, for the transmit scheme of a :class:`zea.Parameters`. The
-simulator is an operation, :class:`zea.ops.Simulate`, so a phantom goes into a
-:class:`zea.Pipeline` and an image comes out, and it is differentiable on jax.
+``zea`` simulates ultrasound RF data from a cloud of point scatterers, using a transmit scheme
+defined by a :class:`zea.Parameters` object. The simulator is differentiable when using jax.
 
 - **Tutorial.** The :doc:`simulation notebook <notebooks/simulation/zea_simulation_example>`
   builds a probe, a scan and a phantom, simulates, beamforms the result, and adds sound speed
   and attenuation maps.
 - **In a pipeline.** :class:`zea.ops.Simulate` documents what the operation takes from the
-  parameters, what is optional, and the two simulation methods.
-- **As functions.** The :mod:`zea.simulator` page documents the simulators
+  parameters, what is optional, and what is specific to the two simulation methods.
+- **As functions.** The :mod:`zea.simulator` page documents the raw simulator functions
   (:func:`~zea.simulator.simulate_rf` and :func:`~zea.simulator.simulate_rf_td`) with every
-  argument, the transmit pulse models, and the helpers that size the record and the FFT.
+  argument, the transmit pulse models, and the helpers that size the record and the FFT. Generally
+  not recommended; use :class:`zea.ops.Simulate` instead unless when using the simulator in your own
+  jitted function.
 
 .. _simulator-internals:
 
