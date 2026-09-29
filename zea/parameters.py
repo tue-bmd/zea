@@ -1129,9 +1129,9 @@ class Parameters(BaseParameters):
         """FFT length of :func:`zea.simulator.simulate_rf` for this scan.
 
         Sized with :func:`zea.simulator.fft_length` so that no echo of a scatterer in the record
-        wraps into it, for any cloud and up to twice the length of the transmit pulse (the
-        ``waveforms_two_way`` of the scan, or the simulator's default pulse), through the sound
-        speed map ``sos_map`` when there is one. Set it explicitly to override.
+        wraps into it, for any cloud, with the transmit pulse of the scan (its
+        ``waveforms_two_way``, or the simulator's default pulse) and through the sound speed
+        map ``sos_map`` when there is one. Set it explicitly to override.
         """
         n_fft = self._params.get("n_fft")
         if n_fft is not None:

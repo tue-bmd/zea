@@ -110,10 +110,17 @@ def simulate_rf(
 
     Under ``jax.jit`` the scene, the probe geometry and element sizes, the transmit scheme, the
     medium, the lens, the maps and ``scatter_exponent`` may be traced; every other argument is
-    a static Python value. ``n_fft`` must then be given (:class:`zea.ops.Simulate` and
-    :attr:`zea.Parameters.n_fft` derive it outside the jit), ``n_sub_elements`` as a pair when
-    it would be derived from a traced element size, and ``scatter_exponent_range`` or
-    ``band_db=None`` for a traced exponent.
+    a static Python value. Three settings are normally derived from the values of the inputs,
+    which a traced input does not have, so under jit:
+
+    - If the geometry, the delays, the sound speed or a sound speed map is traced, pass
+      ``n_fft`` (:class:`zea.ops.Simulate` and :attr:`zea.Parameters.n_fft` derive it before
+      the jit).
+    - If the element size or the sound speed is traced and ``n_sub_elements="auto"`` or an
+      ``elevation_focus`` is set, pass ``n_sub_elements`` as an explicit
+      ``(n_lateral, n_elevation)`` pair.
+    - If ``scatter_exponent`` is traced and ``band_db`` is set, pass ``scatter_exponent_range``
+      or set ``band_db=None`` to keep every frequency bin.
 
     The RF is synthesised in the frequency domain, on the rfft grid of ``n_fft`` samples, as the
     superposition of the scatterer echoes:
@@ -174,14 +181,11 @@ def simulate_rf(
             spherically. Exclusive with ``elevation_focus``, the lens modelled in 3D, and
             rejects a probe with elevation extent.
         element_height (float): The elevation height of the elements [m], used for the
-            elevation directivity. If None, an eighth of the width of a 1D probe (at least
-            ``element_width``), or ``element_width`` for a 2D probe.
-        max_chunk_gb (float): Memory budget [GB] for one block of work: a block of frequency
-            bins over all scatterers, or, when one bin of every scatterer-element response
-            (about ``8 * n_scat * n_el`` bytes) exceeds the budget, one bin over a chunk of
-            scatterers, with the chunks summed. Larger blocks run the batched matrix products
-            more efficiently: 4 GB is about 25% faster than 1 GB at 100k scatterers on a GPU,
-            and up to 2x on CPU. Lower it if memory is tight.
+            elevation directivity. If None, an eighth of the aperture width of a 1D probe, at
+            least ``element_width``, or ``element_width`` for a 2D probe.
+        max_chunk_gb (float): Memory budget [GB] for one block of work; the scene is split to
+            stay under it, so the scatterer count is not limited by memory. Larger blocks run
+            the batched matrix products more efficiently; lower it if memory is tight.
         scatter_exponent (float | array-like): Weigh the scattered field amplitude by
             ``(f / center_frequency)**scatter_exponent``. 2 is Rayleigh scattering (e.g. blood),
             myocardium is approximately 1.5, soft tissue 0.6-0.8. A float sets a global value, an
@@ -235,11 +239,12 @@ def simulate_rf(
             geometry, the delays or the sound speed are traced.
         scatter_exponent_range (tuple, optional): ``(min, max)`` exponent spanned by
             ``scatter_exponent``, used to pick the band instead of reading the exponents.
-            Only needed when ``scatter_exponent`` is traced and ``band_db`` is set; for one
-            traced shared exponent it is ``(p, p)``, or the range swept over if the compiled
-            kernel is reused. :func:`scatter_exponent_bounds` derives it from a concrete
-            exponent, and :class:`zea.ops.Simulate` does so before the jitted call. A range
-            that does not cover the exponents in play truncates their band.
+            Only needed when ``scatter_exponent`` is traced and ``band_db`` is set. Give the
+            range of every exponent the compiled function will be called with: ``(p, p)`` for
+            one fixed exponent, or the interval an optimiser may sweep. A range that does not
+            cover the exponents in play truncates their band. :func:`scatter_exponent_bounds`
+            derives it from a concrete exponent, and :class:`zea.ops.Simulate` does so before
+            the jitted call.
         sos_map (array-like, optional): Sound speed map [m/s] of shape (Nz, Nx) in the x-z
             plane, extruded along y, or (Nz, Nx, Ny) with ``map_grid_y``. Every path from an
             element to a scatterer then runs at the mean slowness along the straight ray between

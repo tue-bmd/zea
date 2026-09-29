@@ -187,9 +187,10 @@ class Simulate(Operation):
 
     Performance and jit. ``max_chunk_gb`` bounds the memory of one block of work. The
     frequency-domain simulator runs on an FFT of ``n_fft`` samples and only the bins above
-    ``band_db`` of the pulse peak; both are derived from the scan when not given, so the op
-    jits without them. Inside an outer jit the scan is traced, so pass ``n_fft`` from
-    :attr:`zea.Parameters.n_fft`, and with a traced ``scatter_exponent`` pass
+    ``band_db`` of the pulse peak; both are derived from the scan when not given, and the
+    pipeline's own jit handles that. If you wrap the pipeline call in your own ``jax.jit``,
+    the scan parameters become tracers and cannot be read: then pass ``n_fft`` from
+    :attr:`zea.Parameters.n_fft`, and for a traced ``scatter_exponent`` pass
     ``scatter_exponent_range=(min, max)`` or ``band_db=None``. Differentiable on jax.
     """
 
