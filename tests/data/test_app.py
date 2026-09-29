@@ -2,7 +2,19 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from . import generate_example_dataset
+
+
+@pytest.fixture(autouse=True)
+def _offline_presets(monkeypatch):
+    """Keep the tests offline: fetching presets from the hub fails, so the bundled ones load."""
+
+    def _offline(*args, **kwargs):
+        raise ConnectionError("offline")
+
+    monkeypatch.setattr("zea.data.app._hf_download", _offline)
 
 
 def test_build_interface_does_not_crash():
@@ -266,13 +278,68 @@ def test_loading_meta_html_mentions_streaming():
     assert "streamed" in _html_progress(1, 2, 12_000_000)
 
 
-def test_presets_are_well_formed():
-    from zea.data.app import PRESETS
+def test_bundled_presets_are_well_formed():
+    import yaml
 
-    for name, p in PRESETS.items():
+    from zea.data.app import _BUNDLED_PRESETS, load_presets
+
+    presets = load_presets()  # offline → the bundled file
+    names = [p["name"] for p in yaml.safe_load(_BUNDLED_PRESETS.read_text())["presets"]]
+    assert len(names) == len(set(names)) == len(presets) > 0, "preset names must be unique"
+    allowed = {"dataset", "config", "key", "file", "n_frames", "revision"}
+    for name, p in presets.items():
+        assert set(p) <= allowed, (name, set(p) - allowed)
         assert p["dataset"].startswith("hf://"), name
         if "file" in p:
             assert p["file"].startswith(p["dataset"] + "/"), name
+
+
+def test_load_presets_from_hub(monkeypatch, tmp_path):
+    from zea.data import app
+
+    remote = tmp_path / "presets.yaml"
+    remote.write_text("schema_version: 1\npresets:\n  - {name: A, dataset: hf://o/r}\n")
+    calls = {}
+
+    def _download(repo_id, filename, **kwargs):
+        calls.update(repo_id=repo_id, filename=filename, **kwargs)
+        return str(remote)
+
+    monkeypatch.setattr(app, "_hf_download", _download)
+    assert app.load_presets() == {"A": {"dataset": "hf://o/r"}}
+    assert (calls["repo_id"], calls["filename"]) == ("zeahub/app", "presets.yaml")
+    assert calls["revision"] == "main"  # "latest" is an alias for main
+    app.load_presets(revision="v0.1.8")
+    assert calls["revision"] == "v0.1.8"
+
+
+def test_load_presets_falls_back_to_bundled(tmp_path):
+    from zea.data.app import _BUNDLED_PRESETS, _parse_presets, load_presets
+
+    bundled = _parse_presets(_BUNDLED_PRESETS.read_text())
+    assert load_presets() == bundled  # hub unreachable
+    newer = tmp_path / "presets.yaml"
+    newer.write_text("schema_version: 99\npresets: []\n")
+    assert load_presets(str(newer)) == bundled  # schema this zea cannot read
+
+
+def test_parse_presets_filters_by_min_zea_version(monkeypatch):
+    import zea
+    from zea.data.app import _parse_presets
+
+    text = """
+schema_version: 1
+presets:
+  - {name: old, dataset: hf://o/r, min_zea_version: 0.1.0}
+  - {name: new, dataset: hf://o/r, min_zea_version: 99.0.0}
+  - {name: broken}
+"""
+    monkeypatch.setattr(zea, "__version__", "0.1.8")
+    with pytest.warns(UserWarning, match="malformed"):
+        assert list(_parse_presets(text)) == ["old"]
+    monkeypatch.setattr(zea, "__version__", "dev")  # a dev install shows everything
+    with pytest.warns(UserWarning):
+        assert list(_parse_presets(text)) == ["old", "new"]
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -286,6 +353,8 @@ def test_cli_defaults():
     args = tyro.cli(AppArgs, args=[])
     assert args.share is False
     assert args.server_port is None
+    assert args.presets == "hf://zeahub/app/presets.yaml"
+    assert args.presets_revision == "latest"
 
 
 def test_cli_with_flags():

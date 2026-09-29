@@ -4,6 +4,7 @@ Usage:
     python -m zea.data.app
     python -m zea.data.app --share
     python -m zea.data.app --server-port 7861
+    python -m zea.data.app --presets zea/data/app_presets.yaml  # try local preset edits
 """
 
 import base64
@@ -21,9 +22,12 @@ from typing import Any
 import h5py
 import numpy as np
 import tyro
+import yaml
 from keras import ops
+from packaging.version import InvalidVersion, Version
 
-from zea import display, io_lib
+import zea
+from zea import display, io_lib, log
 from zea.cli_args import AppArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
@@ -36,7 +40,12 @@ from zea.data.process import (
     _key_requires_pipeline,
 )
 from zea.internal.device import init_device
-from zea.internal.preset_utils import HF_PREFIX, _hf_list_files, _hf_parse_path
+from zea.internal.preset_utils import (
+    HF_PREFIX,
+    _hf_download,
+    _hf_list_files,
+    _hf_parse_path,
+)
 from zea.ops.pipeline import Pipeline
 
 try:
@@ -129,106 +138,65 @@ _DATA_KEYS = [
 
 # ── Presets ───────────────────────────────────────────────────────────────────
 
-PRESETS: dict[str, dict] = {
-    "PICMUS › Contrast speckle (RF)": {
-        "dataset": (
-            "hf://zeahub/picmus/database/experiments/contrast_speckle/"
-            "contrast_speckle_expe_dataset_rf"
-        ),
-        "config": "hf://zeahub/picmus/config_rf.yaml",
-        "key": "data/raw_data",
-    },
-    "PICMUS › Resolution distortion (IQ)": {
-        "dataset": (
-            "hf://zeahub/picmus/database/experiments/resolution_distorsion/"
-            "resolution_distorsion_expe_dataset_iq"
-        ),
-        "config": "hf://zeahub/picmus/config_iq.yaml",
-        "key": "data/raw_data",
-    },
-    "zea › Cardiac 2026": {
-        "dataset": "hf://zeahub/zea-cardiac-2026",
-        "config": "hf://zeahub/zea-cardiac-2026/config.yaml",
-        "key": "data/raw_data",
-    },
-    "zea › Carotid 2023": {
-        "dataset": "hf://zeahub/zea-carotid-2023",
-        "config": "hf://zeahub/zea-carotid-2023/config.yaml",
-        "key": "data/raw_data",
-    },
-    "CAMUS › Cardiac echo": {
-        "dataset": "hf://zeahub/camus",
-        "config": "hf://zeahub/configs/config_camus.yaml",
-        "key": "data/image/values",
-    },
-}
+# The presets are maintained in app_presets.yaml (see the explanation at its top) and
+# synced to this file on the hub, so they can be updated without a zea release.
+PRESETS_PATH = "hf://zeahub/app/presets.yaml"
+_BUNDLED_PRESETS = Path(__file__).with_name("app_presets.yaml")
+_PRESETS_SCHEMA_VERSION = 1
 
 
-_OPENH_RF = "hf://nvidia/OpenH-RF"
+def _is_supported_by_zea(min_version: str | None) -> bool:
+    """Whether the installed zea is at least *min_version* (a dev install always is)."""
+    if not min_version:
+        return True
+    try:
+        return Version(zea.__version__) >= Version(str(min_version))
+    except InvalidVersion:
+        return True
 
 
-def _openh_rf(
-    subset: str,
-    file: str,
-    n_frames: int = 1,
-    data_dir: str = "data",
-    revision: str | None = None,
-) -> dict:
-    """Preset for an OpenH-RF subset: opens the subset folder with *file* pre-selected
-    and the subset's ``pipeline.yaml`` as config, optionally at a *revision*."""
-    root = f"{_OPENH_RF}/{subset}"
-    folder = f"{root}/{data_dir}" if data_dir else root
-    preset = {
-        "dataset": root,
-        "config": f"{root}/pipeline.yaml",
-        "key": "data/raw_data",
-        "file": f"{folder}/{file}",
-        "n_frames": n_frames,
-    }
-    if revision:
-        preset["revision"] = revision
-    return preset
+def _parse_presets(text: str) -> dict[str, dict]:
+    """Parse presets YAML into ``{name: preset}``, dropping presets for newer zea versions.
+
+    Raises ValueError when the file's schema is not one this zea version can read.
+    """
+    data = yaml.safe_load(text) or {}
+    schema = data.get("schema_version")
+    if schema != _PRESETS_SCHEMA_VERSION:
+        raise ValueError(
+            f"presets schema_version {schema!r} is not supported "
+            f"(expected {_PRESETS_SCHEMA_VERSION}); update zea for the latest presets."
+        )
+    presets = {}
+    for entry in data.get("presets") or []:
+        if not isinstance(entry, dict) or not entry.get("name") or not entry.get("dataset"):
+            warnings.warn(f"Skipping malformed preset: {entry!r}")
+            continue
+        preset = dict(entry)
+        name = preset.pop("name")
+        if _is_supported_by_zea(preset.pop("min_zea_version", None)):
+            presets[name] = preset
+    return presets
 
 
-# The per-subset Oslo pipelines live in an open pull request for now; drop the
-# revision once https://huggingface.co/datasets/nvidia/OpenH-RF/discussions/66 is merged.
-_OSLO_REVISION = "refs/pr/66"
+def load_presets(path: str = PRESETS_PATH, revision: str = "latest") -> dict[str, dict]:
+    """Load the example presets, falling back to the copy bundled with zea.
 
+    Args:
+        path: Local path or ``hf://`` path of a presets YAML file.
+        revision: Branch, tag or PR ref of an ``hf://`` *path*; ``"latest"`` means ``"main"``.
+    """
+    revision = "main" if revision == "latest" else revision
+    source = f"{path}@{revision}" if _is_hf(path) else path
+    try:
+        if _is_hf(path):
+            repo_id, filename = _hf_parse_path(path)
+            path = _hf_download(repo_id, filename, revision=revision, etag_timeout=5)
+        return _parse_presets(Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:  # offline, missing revision, unreadable file, ...
+        log.warning(f"Could not load presets from {source} ({exc}); using the bundled ones.")
+        return _parse_presets(_BUNDLED_PRESETS.read_text(encoding="utf-8"))
 
-def _oslo(subset: str, file: str, n_frames: int = 1) -> dict:
-    """Oslo keeps its files directly in each subset folder (no ``data/``)."""
-    return _openh_rf(f"oslo/{subset}", file, n_frames, data_dir="", revision=_OSLO_REVISION)
-
-
-# Optional preset keys: "file" pre-selects a file, "n_frames" sets the frame count for it.
-PRESETS.update(
-    {
-        "OpenH-RF › Concordia": _openh_rf("concordia", "image_0005.hdf5"),
-        "OpenH-RF › KAIST-SNUBH › Barreleye": _openh_rf("kaist-snubh-barreleye", "S01_D1.hdf5"),
-        "OpenH-RF › Technion › Bladder": _openh_rf("technion/bladder", "a1.hdf5", 10),
-        "OpenH-RF › Technion › Cardiac": _openh_rf("technion/cardiac", "c1.hdf5", 32),
-        "OpenH-RF › Technion › Phantom": _openh_rf("technion/phantom", "ph.hdf5"),
-        "OpenH-RF › TU/e › AAA": _openh_rf("tue-aaa", "AAA_subject11.hdf5"),
-        "OpenH-RF › TU/e › Carotid": _openh_rf("tue-carotid", "5_long_bifur_R_0000.hdf5"),
-        "OpenH-RF › Vanderbilt": _openh_rf(
-            "vanderbilt", "Fundamental/118420_1_Focused_Uncoded_TX.hdf5", 10
-        ),
-        # Oslo: the example acquisition from each sub-dataset's README; its pipeline.yaml
-        # is tuned for that file, so other files in the subset may need another one.
-        "OpenH-RF › Oslo › Cardiac": _oslo(
-            "A_cardiac", "Verasonics_P2-4_parasternal_long_subject_1.hdf5"
-        ),
-        "OpenH-RF › Oslo › Carotid": _oslo("B_carotid", "L7_FI_carotid_cross_1.hdf5"),
-        "OpenH-RF › Oslo › Verasonics phantom": _oslo(
-            "C_verasonics_phantom", "FI_P4_cysts_center.hdf5"
-        ),
-        "OpenH-RF › Oslo › Alpinion phantom": _oslo(
-            "D_alpinion_phantom", "Alpinion_L3-8_CPWC_hypoechoic.hdf5"
-        ),
-        "OpenH-RF › Oslo › Simulation": _oslo("E_simulation", "PICMUS_numerical_calib_v2.hdf5"),
-        "OpenH-RF › Oslo › Motion": _oslo("F_motion", "SWE_L7_type_III.hdf5", 20),
-    }
-)
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -1356,8 +1324,14 @@ def _config_badge_html(config: str, revision: str | None, applied: str, dirty: b
     return f'<div class="zea-config-badge">{text}</div>'
 
 
-def build_interface() -> "gr.Blocks":
-    """Build and return the Gradio Blocks interface."""
+def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
+    """Build and return the Gradio Blocks interface.
+
+    Args:
+        presets: ``{name: preset}`` for the preset dropdown; defaults to :func:`load_presets`.
+    """
+    if presets is None:
+        presets = load_presets()
 
     logo = _logo_html(height=54)
 
@@ -1403,7 +1377,7 @@ def build_interface() -> "gr.Blocks":
                     with gr.Tab("① Data", id="data"):
                         preset_selector = gr.Dropdown(
                             label="Example presets (optional)",
-                            choices=list(PRESETS.keys()),
+                            choices=list(presets),
                             value=None,
                             interactive=True,
                             info="Fills in the fields below. Skip it if you know your paths.",
@@ -1821,9 +1795,9 @@ def build_interface() -> "gr.Blocks":
 
         # Preset → fill all fields + reset sync state (no file auto-load)
         def _apply_preset(name):
-            if name not in PRESETS:
+            if name not in presets:
                 return (gr.update(),) * 15
-            p = PRESETS[name]
+            p = presets[name]
             ds = p.get("dataset", "")
             cfg = p.get("config", "")
             key = p.get("key", "data/raw_data")
