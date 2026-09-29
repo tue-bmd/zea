@@ -8,6 +8,8 @@ import keras
 import numpy as np
 import pytest
 
+import zea
+from zea.ops import Pipeline, Simulate
 from zea.simulator import pressure_field, simulate_rf
 
 from . import simulator_helpers
@@ -254,6 +256,49 @@ def test_pressure_field_follows_the_map():
     stronger = to_np(pressure_field(grid, **transmit, n_ax=N_AX, **tensors(_map(2.0))))
     ratio = stronger / reference
     assert (ratio < 1).all() and (np.diff(ratio, axis=-1) < 0).all()
+
+
+def test_simulate_op_and_parameters_take_the_map():
+    kwargs = case(linear_probe())
+    duo = _layered_map(COEF, 1.5, 0.015)
+    reference = simulate_rf(**tensors({**kwargs, **duo}))
+    assert rel_err(simulate_rf(**tensors(kwargs)), reference) > 0.1
+    op = Simulate(jit_compile=True, with_batch_dim=False)
+    assert_close(reference, op(**tensors({**kwargs, **duo}))[op.output_key])
+    with pytest.raises(ValueError, match="attenuation_map is only supported"):
+        Simulate(jit_compile=False, with_batch_dim=False)(
+            **tensors({**kwargs, **duo}), method="time_domain"
+        )
+
+    parameters = zea.Parameters(
+        n_tx=2,
+        n_el=16,
+        n_ax=N_AX,
+        center_frequency=CENTER_FREQUENCY,
+        sampling_frequency=SAMPLING_FREQUENCY,
+        probe_geometry=kwargs["probe_geometry"],
+        t0_delays=kwargs["t0_delays"],
+        initial_times=kwargs["initial_times"],
+        t_peak=kwargs["t_peak"],
+        tx_apodizations=kwargs["tx_apodizations"],
+        sound_speed=SOUND_SPEED,
+        selected_transmits="all",
+        apply_lens_correction=False,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        element_width=0.27e-3,
+        attenuation_coef=COEF,
+        **duo,
+    )
+    pipeline = Pipeline([Simulate()], with_batch_dim=False, jit_options="pipeline")
+    inputs = pipeline.prepare_parameters(parameters)
+    outputs = pipeline(
+        **inputs,
+        scatterer_positions=kwargs["scatterer_positions"],
+        scatterer_magnitudes=kwargs["scatterer_magnitudes"],
+        scatter_exponent=kwargs["scatter_exponent"],
+    )
+    assert_close(reference, outputs["data"])
 
 
 @pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax gradients")

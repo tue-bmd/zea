@@ -34,7 +34,7 @@ from zea.internal.core import (
     python_constant,
 )
 from zea.internal.registry import ops_registry
-from zea.internal.utils import deprecated
+from zea.internal.utils import deprecated, renamed_keywords
 from zea.ops.base import Filter, Operation
 from zea.simulator import fft_length, scatter_exponent_bounds, simulate_rf, simulate_rf_td
 from zea.utils import canonicalize_axis
@@ -407,6 +407,7 @@ class TOFCorrection(Operation):
             **kwargs,
         )
 
+    @renamed_keywords(sos_grid_x="map_grid_x", sos_grid_z="map_grid_z")
     def call(
         self,
         flatgrid,
@@ -426,8 +427,8 @@ class TOFCorrection(Operation):
         lens_thickness=None,
         lens_sound_speed=None,
         sos_map=None,
-        sos_grid_x=None,
-        sos_grid_z=None,
+        map_grid_x=None,
+        map_grid_z=None,
         focal_region_length=None,
         **kwargs,
     ):
@@ -451,9 +452,11 @@ class TOFCorrection(Operation):
             apply_lens_correction (bool): Whether to apply lens correction
             lens_thickness (float): Lens thickness
             lens_sound_speed (float): Sound speed in the lens
-            sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s.
-            sos_grid_x (Tensor): x-coordinates of ``sos_map`` rows.
-            sos_grid_z (Tensor): z-coordinates of ``sos_map`` columns.
+            sos_map (Tensor): Speed-of-sound map of shape ``(Nz, Nx)`` in m/s. 2D only;
+                TODO: 3D maps (``map_grid_y``) as in :func:`zea.simulator.simulate_rf`,
+                by delegating to :func:`zea.func.ultrasound.straight_ray_slowness`.
+            map_grid_x (Tensor): x-coordinates of the ``sos_map`` columns.
+            map_grid_z (Tensor): z-coordinates of the ``sos_map`` rows.
             focal_region_length (float): Full length in meters of the region
                 around the focal plane of focused transmits where first- and
                 last-arrival delays are linearly blended. This smooths the
@@ -484,8 +487,8 @@ class TOFCorrection(Operation):
             "lens_thickness": lens_thickness,
             "lens_sound_speed": lens_sound_speed,
             "sos_map": sos_map,
-            "sos_grid_x": sos_grid_x,
-            "sos_grid_z": sos_grid_z,
+            "map_grid_x": map_grid_x,
+            "map_grid_z": map_grid_z,
             "focal_region_length": focal_region_length,
         }
 

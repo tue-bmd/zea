@@ -10,6 +10,7 @@ import keras
 import numpy as np
 import pytest
 
+import zea
 from zea.ops import Pipeline, Simulate
 from zea.simulator import fft_length, in_record, pressure_field, record_reach, simulate_rf
 
@@ -312,6 +313,87 @@ def test_short_explicit_fft_length_warns_with_a_map(caplog):
     with caplog.at_level(logging.WARNING, logger="zea"):
         simulate_rf(**tensors({**kwargs, "n_fft": N_AX}))
     assert any("wrapping" in record.getMessage() for record in caplog.records)
+
+
+def test_parameters_derive_n_fft_from_the_map():
+    kwargs, _, trio = _slab_scene(n_el=16)
+    parameters = zea.Parameters(
+        n_tx=1,
+        n_el=16,
+        n_ax=N_AX,
+        center_frequency=CENTER_FREQUENCY,
+        sampling_frequency=SAMPLING_FREQUENCY,
+        probe_geometry=kwargs["probe_geometry"],
+        t0_delays=kwargs["t0_delays"],
+        initial_times=kwargs["initial_times"],
+        t_peak=kwargs["t_peak"],
+        tx_apodizations=kwargs["tx_apodizations"],
+        sound_speed=SOUND_SPEED,
+        selected_transmits="all",
+        apply_lens_correction=False,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        element_width=0.27e-3,
+        attenuation_coef=0.0,
+        **trio,
+    )
+    common = (N_AX, SAMPLING_FREQUENCY, CENTER_FREQUENCY, SOUND_SPEED, kwargs["probe_geometry"])
+    delays = (kwargs["t0_delays"], kwargs["initial_times"], kwargs["t_peak"])
+    expected = fft_length(*common, *delays, sos_map=trio["sos_map"])
+    assert parameters.n_fft == expected
+    assert expected > fft_length(*common, *delays)
+    parameters.sos_map = None
+    parameters.map_grid_x = None
+    parameters.map_grid_z = None
+    assert parameters.n_fft == fft_length(*common, *delays)
+    parameters.sos_map = trio["sos_map"]
+    parameters.map_grid_x = trio["map_grid_x"]
+    parameters.map_grid_z = trio["map_grid_z"]
+
+    pipeline = Pipeline([Simulate()], with_batch_dim=False, jit_options="pipeline")
+    inputs = pipeline.prepare_parameters(parameters)
+    assert inputs["n_fft"] == expected
+    outputs = pipeline(
+        **inputs,
+        scatterer_positions=kwargs["scatterer_positions"],
+        scatterer_magnitudes=kwargs["scatterer_magnitudes"],
+        scatter_exponent=0.0,
+    )
+    assert_close(simulate_rf(**tensors(kwargs)), outputs["data"])
+
+
+def test_parameters_accept_the_old_grid_names():
+    _, _, trio = _slab_scene(n_el=16)
+    old = {"sos_grid_x": trio["map_grid_x"], "sos_grid_z": trio["map_grid_z"]}
+    parameters = zea.Parameters(sos_map=trio["sos_map"], **old)
+    assert np.array_equal(parameters.map_grid_x, trio["map_grid_x"])
+    parameters.update(sos_grid_z=trio["map_grid_z"] + 1e-3)
+    assert np.array_equal(parameters.map_grid_z, trio["map_grid_z"] + 1e-3)
+    parameters.sos_grid_x = None
+    assert parameters.map_grid_x is None
+    assert not hasattr(parameters, "sos_grid_x")
+
+
+def test_parameters_warn_when_an_old_and_a_new_grid_name_are_both_given(caplog):
+    """The value under the new name is used whatever the order, and a warning says so."""
+    import logging
+
+    _, _, trio = _slab_scene(n_el=16)
+    new, old = trio["map_grid_x"], trio["map_grid_x"] + 1e-3
+    for order in ({"sos_grid_x": old, "map_grid_x": new}, {"map_grid_x": new, "sos_grid_x": old}):
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="zea"):
+            parameters = zea.Parameters(sos_map=trio["sos_map"], **order)
+        assert np.array_equal(parameters.map_grid_x, new)
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "Both sos_grid_x and map_grid_x" in m and "map_grid_x is used" in m for m in messages
+        )
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="zea"):
+        parameters.update(sos_grid_x=old, map_grid_x=new + 1e-3)
+    assert np.array_equal(parameters.map_grid_x, new + 1e-3)
+    assert any("Both sos_grid_x and map_grid_x" in r.getMessage() for r in caplog.records)
 
 
 def test_record_helpers_gate_through_the_map():
