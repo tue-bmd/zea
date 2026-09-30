@@ -44,6 +44,7 @@ def test_zea_app_main_calls_build_interface(monkeypatch):
 
     assert launched.get("share") is False
     assert launched.get("server_port") is None
+    assert launched.get("inbrowser") is True
     # Dark mode only: the JS that pins Gradio's dark class must reach launch().
     from zea.data.app import JS
 
@@ -52,7 +53,9 @@ def test_zea_app_main_calls_build_interface(monkeypatch):
 
 def test_zea_app_passes_share_flag(monkeypatch):
     """--share and --server-port flags are forwarded to demo.launch()."""
-    monkeypatch.setattr("sys.argv", ["zea", "app", "--share", "--server-port", "7861"])
+    monkeypatch.setattr(
+        "sys.argv", ["zea", "app", "--share", "--server-port", "7861", "--no-inbrowser"]
+    )
 
     launched = {}
 
@@ -68,6 +71,7 @@ def test_zea_app_passes_share_flag(monkeypatch):
 
     assert launched.get("share") is True
     assert launched.get("server_port") == 7861
+    assert launched.get("inbrowser") is False
 
 
 # ── Helper-function unit tests ────────────────────────────────────────────────
@@ -494,7 +498,7 @@ def test_dataset_check_html():
     from zea.data.app import _dataset_check_html
 
     assert _dataset_check_html("", 0, []) == ""
-    assert "3 files" in _dataset_check_html("/data", 3, [])
+    assert "3 zea files" in _dataset_check_html("/data", 3, [])
     assert "No HDF5 files" in _dataset_check_html("/data", 0, [])
     out = _dataset_check_html("/data", 0, [FileNotFoundError("Path not found: /data")])
     assert "Cannot open dataset" in out and "Path not found" in out
@@ -528,3 +532,27 @@ def test_frame_range_updates_are_plain_props():
     update = postprocess_update_dict(picker, gr.update(value=[1, 1, 9], interactive=False), True)
     assert not any(callable(v) for v in update.values())
     assert update["value"] == [1, 1, 9]
+
+
+def test_dataset_files_skips_invalid_files(tmp_path):
+    """One non-zea HDF5 file must not make the whole dataset unusable."""
+    import h5py
+
+    from zea.data.app import _dataset_check_html, _dataset_files, _list_dataset_files
+
+    generate_example_dataset(tmp_path / "b_valid.hdf5", n_frames=2, grid_size_z=8, grid_size_x=8)
+    with h5py.File(tmp_path / "a_other.hdf5", "w") as f:
+        f.create_dataset("x", data=[1, 2, 3])
+    valid, invalid = _dataset_files(str(tmp_path))
+    assert valid == [str(tmp_path / "b_valid.hdf5")]
+    assert list(invalid) == [str(tmp_path / "a_other.hdf5")]
+
+    skipped = {}
+    names, paths = _list_dataset_files(str(tmp_path), _invalid=skipped)
+    assert names == ["b_valid.hdf5"] and skipped == invalid
+    out = _dataset_check_html(str(tmp_path), len(paths), [], skipped)
+    assert "Skipped 1 file" in out and "a_other.hdf5" in out
+
+    (tmp_path / "b_valid.hdf5").unlink()
+    with pytest.raises(ValueError, match="No valid zea files"):
+        _dataset_files(str(tmp_path))

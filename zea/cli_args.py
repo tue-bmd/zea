@@ -59,6 +59,13 @@ class AppArgs:
             "release snapshot such as 'v0.1.8', or e.g. 'refs/pr/1' to preview a change."
         ),
     ] = "latest"
+    inbrowser: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Open the app in the default browser once it is running. Use --no-inbrowser "
+            "on a machine without a browser, or to open the link yourself."
+        ),
+    ] = True
 
     def run(self) -> None:
         """Launch the Gradio dataset visualizer."""
@@ -75,6 +82,7 @@ class AppArgs:
         build_interface(presets).launch(
             share=self.share,
             server_port=self.server_port,
+            inbrowser=self.inbrowser,
             theme=build_theme(),
             css=CSS,
             js=JS,

@@ -33,7 +33,13 @@ from zea.cli_args import AppArgs
 from zea.config import Config
 from zea.data.dataloader import Dataloader
 from zea.data.chunk_cache import network_bytes
-from zea.data.datasets import FILE_TYPES, Dataset
+from zea.data.datasets import (
+    FILE_TYPES,
+    Dataset,
+    _file_hash,
+    _validate_h5_files,
+    _validator_hash,
+)
 from zea.data.file import File
 from zea.data.process import (
     _axis_selections_from_params,
@@ -688,8 +694,13 @@ def _config_check_html(path: str, revision: str | None = None) -> str:
     return _html_fail(f"Config file not found{where}", hint)
 
 
-def _dataset_check_html(path: str, n_files: int, errors: list[Exception]) -> str:
-    """Inline status for the dataset path on the Data tab; '' when no path is set."""
+def _dataset_check_html(
+    path: str, n_files: int, errors: list[Exception], invalid: dict | None = None
+) -> str:
+    """Inline status for the dataset path on the Data tab; '' when no path is set.
+
+    *invalid* lists the skipped files that are not valid zea files, as ``{path: reason}``.
+    """
     if not _normalize_path(path):
         return ""
     if errors:
@@ -699,7 +710,15 @@ def _dataset_check_html(path: str, n_files: int, errors: list[Exception]) -> str
         return _html_fail("Cannot open dataset", detail)
     if not n_files:
         return _html_warn("No HDF5 files found at this path.")
-    return _html_pass(f"Dataset found · {n_files:,} file{'s' if n_files != 1 else ''}")
+    out = _html_pass(f"Dataset found · {n_files:,} zea file{'s' if n_files != 1 else ''}")
+    if invalid:
+        names = [Path(fp).name for fp in invalid]
+        listed = ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else "")
+        n = len(invalid)
+        out += _html_warn(f"Skipped {n} file{'s' if n != 1 else ''} that are not valid zea files")
+        out += f'<p style="margin:0 0 2px 1.5em;font-size:0.85em;color:{_MUTED}">'
+        out += f"{html.escape(listed)}</p>"
+    return out
 
 
 def _enrich_error(exc: Exception) -> str:
@@ -815,12 +834,37 @@ def _fetch_hf_revisions(path: str) -> list[str]:
         return ["main"]
 
 
+def _dataset_files(path: str, revision: str | None = None) -> tuple[list[str], dict[str, str]]:
+    """Sorted zea files of a dataset, and ``{path: reason}`` for the files it skipped.
+
+    A local file that is not a valid zea file is skipped instead of failing the whole
+    dataset. ``hf://`` files are not opened here (they are checked when first read).
+    Listing and running both use this, so a file index means the same file in both.
+    """
+    ds = Dataset(path, lazy=True, revision=revision, validate=False, _suggest_lazy=False)
+    try:
+        file_paths = sorted(ds.file_paths)
+    finally:
+        ds.close()
+    local = [fp for fp in file_paths if not _is_hf(fp)]
+    invalid = _validate_h5_files(local, _file_hash(local), _validator_hash()) if local else {}
+    valid = [fp for fp in file_paths if fp not in invalid]
+    if invalid and not valid:
+        first, reason = next(iter(invalid.items()))
+        raise ValueError(
+            f"No valid zea files: {len(invalid)} file(s) are not valid zea files, "
+            f"e.g. {Path(first).name}: {reason}"
+        )
+    return valid, invalid
+
+
 def _list_dataset_files(
     path: str,
     revision: str | None = None,
     _errors: list | None = None,
+    _invalid: dict | None = None,
 ) -> tuple[list[str], list[str]]:
-    """List HDF5 files in a dataset without downloading any data.
+    """List the zea files in a dataset without downloading any data.
 
     Uses Dataset with lazy=True so HF files are listed via the API but not
     downloaded. For local paths it scans the directory tree.
@@ -828,6 +872,8 @@ def _list_dataset_files(
 
     If *_errors* is provided (a list), any exception encountered is appended to
     it instead of being silently dropped, so callers can surface the problem.
+    If *_invalid* is provided (a dict), it is filled with the skipped files that are
+    not valid zea files, as ``{path: reason}``.
     """
     path = _normalize_path(path)
     if not path:
@@ -837,9 +883,9 @@ def _list_dataset_files(
             raise FileNotFoundError(
                 f"Path not found: {path}. Use a local path or hf://owner/repo[/subdir]."
             )
-        ds = Dataset(path, lazy=True, revision=revision, _suggest_lazy=False)
-        file_paths = sorted(ds.file_paths)
-        ds.close()
+        file_paths, invalid = _dataset_files(path, revision)
+        if _invalid is not None:
+            _invalid.update(invalid)
         return _display_names(path, file_paths), file_paths
     except Exception as exc:
         if _errors is not None:
@@ -1320,10 +1366,8 @@ def run_checks(
     _src = "from HF" if _is_hf(dataset_path) else "from disk"
     yield _emit(_html_info(f"Opening dataset {_src}…"))
     try:
-        ds = Dataset(
-            dataset_path, lazy=True, revision=dataset_revision or None, _suggest_lazy=False
-        )
-        num_files = len(ds)
+        file_paths, _ = _dataset_files(dataset_path, dataset_revision or None)
+        num_files = len(file_paths)
         if not num_files:
             yield _replace_last(_html_fail("Open dataset", "No HDF5 files found."))
             return
@@ -1335,8 +1379,7 @@ def run_checks(
                 )
             )
             return
-        file_path = ds.file_paths[file_index]
-        ds.close()
+        file_path = file_paths[file_index]
     except Exception as exc:
         yield _replace_last(_html_fail("Open dataset", exc))
         return
@@ -1708,8 +1751,12 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                             choices=list(presets),
                             value=None,
                             interactive=True,
+                            # Keep typed text that matches no preset, so it can be flagged
+                            # below instead of silently disappearing.
+                            allow_custom_value=True,
                             info="Fills in the fields below. Skip it if you know your paths.",
                         )
+                        preset_check = gr.HTML("", elem_classes=["zea-path-check"])
                         gr.HTML('<div class="zea-divider">or enter your own paths</div>')
 
                         with gr.Row():
@@ -1886,7 +1933,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                     "",  # dataset_looked_up_state
                 )
             errors: list[Exception] = []
-            names, paths = _list_dataset_files(path, _errors=errors)
+            invalid: dict[str, str] = {}
+            names, paths = _list_dataset_files(path, _errors=errors, _invalid=invalid)
             auto_val = paths[0] if len(paths) == 1 else None
             file_update = gr.update(
                 choices=list(zip(names, paths)), value=auto_val, interactive=bool(paths)
@@ -1894,7 +1942,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             _reset_key = gr.update(choices=_DATA_KEYS, value=None, interactive=False)
 
             # Problems show under the dataset path, and in the File tab's card.
-            dataset_html = _dataset_check_html(path, len(paths), errors)
+            dataset_html = _dataset_check_html(path, len(paths), errors, invalid)
             meta_html = "" if paths else dataset_html
 
             # Auto-fill the config only when the user has not typed their own.
@@ -2029,13 +2077,14 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 return
 
             errors: list[Exception] = []
-            names, fpaths = _list_dataset_files(path, rev or None, _errors=errors)
+            invalid: dict[str, str] = {}
+            names, fpaths = _list_dataset_files(path, rev or None, _errors=errors, _invalid=invalid)
             new_val = current_file if (current_file and current_file in fpaths) else None
             file_upd = gr.update(
                 choices=list(zip(names, fpaths)), value=new_val, interactive=bool(fpaths)
             )
 
-            dataset_html = _dataset_check_html(path, len(fpaths), errors)
+            dataset_html = _dataset_check_html(path, len(fpaths), errors, invalid)
             if not new_val:
                 meta_html = "" if fpaths else dataset_html
                 yield (
@@ -2117,7 +2166,12 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
         # Preset → fill all fields + reset sync state (no file auto-load)
         def _apply_preset(name):
             if name not in presets:
-                return (gr.update(),) * 17
+                check = (
+                    _html_fail(f'No example preset named "{name}"', "Pick one from the list.")
+                    if name
+                    else ""
+                )
+                return (*(gr.update(),) * 17, check)
             p = presets[name]
             ds = p.get("dataset", "")
             cfg = p.get("config", "")
@@ -2133,7 +2187,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 cfg_revs = cfg_revs if rev in cfg_revs else [*cfg_revs, rev]
                 ds_def = cfg_def = rev
             errors: list[Exception] = []
-            names, paths = _list_dataset_files(ds, ds_def, _errors=errors)
+            invalid: dict[str, str] = {}
+            names, paths = _list_dataset_files(ds, ds_def, _errors=errors, _invalid=invalid)
             # Pre-select the preset's file (this triggers the file load); otherwise let
             # the user pick, or auto-pick when there is only one.
             file_val = p.get("file") if p.get("file") in paths else None
@@ -2163,12 +2218,17 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 gr.update(interactive=False),  # run_btn — re-enabled after file is picked
                 cfg,  # config_auto_state — preset config may be replaced by discovery
                 frames,  # preset_frames_state
-                _dataset_check_html(ds, len(paths), errors),  # dataset_check
+                _dataset_check_html(ds, len(paths), errors, invalid),  # dataset_check
                 _normalize_path(ds),  # dataset_looked_up_state
+                "",  # preset_check
             )
 
         _bind_gradio_event(
-            preset_selector, "change", _busy_example, [preset_selector], [data_status]
+            preset_selector,
+            "change",
+            lambda name: _busy_example(name) if name in presets else "",
+            [preset_selector],
+            [data_status],
         ).then(
             _apply_preset,
             [preset_selector],
@@ -2190,6 +2250,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 preset_frames_state,
                 dataset_check,
                 dataset_looked_up_state,
+                preset_check,
             ],
             show_progress="hidden",
         ).then(_config_check_html, [config_input, config_rev_input], [config_check]).then(
