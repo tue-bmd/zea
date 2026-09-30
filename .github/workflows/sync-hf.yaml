@@ -26,6 +26,10 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Hugging Face writes use HF_TOKEN; the GitHub token only needs to read the repo.
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -34,6 +38,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7

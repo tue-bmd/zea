@@ -18,6 +18,7 @@ import threading
 import warnings
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import h5py
 import numpy as np
@@ -293,8 +294,6 @@ def _normalize_path(path: str | None) -> str:
 
 def _hf_web_url(path: str, revision: str | None = None) -> str | None:
     """Browser URL on huggingface.co for an ``hf://`` dataset path at *revision*."""
-    from urllib.parse import quote
-
     path = _normalize_path(path)
     if not _is_hf(path):
         return None
@@ -811,7 +810,7 @@ def _build_meta_card_html(info: dict) -> str:
 
 
 def _file_load_updates(fpath: str, revision: str | None, key: str, n_frames: int = 1) -> tuple:
-    """Download (if HF) and read a file; return the 7 gr.update() values for file-select outputs.
+    """Download (if HF) and read a file; return the 8 values for the file-select outputs.
 
     Returns: (start_frame_upd, n_frames_upd, meta_html, track_upd, track_labels,
                run_btn_upd, key_input_upd, frame_state)
@@ -2137,8 +2136,6 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
         def _apply_editor(text):
             text = text or ""
             try:
-                import yaml
-
                 parsed = yaml.safe_load(text)
                 if not isinstance(parsed, dict):
                     raise ValueError("expected a YAML mapping")
