@@ -464,3 +464,67 @@ def test_find_config_hf_walks_up_to_repo_root():
         assert _find_config("hf://o/r/other") == "hf://o/r/other/config.yaml"
     with patch("zea.data.app._hf_list_files", return_value=["data/a.hdf5"]):
         assert _find_config("hf://o/r") is None
+
+
+def test_config_check_html_local(tmp_path):
+    from zea.data.app import _config_check_html
+
+    assert _config_check_html("") == ""
+    assert "must point to a .yaml" in _config_check_html(str(tmp_path / "config.txt"))
+    missing = _config_check_html(str(tmp_path / "config.yaml"))
+    assert "not found" in missing and "Did you mean" not in missing
+    (tmp_path / "pipeline.yaml").write_text("pipeline: []")
+    assert "Did you mean" in _config_check_html(str(tmp_path / "config.yaml"))
+    assert "Config found" in _config_check_html(str(tmp_path / "pipeline.yaml"))
+
+
+def test_config_check_html_hf_suggests_existing_config():
+    from zea.data.app import _config_check_html
+
+    files = ["sub.v2/pipeline.yaml", "sub.v2/a.hdf5"]
+    with patch("zea.data.app._hf_list_files", return_value=files) as listing:
+        out = _config_check_html("hf://o/r/sub.v2/config.yaml", "refs/pr/1")
+        assert "not found at revision refs/pr/1" in out
+        assert "hf://o/r/sub.v2/pipeline.yaml" in out
+        assert listing.call_args.kwargs == {"revision": "refs/pr/1"}
+        assert "Config found" in _config_check_html("hf://o/r/sub.v2/pipeline.yaml")
+
+
+def test_dataset_check_html():
+    from zea.data.app import _dataset_check_html
+
+    assert _dataset_check_html("", 0, []) == ""
+    assert "3 files" in _dataset_check_html("/data", 3, [])
+    assert "No HDF5 files" in _dataset_check_html("/data", 0, [])
+    out = _dataset_check_html("/data", 0, [FileNotFoundError("Path not found: /data")])
+    assert "Cannot open dataset" in out and "Path not found" in out
+
+
+# ── Frame picker ──────────────────────────────────────────────────────────────
+
+
+def test_frame_sliders_bounds_clip_to_file():
+    from zea.data.app import _DEFAULT_CLIP_FRAMES, _frame_sliders
+
+    single, clip = _frame_sliders(2000)
+    assert single["value"] == [0, 0, 1999]
+    assert clip["value"] == [0, _DEFAULT_CLIP_FRAMES - 1, 1999]
+    assert _frame_sliders(2000, n_frames=20)[1]["value"] == [0, 19, 1999]
+    assert _frame_sliders(10, n_frames=20)[1]["value"] == [0, 9, 9]  # capped by the file
+    single, clip = _frame_sliders(1)
+    assert single["interactive"] is False and clip["value"] == [0, 0, 0]
+
+
+def test_frame_range_updates_are_plain_props():
+    """Prop names quoted in js_on_load would turn into event triggers in gr.update()."""
+    import gradio as gr
+    from gradio.blocks import postprocess_update_dict
+
+    from zea.data.app import frame_picker
+
+    with gr.Blocks():
+        picker = frame_picker(single=True)
+    assert "const SINGLE = true;" in picker.js_on_load
+    update = postprocess_update_dict(picker, gr.update(value=[1, 1, 9], interactive=False), True)
+    assert not any(callable(v) for v in update.values())
+    assert update["value"] == [1, 1, 9]

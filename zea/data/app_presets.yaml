@@ -40,7 +40,7 @@ presets:
   key: data/raw_data
 - name: zea › Carotid 2023
   dataset: hf://zeahub/zea-carotid-2023
-  config: hf://zeahub/zea-carotid-2023/config.yaml
+  config: hf://zeahub/zea-carotid-2023/pipeline.yaml
   key: data/raw_data
 - name: CAMUS › Cardiac echo
   dataset: hf://zeahub/camus

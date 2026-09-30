@@ -212,10 +212,6 @@ footer { display: none !important; }
 .run-btn:hover { background: #e6b800 !important; border-color: #e6b800 !important; }
 .run-btn:disabled { background: #5a4a00 !important; border-color: #5a4a00 !important;
   color: #888 !important; opacity: 0.5 !important; }
-.frame-slider input[type=number] {
-  pointer-events: none !important; background: transparent !important;
-  border: none !important; box-shadow: none !important; cursor: default !important; }
-.frame-slider button { display: none !important; }
 .zea-frames-info { color: #9ca3af; font-size: 0.85em; margin: 6px 0 0; }
 .zea-divider { display: flex; align-items: center; gap: 8px; color: #9ca3af;
   font-size: 0.8em; margin: 2px 0; }
@@ -230,6 +226,8 @@ footer { display: none !important; }
 .zea-links { font-size: 0.8em; color: #9ca3af; margin: -2px 0 4px; }
 .zea-links a { color: inherit; text-decoration: none; border-bottom: 1px dotted #9ca3af; }
 .zea-links a:hover { color: #f5c518; border-bottom-color: #f5c518; }
+.zea-path-check { font-size: 0.9em; margin: -4px 0 0 2px; }
+.zea-path-check .zea-path-check { font-size: inherit; margin: 0; }
 .zea-path input, .zea-path textarea { font-family: var(--font-mono) !important;
   font-size: 0.9em !important; }
 @keyframes zea-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
@@ -258,6 +256,276 @@ _SCROLL_JS = """
     });
 }
 """
+
+# ── Clip range picker ─────────────────────────────────────────────────────────
+
+# Default clip length when a file is loaded (a preset's n_frames overrides it).
+_DEFAULT_CLIP_FRAMES = 15
+
+_FRAME_RANGE_HTML = """
+<div class="zfr">
+  <div class="zfr-head">
+    <label><span class="zfr-start-label">Start</span>
+      <input class="zfr-start" type="number" min="0" step="1"></label>
+    <label class="zfr-end-label">End <input class="zfr-end" type="number" min="0" step="1"></label>
+    <span class="zfr-count"></span>
+  </div>
+  <div class="zfr-track">
+    <div class="zfr-rail"></div>
+    <div class="zfr-band"></div>
+    <div class="zfr-thumb zfr-lo" tabindex="0" role="slider" aria-label="Start frame"></div>
+    <div class="zfr-thumb zfr-hi" tabindex="0" role="slider" aria-label="End frame"></div>
+  </div>
+  <div class="zfr-scale"><span class="zfr-v0"></span><span class="zfr-v1"></span></div>
+  <div class="zfr-overview-wrap">
+    <div class="zfr-overview"><div class="zfr-ov-view"></div><div class="zfr-ov-sel"></div></div>
+    <div class="zfr-scale"><span>0</span><span class="zfr-ov-hint"></span>
+      <span class="zfr-last"></span></div>
+  </div>
+</div>
+"""
+
+_FRAME_RANGE_CSS = """
+.zfr { font-size: 0.9em; color: #e5e7eb; padding: 2px 0 4px; user-select: none; }
+.zfr-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.zfr-head label { color: #9ca3af; display: flex; align-items: center; gap: 6px; }
+.zfr-head input { width: 7.5em; padding: 3px 6px; border-radius: 4px; color: #e5e7eb;
+  background: #292524; border: 1px solid #44403c; font: inherit;
+  font-variant-numeric: tabular-nums; }
+.zfr-head input:focus { outline: none; border-color: #f5c518; }
+.zfr-count { margin-left: auto; color: #9ca3af; }
+.zfr-count b { color: #f5c518; font-weight: 600; }
+.zfr-track { position: relative; height: 26px; margin: 8px 9px 0; cursor: pointer;
+  touch-action: none; }
+.zfr-rail, .zfr-band { position: absolute; top: 11px; height: 4px; border-radius: 2px; }
+.zfr-rail { left: 0; right: 0; background: #44403c; }
+.zfr-band { background: #f5c518; cursor: grab; min-width: 2px; }
+.zfr-thumb { position: absolute; top: 4px; width: 18px; height: 18px; margin-left: -9px;
+  border-radius: 50%; background: #f5c518; border: 2px solid #1c1917; cursor: ew-resize; }
+.zfr-thumb:focus-visible { outline: 2px solid #fde68a; outline-offset: 1px; }
+.zfr-scale { display: flex; justify-content: space-between; color: #6b7280;
+  font-size: 0.8em; margin: 0 9px; font-variant-numeric: tabular-nums; }
+.zfr-overview { position: relative; height: 8px; margin: 10px 9px 2px; border-radius: 2px;
+  background: #292524; cursor: pointer; touch-action: none; }
+.zfr-ov-view { position: absolute; top: 0; bottom: 0; background: #44403c; border-radius: 2px; }
+.zfr-ov-sel { position: absolute; top: 0; bottom: 0; background: #f5c518; min-width: 2px; }
+.zfr-disabled { opacity: 0.5; pointer-events: none; }
+.zfr-single .zfr-hi, .zfr-single .zfr-band, .zfr-single .zfr-end-label { display: none; }
+"""
+
+# The detail track spans the whole file only up to _WINDOW frames. Longer files get a
+# zoomed track around the clip (about one frame per pixel) plus a whole-file overview,
+# so dragging a handle never selects thousands of frames at once.
+_FRAME_RANGE_JS = """
+const WINDOW = 500;
+const q = (sel) => element.querySelector(sel);
+const root = q('.zfr'), track = q('.zfr-track'), overview = q('.zfr-overview');
+const startIn = q('.zfr-start'), endIn = q('.zfr-end');
+let s = 0, e = 0, lastFrame = 0, v0 = 0, W = 1, drag = null;
+
+const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+const last = () => lastFrame;
+const locked = () => props.interactive === false;
+const single = () => SINGLE;
+
+// Choose the frames the detail track shows. recenter: always centre on the clip;
+// otherwise only move when the clip left the view, touches an edge, or outgrew it.
+function fit(recenter) {
+  const n = last() + 1, len = e - s + 1;
+  const wanted = Math.min(n, Math.max(WINDOW, Math.ceil(len * 1.5)));
+  const atEdge = (s <= v0 && v0 > 0) || (e >= v0 + W - 1 && v0 + W < n);
+  if (recenter || W > n || len > 0.9 * W || s < v0 || e > v0 + W - 1 || atEdge) {
+    W = recenter || len > 0.9 * W || W > n ? wanted : W;
+    v0 = clamp(Math.round((s + e) / 2 - W / 2), 0, n - W);
+  }
+}
+
+const pct = (f) => (W <= 1 ? 0 : ((f - v0) / (W - 1)) * 100);
+
+function draw() {
+  const n = last() + 1, k = e - s + 1;
+  q('.zfr-lo').style.left = pct(s) + '%';
+  q('.zfr-hi').style.left = pct(e) + '%';
+  q('.zfr-band').style.left = pct(s) + '%';
+  q('.zfr-band').style.width = pct(e) - pct(s) + '%';
+  q('.zfr-lo').setAttribute('aria-valuenow', s);
+  q('.zfr-hi').setAttribute('aria-valuenow', e);
+  startIn.max = endIn.max = n - 1;
+  if (document.activeElement !== startIn) startIn.value = s;
+  if (document.activeElement !== endIn) endIn.value = e;
+  q('.zfr-count').innerHTML = '<b>' + k.toLocaleString() + '</b> frame' + (k === 1 ? '' : 's')
+    + ' to process' + (k > 300 ? ' · long clip, may take a while' : '');
+  q('.zfr-v0').textContent = v0.toLocaleString();
+  q('.zfr-v1').textContent = (v0 + W - 1).toLocaleString();
+  q('.zfr-last').textContent = (n - 1).toLocaleString();
+  q('.zfr-overview-wrap').style.display = n > WINDOW ? '' : 'none';
+  q('.zfr-ov-view').style.left = (v0 / n) * 100 + '%';
+  q('.zfr-ov-view').style.width = (W / n) * 100 + '%';
+  q('.zfr-ov-sel').style.left = (s / n) * 100 + '%';
+  q('.zfr-ov-sel').style.width = (k / n) * 100 + '%';
+  root.classList.toggle('zfr-disabled', locked());
+  root.classList.toggle('zfr-single', single());
+  q('.zfr-start-label').textContent = single() ? 'Frame' : 'Start';
+  q('.zfr-ov-hint').textContent = 'whole file · drag to move the ' + (single() ? 'frame' : 'clip');
+  q('.zfr-lo').setAttribute('aria-label', single() ? 'Frame' : 'Start frame');
+  startIn.disabled = endIn.disabled = locked();
+}
+
+function commit() {
+  const v = props.value || [];
+  if (v[0] === s && v[1] === e && v[2] === lastFrame) return;
+  props.value = [s, e, lastFrame];
+  trigger('input');
+}
+
+// Take [start, end, last] from Python, keeping them consistent.
+function load() {
+  const v = Array.isArray(props.value) ? props.value : [0, 0, 0];
+  lastFrame = Math.max(0, Math.round(Number(v[2]) || 0));
+  const n = last();
+  s = clamp(Math.round(Number(v[0]) || 0), 0, n);
+  e = single() ? s : clamp(Math.round(Number(v[1]) || 0), s, n);
+  fit(true);
+  draw();
+}
+
+const frameAt = (el, first, count, x) => {
+  const r = el.getBoundingClientRect();
+  return first + Math.round(clamp((x - r.left) / r.width, 0, 1) * (count - 1));
+};
+
+function dragTo(f) {
+  const n = last();
+  if (single()) s = e = clamp(f, 0, n);
+  else if (drag.which === 'lo') s = clamp(f, 0, e);
+  else if (drag.which === 'hi') e = clamp(f, s, n);
+  else {
+    const d = clamp(f - drag.f0, -drag.s0, n - drag.e0);
+    s = drag.s0 + d;
+    e = drag.e0 + d;
+  }
+  draw();
+}
+
+track.addEventListener('pointerdown', (ev) => {
+  if (locked()) return;
+  const f = frameAt(track, v0, W, ev.clientX);
+  const thumb = ev.target.closest('.zfr-thumb');
+  let which;
+  if (single()) which = 'lo';
+  else if (thumb) which = thumb.classList.contains('zfr-lo') ? 'lo' : 'hi';
+  else if (ev.target.closest('.zfr-band')) which = 'band';
+  else which = f < s ? 'lo' : f > e ? 'hi' : f - s <= e - f ? 'lo' : 'hi';
+  drag = { which, f0: f, s0: s, e0: e };
+  track.setPointerCapture(ev.pointerId);
+  if (which !== 'band') dragTo(f);
+  (thumb || q(which === 'hi' ? '.zfr-hi' : '.zfr-lo')).focus({ preventScroll: true });
+  ev.preventDefault();
+});
+track.addEventListener('pointermove', (ev) => {
+  if (drag) dragTo(frameAt(track, v0, W, ev.clientX));
+});
+const endDrag = () => {
+  if (!drag) return;
+  drag = null;
+  fit(false);
+  draw();
+  commit();
+};
+track.addEventListener('pointerup', endDrag);
+track.addEventListener('pointercancel', endDrag);
+
+// Overview: move the whole clip through the file, keeping its length.
+let ovDrag = false;
+const ovMove = (x) => {
+  const n = last() + 1, len = e - s;
+  const centre = frameAt(overview, 0, n, x);
+  s = clamp(centre - Math.floor(len / 2), 0, n - 1 - len);
+  e = s + len;
+  fit(true);
+  draw();
+};
+overview.addEventListener('pointerdown', (ev) => {
+  if (locked()) return;
+  ovDrag = true;
+  overview.setPointerCapture(ev.pointerId);
+  ovMove(ev.clientX);
+  ev.preventDefault();
+});
+overview.addEventListener('pointermove', (ev) => { if (ovDrag) ovMove(ev.clientX); });
+const ovEnd = () => { if (ovDrag) { ovDrag = false; commit(); } };
+overview.addEventListener('pointerup', ovEnd);
+overview.addEventListener('pointercancel', ovEnd);
+
+// Keyboard on a handle: arrows ±1, Shift+arrows ±10, Page Up/Down ±10% of the view.
+element.addEventListener('keydown', (ev) => {
+  const thumb = ev.target.closest('.zfr-thumb');
+  if (!thumb || locked()) return;
+  const big = Math.max(10, Math.round(W / 10));
+  const steps = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1,
+                  PageDown: -big, PageUp: big };
+  const lo = thumb.classList.contains('zfr-lo'), n = last();
+  let f = lo ? s : e;
+  if (ev.key in steps) f += steps[ev.key] * (ev.shiftKey && Math.abs(steps[ev.key]) === 1 ? 10 : 1);
+  else if (ev.key === 'Home') f = 0;
+  else if (ev.key === 'End') f = n;
+  else return;
+  ev.preventDefault();
+  if (single()) s = e = clamp(f, 0, n);
+  else if (lo) s = clamp(f, 0, e);
+  else e = clamp(f, s, n);
+  fit(false);
+  draw();
+  commit();
+});
+
+// Typed numbers are clamped to the file; a start past the end moves the end along.
+function typed(isStart) {
+  const n = last(), input = isStart ? startIn : endIn;
+  let f = parseInt(input.value, 10);
+  if (Number.isNaN(f)) f = isStart ? s : e;
+  f = clamp(f, 0, n);
+  if (single()) { s = e = f; }
+  else if (isStart) { s = f; e = Math.max(e, f); } else { e = f; s = Math.min(s, f); }
+  input.value = f;
+  fit(true);
+  draw();
+  commit();
+}
+startIn.addEventListener('change', () => typed(true));
+endIn.addEventListener('change', () => typed(false));
+for (const input of [startIn, endIn]) {
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') input.blur(); });
+}
+
+// Not written as quoted names: gr.HTML would take those for custom event names.
+watch('value interactive'.split(' '), load);
+load();
+"""
+
+
+def frame_picker(single: bool = False, **kwargs) -> "gr.HTML":
+    """Frame picker: a two-handle slider plus number inputs for a clip's start and end.
+
+    The value is ``[start, end, last]``: inclusive frame indices plus the file's last
+    frame index, which bounds the picker. The frame count to process is shown next to
+    the inputs. With ``single=True`` it picks one frame with one handle, and the value
+    is ``[frame, frame, last]``.
+
+    Everything the picker needs is in the value (and ``single`` in its script) rather
+    than in custom props: a component in a tab that has not been opened yet mounts
+    with only its latest update, dropping custom props. It is a configured ``gr.HTML``
+    rather than a subclass, because Gradio writes a ``.pyi`` stub next to the source
+    of every component subclass.
+    """
+    return gr.HTML(
+        value=[0, 0, 0],
+        html_template=_FRAME_RANGE_HTML,
+        css_template=_FRAME_RANGE_CSS,
+        js_on_load=f"const SINGLE = {'true' if single else 'false'};\n{_FRAME_RANGE_JS}",
+        **kwargs,
+    )
+
 
 # ── Stop signal ───────────────────────────────────────────────────────────────
 
@@ -382,6 +650,58 @@ def _find_config(dataset_path: str, revision: str | None = None) -> str | None:
     return None
 
 
+def _config_check_html(path: str, revision: str | None = None) -> str:
+    """Inline status for the config path on the Data tab; '' when no path is set.
+
+    A missing config names the config that does exist next to it, if any.
+    """
+    path = _normalize_path(path)
+    revision = (revision or "").strip() or None
+    if not path:
+        return ""
+    if Path(path).suffix.lower() not in (".yaml", ".yml"):
+        return _html_fail("Config path must point to a .yaml file.")
+    try:
+        if _is_hf(path):
+            repo_id, filepath = _hf_parse_path(path)
+            if repo_id.count("/") != 1 or not all(repo_id.split("/")):
+                return _html_fail("Invalid Hugging Face path: expected hf://owner/repo/….yaml")
+            files = set(_hf_list_files(repo_id, **({"revision": revision} if revision else {})))
+            if filepath in files:
+                return _html_pass("Config found")
+            prefix = filepath.rpartition("/")[0] + "/" if "/" in filepath else ""
+            nearby = [
+                f"{HF_PREFIX}{repo_id}/{prefix}{name}"
+                for name in _CONFIG_CANDIDATES
+                if f"{prefix}{name}" in files
+            ]
+            where = f" at revision {revision}" if revision else ""
+        else:
+            if Path(path).is_file():
+                return _html_pass("Config found")
+            folder = Path(path).parent
+            nearby = [str(folder / n) for n in _CONFIG_CANDIDATES if (folder / n).is_file()]
+            where = ""
+    except Exception as exc:
+        return _html_fail("Cannot access config", exc)
+    hint = f"Did you mean {nearby[0]}?" if nearby else None
+    return _html_fail(f"Config file not found{where}", hint)
+
+
+def _dataset_check_html(path: str, n_files: int, errors: list[Exception]) -> str:
+    """Inline status for the dataset path on the Data tab; '' when no path is set."""
+    if not _normalize_path(path):
+        return ""
+    if errors:
+        # Keep the hint (e.g. "Repository not found…"), not the full HTTP error.
+        parts = _enrich_error(errors[0]).split("\n\n")
+        detail = parts[-1] if len(parts) > 1 else parts[0].splitlines()[0]
+        return _html_fail("Cannot open dataset", detail)
+    if not n_files:
+        return _html_warn("No HDF5 files found at this path.")
+    return _html_pass(f"Dataset found · {n_files:,} file{'s' if n_files != 1 else ''}")
+
+
 def _enrich_error(exc: Exception) -> str:
     try:
         from huggingface_hub.errors import (
@@ -440,9 +760,9 @@ def _html_busy(msg: str) -> str:
     )
 
 
-def _busy_lookup(path: str) -> str:
+def _busy_lookup(path: str, looked_up: str = "") -> str:
     path = _normalize_path(path)
-    if not path:
+    if not path or path == looked_up:
         return ""
     return _html_busy("Looking up files on Hugging Face…" if _is_hf(path) else "Looking up files…")
 
@@ -812,7 +1132,7 @@ def _build_meta_card_html(info: dict) -> str:
 def _file_load_updates(fpath: str, revision: str | None, key: str, n_frames: int = 1) -> tuple:
     """Download (if HF) and read a file; return the 8 values for the file-select outputs.
 
-    Returns: (start_frame_upd, n_frames_upd, meta_html, track_upd, track_labels,
+    Returns: (start_frame_upd, clip_range_upd, meta_html, track_upd, track_labels,
                run_btn_upd, key_input_upd, frame_state)
     """
     info = _read_file_info(fpath, revision)
@@ -835,7 +1155,7 @@ def _file_load_updates(fpath: str, revision: str | None, key: str, n_frames: int
     else:
         meta_html = _build_meta_card_html(info)
 
-    sf_upd, nf_upd = _frame_sliders(n, n_frames)
+    sf_upd, range_upd = _frame_sliders(n, n_frames)
 
     if n_tracks > 1 and track_labels:
         # Use numeric indices as values so duplicate labels don't break selection.
@@ -846,7 +1166,7 @@ def _file_load_updates(fpath: str, revision: str | None, key: str, n_frames: int
 
     return (
         sf_upd,
-        nf_upd,
+        range_upd,
         meta_html,
         track_upd,
         track_labels,
@@ -857,14 +1177,18 @@ def _file_load_updates(fpath: str, revision: str | None, key: str, n_frames: int
 
 
 def _frame_sliders(n: int, n_frames: int = 1) -> tuple:
-    """Start-frame / frame-count slider updates for a track with *n* frames."""
+    """Single-frame slider and clip range updates for a track with *n* frames.
+
+    The clip starts at frame 0 and spans *n_frames* (when > 1) or a default length.
+    """
     if n > 1:
+        clip_len = int(n_frames) if int(n_frames) > 1 else _DEFAULT_CLIP_FRAMES
         return (
-            gr.update(maximum=n - 1, value=0, interactive=True),
-            gr.update(maximum=n, value=max(1, min(int(n_frames), n)), interactive=True),
+            gr.update(value=[0, 0, n - 1], interactive=True),
+            gr.update(value=[0, min(clip_len, n) - 1, n - 1], interactive=True),
         )
-    # Single or zero-frame track: keep maximum > minimum (Gradio requires it strictly).
-    return gr.update(value=0, interactive=False), gr.update(value=1, interactive=False)
+    reset = gr.update(value=[0, 0, 0], interactive=False)
+    return reset, reset
 
 
 def _frames_info_html(n: int | None, clip: bool = False) -> str:
@@ -895,7 +1219,7 @@ def _loading_meta_html(streamed_bytes: int = 0, size_bytes: int | None = None) -
     )
 
 
-_NO_DATASET_INFO = "Choose a dataset in ① Data first."
+_NO_DATASET_INFO = "Choose a dataset in 1. Data first."
 _FILE_INFO = "Type to filter."
 
 
@@ -1341,10 +1665,13 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             f'margin-bottom:6px">'
             f'<a href="https://github.com/tue-bmd/zea" target="_blank" rel="noopener" '
             f'title="zea on GitHub" style="flex-shrink:0;margin-right:10px">{logo}</a>'
-            f'<div style="display:flex;align-items:center;'
+            f'<div style="display:flex;align-items:baseline;'
             f'border-bottom:1px solid #44403c;flex:1;padding-bottom:5px">'
-            f'<span style="font-size:1.35em;font-weight:700;color:{_YELLOW}">zea</span>'
-            f'<span style="font-size:1.35em;font-weight:400;margin-left:6px;color:{_MUTED}">'
+            # Whole-pixel size and a weight the theme loads (400/600): fractional sizes
+            # and synthesised weights render unevenly on Windows.
+            f'<span style="font-size:22px;line-height:1;font-weight:600;color:{_YELLOW}">zea</span>'
+            f'<span style="font-size:22px;line-height:1;font-weight:400;margin-left:6px;'
+            f'color:{_MUTED}">'
             f"dataset visualizer</span>"
             f"</div>"
             f"</div>"
@@ -1356,6 +1683,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
         # Last config path filled in automatically (dataset discovery or preset). A
         # config the user typed differs from it and is never overwritten.
         config_auto_state = gr.State("")
+        # Dataset path whose files were last listed; leaving the field unchanged is a no-op.
+        dataset_looked_up_state = gr.State("")
         track_labels_state = gr.State([])
         # Config YAML applied from the editor ("" = use the config path). Runs use this
         # snapshot, never the live editor text, so what is in use is always explicit.
@@ -1373,7 +1702,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             with gr.Column(scale=2, min_width=420):
                 config_badge = gr.HTML(_config_badge_html("", None, "", False))
                 with gr.Tabs(selected="data") as tabs:
-                    with gr.Tab("① Data", id="data"):
+                    with gr.Tab("1. Data", id="data"):
                         preset_selector = gr.Dropdown(
                             label="Example presets (optional)",
                             choices=list(presets),
@@ -1401,6 +1730,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                                 min_width=140,
                                 elem_classes=["revision-dropdown"],
                             )
+                        dataset_check = gr.HTML("", elem_classes=["zea-path-check"])
                         with gr.Row():
                             config_input = gr.Textbox(
                                 label="Config path",
@@ -1419,6 +1749,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                                 min_width=140,
                                 elem_classes=["revision-dropdown"],
                             )
+                        config_check = gr.HTML("", elem_classes=["zea-path-check"])
 
                         hf_links = gr.HTML("")
 
@@ -1426,7 +1757,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                         data_status = gr.HTML("")
                         next_btn = gr.Button("Next: select a file  →", interactive=False)
 
-                    with gr.Tab("② File & run", id="file"):
+                    with gr.Tab("2. File & run", id="file"):
                         file_selector = gr.Dropdown(
                             label="File",
                             choices=[],
@@ -1464,27 +1795,12 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                             visible=False,
                         )
 
-                        with gr.Row():
-                            start_frame_input = gr.Slider(
-                                label="Frame",
-                                visible=False,
-                                minimum=0,
-                                maximum=999,
-                                value=0,
-                                step=1,
-                                interactive=False,
-                                elem_classes=["frame-slider"],
-                            )
-                            n_frames_input = gr.Slider(
-                                label="Frame count",
-                                visible=False,
-                                minimum=1,
-                                maximum=999,
-                                value=1,
-                                step=1,
-                                interactive=False,
-                                elem_classes=["frame-slider"],
-                            )
+                        # visible="hidden" (not False) keeps these mounted, so updates
+                        # sent while hidden (e.g. on file load) still reach them.
+                        start_frame_input = frame_picker(
+                            single=True, visible="hidden", interactive=False
+                        )
+                        clip_range_input = frame_picker(visible="hidden", interactive=False)
 
                         with gr.Row():
                             run_btn = gr.Button(
@@ -1544,10 +1860,13 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
         )
 
         # Dataset blur → fetch revisions + file list (no download)
-        def _on_dataset_blur(path, config, config_auto):
+        def _on_dataset_blur(path, config, config_auto, looked_up):
             raw = path or ""
             path = _normalize_path(raw)
             path_upd = gr.update(value=path) if path != raw.strip() else gr.update()
+            if path and path == looked_up:
+                # Unchanged: keep the file list, selection and revision as they are.
+                return (path_upd, *(gr.update(),) * 12)
             config = _normalize_path(config)
             _disable_run = gr.update(interactive=False)
             if not path:
@@ -1563,6 +1882,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                     "",
                     _disable_run,
                     gr.update(choices=_DATA_KEYS),
+                    "",  # dataset_check
+                    "",  # dataset_looked_up_state
                 )
             errors: list[Exception] = []
             names, paths = _list_dataset_files(path, _errors=errors)
@@ -1572,16 +1893,9 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             )
             _reset_key = gr.update(choices=_DATA_KEYS, value=None, interactive=False)
 
-            if not names:
-                if errors:
-                    short = _enrich_error(errors[0]).split("\n\n")[0]
-                    gr.Warning(f"Cannot open dataset: {short}")
-                    meta_html = _html_fail("Cannot open dataset", errors[0])
-                else:
-                    gr.Warning("No HDF5 files found at this path.")
-                    meta_html = _html_warn("No HDF5 files found at this path.")
-            else:
-                meta_html = ""
+            # Problems show under the dataset path, and in the File tab's card.
+            dataset_html = _dataset_check_html(path, len(paths), errors)
+            meta_html = "" if paths else dataset_html
 
             # Auto-fill the config only when the user has not typed their own.
             config_upd, new_auto = gr.update(), config_auto
@@ -1589,10 +1903,12 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 found = _find_config(path) or ""
                 config_upd, new_auto = gr.update(value=found), found
                 if not found and paths:
-                    meta_html += _html_warn(
+                    no_config = _html_warn(
                         "No config.yaml or pipeline.yaml found next to the dataset. "
                         "Set a config path to process raw data."
                     )
+                    meta_html += no_config
+                    dataset_html += no_config
 
             if not _is_hf(path) or errors:
                 # Local path, or repo inaccessible — no revisions to fetch.
@@ -1613,13 +1929,19 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 meta_html,
                 _disable_run,
                 _reset_key,
+                dataset_html,
+                path,  # dataset_looked_up_state
             )
 
         _bind_gradio_event(
-            dataset_input, "blur", _busy_lookup, [dataset_input], [data_status]
+            dataset_input,
+            "blur",
+            _busy_lookup,
+            [dataset_input, dataset_looked_up_state],
+            [data_status],
         ).then(
             _on_dataset_blur,
-            inputs=[dataset_input, config_input, config_auto_state],
+            inputs=[dataset_input, config_input, config_auto_state, dataset_looked_up_state],
             outputs=[
                 dataset_input,
                 config_input,
@@ -1632,60 +1954,55 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 meta_card,
                 run_btn,
                 key_input,
+                dataset_check,
+                dataset_looked_up_state,
             ],
             show_progress="hidden",
-        ).then(lambda: "", None, [data_status], show_progress="hidden")
+        ).then(_config_check_html, [config_input, config_rev_input], [config_check]).then(
+            lambda: "", None, [data_status], show_progress="hidden"
+        )
 
-        # Config blur → validate path + fetch revisions
-        def _on_config_blur(path):
+        # Config blur → tidy the path, fetch its revisions and check that it exists.
+        def _on_config_blur(path, current_rev):
             raw = path or ""
             path = _normalize_path(raw)
             path_upd = gr.update(value=path) if path != raw.strip() else gr.update()
-            return path_upd, _check_config_path(path)
+            return path_upd, _config_revisions(path, current_rev)
 
-        def _check_config_path(path):
-            if not path:
+        def _config_revisions(path, current_rev):
+            """Revision dropdown for *path*; keeps *current_rev* when the repo has it."""
+            repo_id = _hf_parse_path(path)[0] if _is_hf(path) else ""
+            if repo_id.count("/") != 1 or not all(repo_id.split("/")):
                 return gr.update(interactive=False, choices=["main"], value=None)
-            if not _is_hf(path):
-                p = Path(path)
-                if not p.exists():
-                    gr.Warning(f"Config file not found: {path}")
-                elif p.suffix.lower() not in (".yaml", ".yml"):
-                    suffix = p.suffix or "(no extension)"
-                    gr.Warning(f"Config path should be a .yaml file, got: {suffix}")
-                return gr.update(interactive=False, choices=["main"], value=None)
-            # HF path — check repo + specific file, then fetch revisions
-            try:
-                from huggingface_hub import file_exists, list_repo_refs
-
-                repo_id, filepath = _hf_parse_path(path)
-                if "/" not in repo_id or not repo_id.split("/")[1]:
-                    gr.Warning("Invalid Hugging Face path: expected hf://owner/repo-name/…")
-                    return gr.update(interactive=False, choices=["main"], value=None)
-                if not filepath:
-                    gr.Warning("Config path must point to a .yaml file inside the repo.")
-                refs = list_repo_refs(repo_id, repo_type="dataset")
-                branches = [b.name for b in refs.branches]
-                tags = [t.name for t in refs.tags]
-                revisions = branches + tags or ["main"]
-                default = "main" if "main" in revisions else revisions[0]
-                if filepath and not file_exists(
-                    repo_id, filepath, repo_type="dataset", revision=default
-                ):
-                    gr.Warning(f"Config file not found in repo: {filepath}")
-                return gr.update(interactive=True, choices=revisions, value=default)
-            except Exception as exc:
-                short = _enrich_error(exc).split("\n\n")[0]
-                gr.Warning(f"Cannot access config: {short}")
-                return gr.update(interactive=False, choices=["main"], value=None)
+            revisions = _fetch_hf_revisions(path)
+            # PR refs (refs/pr/N) are not listed among branches and tags.
+            if current_rev and (current_rev in revisions or current_rev.startswith("refs/")):
+                value = current_rev
+            else:
+                value = "main" if "main" in revisions else revisions[0]
+            return gr.update(interactive=True, choices=revisions, value=value)
 
         _bind_gradio_event(
             config_input,
             "blur",
             _on_config_blur,
-            [config_input],
             [config_input, config_rev_input],
+            [config_input, config_rev_input],
+        ).then(_config_check_html, [config_input, config_rev_input], [config_check])
+        _bind_gradio_event(
+            config_rev_input,
+            "input",
+            _config_check_html,
+            [config_input, config_rev_input],
+            [config_check],
         )
+        # Status lines describe the checked path; clear them while it is being edited,
+        # and treat Enter like leaving the field (which runs the check).
+        for _field, _check in ((dataset_input, dataset_check), (config_input, config_check)):
+            _bind_gradio_event(_field, "input", None, None, [_check], js="() => ''")
+            _bind_gradio_event(
+                _field, "submit", None, None, None, js="() => document.activeElement?.blur()"
+            )
 
         # Dataset revision change → refresh file list; auto-reload selected file at new revision
         def _on_dataset_rev_change_gen(rev, path, decoupled, current_file, key):
@@ -1701,9 +2018,10 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 [],
                 gr.update(interactive=False),
                 _reset_key,
-                gr.update(value=0, interactive=False),
-                gr.update(value=1, interactive=False),
+                gr.update(value=[0, 0, 0], interactive=False),
+                gr.update(value=[0, 0, 0], interactive=False),
                 {},
+                "",  # dataset_check
             )
 
             if not path:
@@ -1717,13 +2035,9 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 choices=list(zip(names, fpaths)), value=new_val, interactive=bool(fpaths)
             )
 
+            dataset_html = _dataset_check_html(path, len(fpaths), errors)
             if not new_val:
-                if not fpaths and errors:
-                    meta_html = _html_fail("Cannot open dataset", errors[0])
-                elif not fpaths:
-                    meta_html = _html_warn("No HDF5 files found at this path.")
-                else:
-                    meta_html = ""
+                meta_html = "" if fpaths else dataset_html
                 yield (
                     cfg_upd,
                     file_upd,
@@ -1733,9 +2047,10 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                     [],
                     gr.update(interactive=False),
                     _reset_key,
-                    gr.update(value=0, interactive=False),
-                    gr.update(value=1, interactive=False),
+                    gr.update(value=[0, 0, 0], interactive=False),
+                    gr.update(value=[0, 0, 0], interactive=False),
                     {},
+                    dataset_html,
                 )
                 return
 
@@ -1752,12 +2067,16 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 gr.update(interactive=False),
                 gr.update(interactive=False),
                 gr.update(),
+                dataset_html,
             )
 
-            sf, nf, meta, trk, tlbls, run_upd, key_upd, fstate = _file_load_updates(
+            sf, clip_range, meta, trk, tlbls, run_upd, key_upd, fstate = _file_load_updates(
                 new_val, rev or None, key
             )
-            yield cfg_upd, gr.update(), fpaths, meta, trk, tlbls, run_upd, key_upd, sf, nf, fstate
+            yield (
+                *(cfg_upd, gr.update(), fpaths, meta, trk, tlbls, run_upd, key_upd),
+                *(sf, clip_range, fstate, gr.update()),
+            )
 
         _bind_gradio_event(
             dataset_rev_input, "input", _busy_revision, [dataset_rev_input], [data_status]
@@ -1774,11 +2093,14 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 run_btn,
                 key_input,
                 start_frame_input,
-                n_frames_input,
+                clip_range_input,
                 frame_state,
+                dataset_check,
             ],
             show_progress="hidden",
-        ).then(lambda: "", None, [data_status], show_progress="hidden")
+        ).then(_config_check_html, [config_input, config_rev_input], [config_check]).then(
+            lambda: "", None, [data_status], show_progress="hidden"
+        )
 
         # User manually picks a config revision → decouple
         def _on_config_rev_input():
@@ -1795,7 +2117,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
         # Preset → fill all fields + reset sync state (no file auto-load)
         def _apply_preset(name):
             if name not in presets:
-                return (gr.update(),) * 15
+                return (gr.update(),) * 17
             p = presets[name]
             ds = p.get("dataset", "")
             cfg = p.get("config", "")
@@ -1810,7 +2132,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 ds_revs = ds_revs if rev in ds_revs else [*ds_revs, rev]
                 cfg_revs = cfg_revs if rev in cfg_revs else [*cfg_revs, rev]
                 ds_def = cfg_def = rev
-            names, paths = _list_dataset_files(ds, ds_def)
+            errors: list[Exception] = []
+            names, paths = _list_dataset_files(ds, ds_def, _errors=errors)
             # Pre-select the preset's file (this triggers the file load); otherwise let
             # the user pick, or auto-pick when there is only one.
             file_val = p.get("file") if p.get("file") in paths else None
@@ -1840,6 +2163,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 gr.update(interactive=False),  # run_btn — re-enabled after file is picked
                 cfg,  # config_auto_state — preset config may be replaced by discovery
                 frames,  # preset_frames_state
+                _dataset_check_html(ds, len(paths), errors),  # dataset_check
+                _normalize_path(ds),  # dataset_looked_up_state
             )
 
         _bind_gradio_event(
@@ -1863,16 +2188,20 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 run_btn,
                 config_auto_state,
                 preset_frames_state,
+                dataset_check,
+                dataset_looked_up_state,
             ],
             show_progress="hidden",
-        ).then(lambda: "", None, [data_status], show_progress="hidden")
+        ).then(_config_check_html, [config_input, config_rev_input], [config_check]).then(
+            lambda: "", None, [data_status], show_progress="hidden"
+        )
 
         # File selected → load file (may download HF), show metadata + update sliders
         # 8 primary outputs + 7 lock outputs (stop_btn, file_selector, preset_selector,
         # dataset_input, dataset_rev_input, config_input, config_rev_input)
         _NO_FILE = (
             gr.update(interactive=False),  # start_frame_input
-            gr.update(interactive=False),  # n_frames_input
+            gr.update(interactive=False),  # clip_range_input
             "",  # meta_card
             _TRACK_RESET,  # track_selector
             [],  # track_labels_state
@@ -1915,7 +2244,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 upd = gr.update(interactive=False) if lock else gr.update()
                 return (
                     upd,  # start_frame_input
-                    upd,  # n_frames_input
+                    upd,  # clip_range_input
                     _loading_meta_html(streamed, size_bytes),  # meta_card
                     _TRACK_RESET if lock else gr.update(),  # track_selector
                     [] if lock else gr.update(),  # track_labels_state
@@ -1951,10 +2280,10 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 if worker.is_alive():
                     yield _progress(network_bytes() - bytes_at_start, lock=False)
 
-            sf, nf, meta, trk, tlbls, run_upd, key_upd, fstate = result["out"]
+            sf, clip_range, meta, trk, tlbls, run_upd, key_upd, fstate = result["out"]
             yield (
                 sf,
-                nf,
+                clip_range,
                 meta,
                 trk,
                 tlbls,
@@ -1986,7 +2315,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             ],
             outputs=[
                 start_frame_input,
-                n_frames_input,
+                clip_range_input,
                 meta_card,
                 track_selector,
                 track_labels_state,
@@ -2036,18 +2365,18 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             n_per_track = (fstate or {}).get("n_per_track") or []
             if track_id is None or int(track_id) >= len(n_per_track):
                 return gr.update(), gr.update(), gr.update()
-            sf, nf = _frame_sliders(n_per_track[int(track_id)])
-            return sf, nf, {**fstate, "track": int(track_id), "clip": False}
+            sf, clip_range = _frame_sliders(n_per_track[int(track_id)])
+            return sf, clip_range, {**fstate, "track": int(track_id), "clip": False}
 
         _bind_gradio_event(
             track_selector,
             "change",
             _on_track_change,
             [track_selector, frame_state],
-            [start_frame_input, n_frames_input, frame_state],
+            [start_frame_input, clip_range_input, frame_state],
         )
 
-        # Frame controls: one slider for a single frame, start + count for a clip.
+        # Frame controls: one slider for a single frame, a start/end range for a clip.
         # Hidden entirely when there is nothing to choose.
         def _frame_mode_updates(mode, fstate):
             fstate = fstate or {}
@@ -2058,8 +2387,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             clip = choosable and mode == "Clip (GIF)"
             return (
                 _frames_info_html(n, clip),
-                gr.update(label="Start frame" if clip else "Frame", visible=choosable),
-                gr.update(visible=clip),
+                gr.update(visible=True if choosable and not clip else "hidden"),
+                gr.update(visible=True if clip else "hidden"),
             )
 
         def _on_frame_state(fstate):
@@ -2072,19 +2401,33 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 *_frame_mode_updates(mode, fstate),
             )
 
+        def _on_frame_mode(mode, fstate, frame, clip_range):
+            # Switching modes keeps the position: the clip starts at the chosen frame
+            # (keeping its length), and a single frame is the clip's first frame.
+            info, single_upd, range_upd = _frame_mode_updates(mode, fstate)
+            start, end, last = (int(v) for v in (clip_range or [0, 0, 0])[:3])
+            if mode == "Clip (GIF)":
+                length = end - start
+                start = max(0, min(int((frame or [0])[0]), last - length))
+                value = [start, start + length, last]
+                range_upd = gr.update(visible=range_upd["visible"], value=value)
+            else:
+                single_upd = gr.update(visible=single_upd["visible"], value=[start, start, last])
+            return info, single_upd, range_upd
+
         _bind_gradio_event(
             frame_state,
             "change",
             _on_frame_state,
             [frame_state],
-            [frame_mode, frames_info, start_frame_input, n_frames_input],
+            [frame_mode, frames_info, start_frame_input, clip_range_input],
         )
         _bind_gradio_event(
             frame_mode,
             "input",
-            _frame_mode_updates,
-            [frame_mode, frame_state],
-            [frames_info, start_frame_input, n_frames_input],
+            _on_frame_mode,
+            [frame_mode, frame_state, start_frame_input, clip_range_input],
+            [frames_info, start_frame_input, clip_range_input],
         )
 
         # ── Config editor ───────────────────────────────────────────────────
@@ -2183,15 +2526,17 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
             file_paths,
             track_name,
             track_labels,
-            start_f,
-            n_f,
+            single_frame,
+            clip_range,
             applied_yaml,
             editor_dirty,
             mode,
         ):
             _stop_event.clear()
-            if mode != "Clip (GIF)":
-                n_f = 1
+            if mode == "Clip (GIF)":
+                start_f, end_f = (int(v) for v in (clip_range or [0, 0])[:2])
+            else:
+                start_f = end_f = int((single_frame or [0])[0])
             dataset = _normalize_path(dataset)
             config = _normalize_path(config)
             if not dataset:
@@ -2237,7 +2582,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 gr.update(interactive=False),  # config_rev_input
                 gr.update(interactive=False),  # key_input
                 gr.update(interactive=False),  # start_frame_input
-                gr.update(interactive=False),  # n_frames_input
+                gr.update(interactive=False),  # clip_range_input
                 gr.update(interactive=False),  # track_selector
             )
             _unlock_extras = (
@@ -2251,7 +2596,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 gr.update(interactive=_is_hf(config)),  # config_rev_input
                 gr.update(interactive=True),  # key_input
                 gr.update(interactive=True),  # start_frame_input
-                gr.update(interactive=True),  # n_frames_input
+                gr.update(interactive=True),  # clip_range_input
                 gr.update(),  # track_selector — keep
             )
 
@@ -2275,8 +2620,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                     cfg_rev if cfg_rev else None,
                     (key or "data/raw_data").strip() or "data/raw_data",
                     file_index,
-                    int(start_f or 0),
-                    int(n_f or 1),
+                    start_f,
+                    end_f - start_f + 1,
                     stop_check=_stop_event.is_set,
                     track_index=track_index,
                     status_lines=status_lines,
@@ -2335,7 +2680,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 track_selector,
                 track_labels_state,
                 start_frame_input,
-                n_frames_input,
+                clip_range_input,
                 editor_applied_state,
                 editor_dirty_state,
                 frame_mode,
@@ -2353,7 +2698,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 config_rev_input,
                 key_input,
                 start_frame_input,
-                n_frames_input,
+                clip_range_input,
                 track_selector,
                 run_status,
             ],
@@ -2374,7 +2719,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 gr.update(),  # config_rev_input — keep
                 gr.update(interactive=bool(current_key)),  # key_input
                 gr.update(interactive=True),  # start_frame_input
-                gr.update(interactive=True),  # n_frames_input
+                gr.update(interactive=True),  # clip_range_input
                 gr.update(),  # track_selector: keep (a file is still loaded)
                 gr.update(),  # meta_card
                 _html_warn("Stopped"),  # run_status
@@ -2397,7 +2742,7 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 config_rev_input,
                 key_input,
                 start_frame_input,
-                n_frames_input,
+                clip_range_input,
                 track_selector,
                 meta_card,
                 run_status,
