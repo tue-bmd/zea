@@ -2052,6 +2052,26 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
                 _field, "submit", None, None, None, js="() => document.activeElement?.blur()"
             )
 
+        # Paths that no longer match the selected preset (typed, pasted, discovered, ...)
+        # mean the settings are not the preset's any more, so stop showing it.
+        def _drop_stale_preset(name, dataset, config):
+            p = presets.get(name)
+            if p is None or (
+                _normalize_path(dataset) == _normalize_path(p.get("dataset"))
+                and _normalize_path(config) == _normalize_path(p.get("config"))
+            ):
+                return gr.update(), gr.update()
+            return None, ""
+
+        for _field in (dataset_input, config_input):
+            _bind_gradio_event(
+                _field,
+                "change",
+                _drop_stale_preset,
+                [preset_selector, dataset_input, config_input],
+                [preset_selector, preset_check],
+            )
+
         # Dataset revision change → refresh file list; auto-reload selected file at new revision
         def _on_dataset_rev_change_gen(rev, path, decoupled, current_file, key):
             cfg_upd = gr.update() if decoupled else gr.update(value=rev)
@@ -2225,7 +2245,8 @@ def build_interface(presets: dict[str, dict] | None = None) -> "gr.Blocks":
 
         _bind_gradio_event(
             preset_selector,
-            "change",
+            # "input", not "change": clearing the preset below must not re-apply it.
+            "input",
             lambda name: _busy_example(name) if name in presets else "",
             [preset_selector],
             [data_status],
