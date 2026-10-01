@@ -373,6 +373,17 @@ def test_import_ops_module_broken_module_raises(tmp_path):
     assert "zea_modules.broken_ops" not in sys.modules
 
 
+def test_import_ops_module_broken_dotted_module_raises(tmp_path, monkeypatch):
+    """A dotted module raising a non-ImportError is wrapped, not let through as-is."""
+    (tmp_path / "broken_dotted_ops.py").write_text("raise ValueError('boom')\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    with pytest.raises(OpsModuleImportError, match="boom"):
+        import_ops_module("broken_dotted_ops")
+
+    assert "broken_dotted_ops" not in sys.modules
+
+
 def test_import_ops_module_unknown_dotted_module_raises():
     with pytest.raises(OpsModuleImportError, match="PYTHONPATH"):
         import_ops_module("definitely_not_a_module_zzzzzz")
@@ -421,9 +432,8 @@ def test_remote_import_trust_via_env_var(tmp_path, monkeypatch):
     assert get_ops(name) is module.TmpOp
 
 
-def test_remote_import_forwards_revision(tmp_path, monkeypatch):
-    """The config's revision is passed on, so the module matches the config commit."""
-    path, _ = write_op_module(tmp_path)
+def _record_hf_resolve(monkeypatch, path):
+    """Stub out the Hub download, recording what it was asked for."""
     seen = {}
 
     def fake_resolve(hf_path, **kwargs):
@@ -431,10 +441,38 @@ def test_remote_import_forwards_revision(tmp_path, monkeypatch):
         return path
 
     monkeypatch.setattr("zea.internal.preset_utils._hf_resolve_path", fake_resolve)
+    return seen
 
-    import_ops_module("hf://org/repo/my_ops.py", trust_remote_code=True, revision="abc123")
+
+def test_remote_import_relative_to_config_forwards_revision(tmp_path, monkeypatch):
+    """A module next to an hf:// config is fetched at the config's revision."""
+    path, _ = write_op_module(tmp_path)
+    seen = _record_hf_resolve(monkeypatch, path)
+
+    import_ops_module(
+        "my_ops.py",
+        base_path="hf://org/repo",
+        trust_remote_code=True,
+        revision="abc123",
+    )
 
     assert seen == {"hf_path": "hf://org/repo/my_ops.py", "revision": "abc123"}
+
+
+def test_remote_import_absolute_uri_ignores_config_revision(tmp_path, monkeypatch):
+    """An absolute hf:// URI may name another repo, where the config's revision
+    need not exist, so it is fetched from that repo's default branch."""
+    path, _ = write_op_module(tmp_path)
+    seen = _record_hf_resolve(monkeypatch, path)
+
+    import_ops_module(
+        "hf://other-org/other-repo/my_ops.py",
+        base_path="hf://org/repo",
+        trust_remote_code=True,
+        revision="abc123",
+    )
+
+    assert seen == {"hf_path": "hf://other-org/other-repo/my_ops.py"}
 
 
 def test_http_import_is_rejected(monkeypatch):
@@ -481,6 +519,26 @@ def test_pipeline_config_imports_from_other_directory(tmp_path):
     )
 
     pipeline = Pipeline.from_path(str(config_path), jit_options=None)
+
+    assert isinstance(pipeline.operations[0], get_ops(name))
+
+
+def test_pipeline_from_config_resolves_imports_next_to_loaded_file(tmp_path, monkeypatch):
+    """A Config loaded from a file remembers where it came from, so from_config
+    resolves relative imports exactly like from_path does."""
+    config_dir = tmp_path / "dataset"
+    config_dir.mkdir()
+    _, name = write_op_module(config_dir)
+    config_path = config_dir / "pipeline.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"pipeline": {"imports": ["tmp_ops.py"], "operations": [name]}}),
+        encoding="utf-8",
+    )
+    # Run from elsewhere, so the working directory cannot be what makes it work.
+    monkeypatch.chdir(tmp_path)
+
+    config = Config.from_path(config_path)
+    pipeline = Pipeline.from_config(config, jit_options=None)
 
     assert isinstance(pipeline.operations[0], get_ops(name))
 

@@ -225,8 +225,10 @@ def import_ops_module(
         trust_remote_code (bool, optional): Allow executing code fetched from a
             remote source. Also settable through ``ZEA_TRUST_REMOTE_CODE=1``.
             Defaults to ``False``.
-        revision (str, optional): Hugging Face revision (branch, tag or commit)
-            for ``hf://`` sources. Defaults to ``None``.
+        revision (str, optional): Hugging Face revision (branch, tag or commit) of
+            the config's repo. Only applied to a relative ``source`` resolved against
+            an ``hf://`` ``base_path``; an absolute ``hf://`` URI is fetched from its
+            repo's default branch. Defaults to ``None``.
 
     Returns:
         ModuleType: The imported module.
@@ -256,11 +258,18 @@ def import_ops_module(
                 f"Could not import module '{source}': {exc}. Make sure it is installed "
                 "or on your PYTHONPATH, or point to the .py file directly."
             ) from exc
+        except Exception as exc:  # noqa: BLE001 - re-raised with context below
+            # Wrapped like a failing .py file, so that callers catching ValueError /
+            # KeyError around pipeline construction do not swallow it.
+            raise OpsModuleImportError(f"Error while importing '{source}': {exc}") from exc
         _LOADED[source] = module
         return module
 
     # A relative path is only meaningful next to the config that named it.
-    if base_path is not None and not _is_remote(source) and not Path(source).is_absolute():
+    relative_to_config = (
+        base_path is not None and not _is_remote(source) and not Path(source).is_absolute()
+    )
+    if relative_to_config:
         source = _join_base_path(source, base_path)
 
     if _is_remote(source):
@@ -272,7 +281,9 @@ def import_ops_module(
                 "re-run with --trust-remote-code (or set "
                 f"{_TRUST_ENV_VAR}=1)."
             )
-        path = _resolve_remote(source, revision)
+        # The revision belongs to the config's repo: an absolute hf:// URI may point at
+        # another repo, where that branch or tag need not exist.
+        path = _resolve_remote(source, revision if relative_to_config else None)
     else:
         path = Path(source).expanduser().resolve()
 

@@ -852,7 +852,10 @@ class Pipeline:
                 ... )
                 >>> pipeline = Pipeline.from_config(config)
         """
-        return pipeline_from_config(Config(config), **kwargs)
+        # An existing Config is passed as is, so it keeps the location it was loaded from.
+        if not isinstance(config, Config):
+            config = Config(config)
+        return pipeline_from_config(config, **kwargs)
 
     @classmethod
     def from_path(
@@ -896,15 +899,7 @@ class Pipeline:
 
         """
         config = Config.from_path(file_path, revision=revision)
-        # The original path, not the resolved local cache path: an ``hf://`` config
-        # must resolve its sibling modules from the same repo and revision.
-        return pipeline_from_config(
-            config,
-            base_path=parent_location(file_path),
-            trust_remote_code=trust_remote_code,
-            revision=revision,
-            **kwargs,
-        )
+        return pipeline_from_config(config, trust_remote_code=trust_remote_code, **kwargs)
 
     @classmethod
     @deprecated(replacement="Pipeline.from_path")
@@ -2610,11 +2605,15 @@ def pipeline_from_config(
     Args:
         config (Config): The config to build the pipeline from.
         base_path (str or Path, optional): Location that relative ``imports`` entries
-            are resolved against, usually the directory holding the config. May be an
-            ``hf://`` path. Defaults to ``None`` (the working directory).
+            are resolved against. May be an ``hf://`` path. Defaults to ``None``: the
+            directory of the file the config was loaded from (see
+            :meth:`Config.from_path <zea.Config.from_path>`), or the working directory
+            for a config built in code.
         trust_remote_code (bool, optional): Allow ``imports`` to execute code fetched
             from a remote location. Defaults to ``False``.
-        revision (str, optional): Hugging Face revision for remote ``imports``.
+        revision (str, optional): Hugging Face revision for ``imports`` that are
+            resolved relative to an ``hf://`` config. Defaults to ``None``: the
+            revision the config was loaded at.
         **kwargs: Additional keyword arguments to be passed to the pipeline.
     """
     if "pipeline" not in config:
@@ -2628,6 +2627,14 @@ def pipeline_from_config(
             f"      - ...\n"
             f"Found top-level keys: {top_keys}"
         )
+
+    # Default to the location of the file the config came from, read before the
+    # pipeline section is unwrapped into a new Config that does not carry it.
+    source = getattr(config, "__source__", None)
+    if base_path is None and source is not None:
+        base_path = parent_location(source)
+    if revision is None:
+        revision = getattr(config, "__revision__", None)
 
     # Unwrap the pipeline subsection from a full config
     config = Config(config["pipeline"])

@@ -8,7 +8,7 @@ import types
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Sequence
 
 import numpy as np
 import tyro
@@ -233,7 +233,7 @@ def run_processing(
     revision: str | None = None,
     config_revision: str | None = None,
     track: str | None = None,
-    imports=(),
+    imports: Sequence[str] = (),
     trust_remote_code: bool = False,
 ) -> None:
     if keep_dynamic_range and save_as != "hdf5":
@@ -244,18 +244,15 @@ def run_processing(
         raise ValueError(f"save_as must be one of {SUPPORTED_FORMATS}, got {save_as!r}")
 
     dataset_hf_kwargs = {"revision": revision} if revision is not None else {}
-    config_resolved_revision = config_revision if config_revision is not None else revision
     config_hf_kwargs = (
-        {"revision": config_resolved_revision} if (config_revision or revision) else {}
+        {"revision": config_revision if config_revision is not None else revision}
+        if (config_revision or revision)
+        else {}
     )
 
     # Imported after init_device has run (custom operations may touch keras at import
     # time) and before anything resolves an operation name.
-    import_ops_modules(
-        imports,
-        trust_remote_code=trust_remote_code,
-        revision=config_resolved_revision,
-    )
+    import_ops_modules(imports, trust_remote_code=trust_remote_code)
 
     config = Config.from_path(config_path, **config_hf_kwargs)
     config_params = _get_config_parameters(config)
