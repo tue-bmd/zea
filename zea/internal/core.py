@@ -74,6 +74,23 @@ def _skip_to_tensor(value):
     return isinstance(value, str) or callable(value) or isinstance(value, bytes)
 
 
+def python_constant(x):
+    """0-d numeric arrays as Python scalars and 1-d and 2-d ones as (nested) tuples, hashable
+    so that jit can treat them as static arguments; anything else, traced values included,
+    unchanged."""
+    if isinstance(x, (bool, int, float, str, tuple, type(None))):
+        return x
+    try:
+        value = keras.ops.convert_to_numpy(x)
+    except (RuntimeError, ValueError, TypeError, NotImplementedError):
+        return x
+    if np.ndim(value) > 2:
+        return x
+    if np.ndim(value) == 0:
+        return value.item()
+    return tuple(tuple(row) if isinstance(row, list) else row for row in value.tolist())
+
+
 def dict_to_tensor(dictionary: dict, keep_as_is: list | None = None) -> dict:
     """Convert an object to a dictionary of tensors."""
     from zea.config import Config
