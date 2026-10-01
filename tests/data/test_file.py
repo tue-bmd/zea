@@ -2604,3 +2604,22 @@ def test_channel_dims_require_channel_data(tmp_path):
         # n_frames and n_el do not need channel data.
         assert f.n_frames == 1
         assert f.n_el == 8
+
+
+def test_legacy_lens_correction_moves_to_probe():
+    """Legacy scan groups store the Verasonics lens correction (wavelengths); it is now a
+    probe property (lens thickness and sound speed) and must not reach ScanSpec."""
+    from zea.data.legacy_file import legacy_probe, legacy_scan
+
+    scan = {
+        "center_frequency": np.float32(5e6),
+        "sampling_frequency": np.float32(20e6),
+        "lens_correction": np.float64(0.5),
+        "n_tx": np.int64(2),
+        "initial_times": np.zeros(2, dtype=np.float32),
+        "transmit_origins": np.zeros((2, 3), dtype=np.float32),
+    }
+    probe = legacy_probe(dict(scan))
+    assert probe["lens_sound_speed"] == pytest.approx(1000.0)
+    assert probe["lens_thickness"] == pytest.approx(0.5 * 1000.0 / 5e6)
+    assert "lens_correction" not in legacy_scan(dict(scan))

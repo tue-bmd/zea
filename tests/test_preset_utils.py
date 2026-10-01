@@ -500,6 +500,14 @@ def test_stream_url_with_revision_and_repo_type():
     assert url == f"https://huggingface.co/{REPO_ID}/resolve/v1/model.weights.h5"
 
 
+def test_stream_url_encodes_pr_revision():
+    # A PR ref is a single path segment in the resolve URL; unencoded, the hub 404s.
+    url = ipu._hf_stream_url(f"hf://{REPO_ID}/oslo/a b.hdf5", revision="refs/pr/66")
+    assert url == (
+        f"https://huggingface.co/datasets/{REPO_ID}/resolve/refs%2Fpr%2F66/oslo/a%20b.hdf5"
+    )
+
+
 def test_stream_url_requires_file():
     with pytest.raises(ValueError, match="single file"):
         ipu._hf_stream_url(f"hf://{REPO_ID}")

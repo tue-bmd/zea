@@ -143,6 +143,8 @@ def legacy_scan(scan_parameters: dict):
     scan_parameters.pop("n_frames", None)
     scan_parameters.pop("bandwidth_percent", None)
     scan_parameters.pop("element_width", None)
+    # A probe property now: legacy_probe turns it into lens_thickness / lens_sound_speed.
+    scan_parameters.pop("lens_correction", None)
     tx_waveform_indices = scan_parameters.pop("tx_waveform_indices", None)
 
     if "waveforms_one_way" in scan_parameters:
@@ -163,6 +165,11 @@ def legacy_scan(scan_parameters: dict):
             scan_parameters["demodulation_frequency"] = scan_parameters["center_frequency"]
         else:
             raise ValueError("No demodulation or center frequency found in scan parameters.")
+
+    # The earliest files name the transmit origins just "origin".
+    origin = scan_parameters.pop("origin", None)
+    if origin is not None and "transmit_origins" not in scan_parameters:
+        scan_parameters["transmit_origins"] = origin
 
     if "transmit_origins" not in scan_parameters:
         n_tx = infer_n_tx(scan_parameters)
@@ -193,6 +200,17 @@ def legacy_probe(scan_parameters: dict):
         probe_parameters["probe_geometry"] = scan_parameters["probe_geometry"]
     if "element_width" in scan_parameters:
         probe_parameters["element_width"] = scan_parameters["element_width"]
+    lens_correction = scan_parameters.get("lens_correction")
+    center_frequency = scan_parameters.get("center_frequency")
+    if lens_correction is not None and center_frequency is not None:
+        # Imported here: the Verasonics converter imports zea.data.file, which imports us.
+        from zea.data.convert.verasonics import estimate_lens_probe_params
+
+        probe_parameters.update(
+            estimate_lens_probe_params(
+                float(np.squeeze(lens_correction)), float(np.squeeze(center_frequency))
+            )
+        )
 
     return probe_parameters
 

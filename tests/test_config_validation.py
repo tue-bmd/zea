@@ -1,5 +1,7 @@
 """Tests for the dataclass-based config validation (zea.internal.config.validation)."""
 
+from pathlib import Path
+
 import pytest
 
 from zea.config import Config, _migrate_legacy_config, check_config
@@ -253,3 +255,35 @@ def test_users_config_rejects_a_non_mapping():
 def test_data_local_accepts_none(local):
     """`set_data_paths(local=None)` is valid, so the config must be able to say so."""
     assert validate_config({"data": {"local": local}})["data"]["local"] is local
+
+
+# ── pipeline.imports ─────────────────────────────────────────────────────────
+
+
+def test_pipeline_imports_defaults_to_none():
+    """Configs that declare no custom modules are unchanged."""
+    assert validate_config({})["pipeline"]["imports"] is None
+
+
+def test_pipeline_imports_accepts_a_list_of_strings():
+    """Dotted modules, file paths and hf:// URIs are all just strings here."""
+    config = validate_config(
+        {
+            "pipeline": {
+                "imports": ["my_project.my_ops", "./ops.py", "hf://org/repo/ops.py"],
+                "operations": ["identity"],
+            }
+        }
+    )
+    assert config["pipeline"]["imports"] == [
+        "my_project.my_ops",
+        "./ops.py",
+        "hf://org/repo/ops.py",
+    ]
+
+
+@pytest.mark.parametrize("imports", ["ops.py", [Path("ops.py")], [1], {"a": "ops.py"}])
+def test_pipeline_imports_rejects_non_string_lists(imports):
+    """A bare string or a list of non-strings is a mistake worth catching early."""
+    with pytest.raises(ValueError, match="list of strings"):
+        validate_config({"pipeline": {"imports": imports}})
