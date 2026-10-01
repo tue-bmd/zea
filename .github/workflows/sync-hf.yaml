@@ -9,7 +9,8 @@
 #     live for all users. Presets needing a newer zea set `min_zea_version`.
 #   - Release: snapshots both to a branch named after the tag (e.g. `v0.1.8`), for
 #     reproducibility (`zea app --presets-revision v0.1.8`).
-#   - Manual run (Actions tab): re-syncs `main`, e.g. after a failed run.
+#   - Manual run (Actions tab): re-syncs `main`, e.g. after a failed run. Only runs
+#     from the main branch; started from any other branch, the job is skipped.
 #
 # Please change these files through a PR here, not by editing them on the hub:
 # the next sync overwrites hub edits.
@@ -34,7 +35,11 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.repository == 'tue-bmd/zea'
+    # Only main may write to the hub's `main`: a manual run can pick any branch, which
+    # would otherwise publish unreviewed files. Releases run on a tag ref instead.
+    if: >-
+      github.repository == 'tue-bmd/zea' &&
+      (github.event_name == 'release' || github.ref == 'refs/heads/main')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
