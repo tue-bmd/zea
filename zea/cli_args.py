@@ -45,23 +45,47 @@ class AppArgs:
             "port starting at 7860. Defaults to None."
         ),
     ] = None
+    presets: Annotated[
+        str,
+        tyro.conf.arg(
+            help="Presets YAML file (local or hf:// path) for the example dropdown. Defaults to "
+            "the presets maintained on hf://zeahub/app, so they update without a zea release."
+        ),
+    ] = "hf://zeahub/app/presets.yaml"
+    presets_revision: Annotated[
+        str,
+        tyro.conf.arg(
+            help="Branch, tag or PR ref of an hf:// presets file: 'latest' (= 'main'), a "
+            "release snapshot such as 'v0.1.8', or e.g. 'refs/pr/1' to preview a change."
+        ),
+    ] = "latest"
+    inbrowser: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Open the app in the default browser once it is running. Use --no-inbrowser "
+            "on a machine without a browser, or to open the link yourself."
+        ),
+    ] = True
 
     def run(self) -> None:
         """Launch the Gradio dataset visualizer."""
         try:
-            import gradio as gr
+            import gradio  # noqa: F401
         except ImportError as exc:
             raise ImportError(
                 "gradio is required for the zea app. Install with: pip install 'zea[app]'"
             ) from exc
 
-        from zea.data.app import CSS, build_interface
+        from zea.data.app import CSS, JS, build_interface, build_theme, load_presets
 
-        build_interface().launch(
+        presets = load_presets(self.presets, self.presets_revision)
+        build_interface(presets).launch(
             share=self.share,
             server_port=self.server_port,
-            theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
+            inbrowser=self.inbrowser,
+            theme=build_theme(),
             css=CSS,
+            js=JS,
         )
 
 
