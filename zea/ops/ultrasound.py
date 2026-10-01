@@ -634,7 +634,9 @@ class LowPassFilterIQ(FirFilter):
     operations. The :class:`LowPassFilterIQ` operation itself is not jittable and is provided
     for convenience only.
 
-    Uses :func:`get_low_pass_iq_filter` to compute the filter taps.
+    Uses :func:`get_low_pass_iq_filter` to compute the filter taps. The call-time
+    ``bandwidth`` (in Hz) defaults to :attr:`~zea.Parameters.bandwidth` when the parameters are
+    prepared with :meth:`~zea.Pipeline.prepare_parameters`.
     """
 
     def __init__(
@@ -688,7 +690,9 @@ class BandPassFilter(FirFilter):
     By default, the call-time ``bandwidth`` defines the passband centered around
     ``demodulation_frequency``, with edges at
     ``demodulation_frequency - bandwidth/2`` and
-    ``demodulation_frequency + bandwidth/2``.
+    ``demodulation_frequency + bandwidth/2``. When the parameters are prepared with
+    :meth:`~zea.Pipeline.prepare_parameters`, ``bandwidth`` defaults to
+    :attr:`~zea.Parameters.bandwidth`.
 
     Optionally, a fixed ``passband=(f1, f2)`` can be provided at initialization, or a
     call-time ``passband`` can be provided to override both the fixed passband and the
