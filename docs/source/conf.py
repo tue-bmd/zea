@@ -67,6 +67,8 @@ exclude_patterns = [
     "_autosummary/zea.models.hvae.model.rst",
     "_autosummary/zea.models.hvae.utils.rst",
     "_autosummary/zea.cli_args.rst",
+    "_autosummary/zea.simulator.*.rst",
+    "_autosummary/zea.simulator_time_domain.rst",
 ]
 
 autodoc_default_options = {
@@ -127,7 +129,7 @@ bibtex_bibfiles = ["../../paper/paper.bib", "references.bib"]
 # for redirecting empty toc items to their parent
 redirects = {
     f"notebooks/{page}.html": f"../examples.html#{page}"
-    for page in ["data", "pipeline", "models", "metrics", "agent"]
+    for page in ["data", "pipeline", "simulation", "models", "metrics", "agent"]
 }
 
 # this will make sure that when an __all__ is defined in a module, the members

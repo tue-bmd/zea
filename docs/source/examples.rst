@@ -19,6 +19,14 @@ Pipeline
 
     notebooks/pipeline
 
+Simulation
+----------
+
+.. toctree::
+    :maxdepth: 2
+
+    notebooks/simulation
+
 Models
 ------
 

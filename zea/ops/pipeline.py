@@ -61,7 +61,8 @@ def _valid_parameter_names() -> frozenset:
     # Local import for the circular-import reason described above.
     from zea.parameters import Parameters
 
-    return frozenset(Parameters.VALID_PARAMS)
+    # Old names still reach their op through its renames, so they are not typos either.
+    return frozenset(Parameters.VALID_PARAMS) | frozenset(Parameters._RENAMED_PARAMS)
 
 
 class PipelineError(RuntimeError):
@@ -280,6 +281,11 @@ class Pipeline:
     def _compile(self, func):
         """JIT compile ``func`` with this pipeline's jit_kwargs and compiler options."""
         return jit(func, **self.jit_kwargs, default_compiler_options=self.compiler_options)
+
+    @property
+    def required_keys(self) -> set:
+        """Input keys without a default value in any of the operations."""
+        return set().union(*(operation.required_keys for operation in self.operations))
 
     @property
     def needs_keys(self) -> set:
@@ -730,7 +736,9 @@ class Pipeline:
                 operation.set_params(**params)
             elif isinstance(operation, Operation):
                 operation_params = {
-                    key: value for key, value in params.items() if key in operation.valid_keys
+                    key: value
+                    for key, value in params.items()
+                    if key in operation.valid_keys or key in operation._renames
                 }
                 if operation_params:
                     operation.set_input_cache(operation_params)
@@ -1039,6 +1047,9 @@ class Pipeline:
                 params_dict = parameters.to_tensor(
                     include=list(needs_keys), keep_as_is=self.static_params
                 )
+            # Strip optional None parameters so the caller can still pass them directly
+            required = self.required_keys
+            params_dict = {k: v for k, v in params_dict.items() if v is not None or k in required}
 
         # Convert all overrides to tensors
         with backend.device(_device):

@@ -1,0 +1,8 @@
+Simulation
+==========
+
+.. toctree::
+    :maxdepth: 1
+    :glob:
+
+    simulation/*
