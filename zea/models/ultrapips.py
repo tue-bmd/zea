@@ -31,6 +31,14 @@ feature levels UltraPIPS compares.
     For the original code, see `here <https://github.com/talg2324/UltraPIPS>`_
     and `here <https://github.com/talg2324/tusa>`_ for the TUSA backbone.
 
+.. note::
+    The original UltraPIPS and TUSA code and the pretrained TUSA weights are
+    released by their authors under the
+    `GNU General Public License v3.0 <https://github.com/talg2324/UltraPIPS/blob/main/LICENSE>`_.
+    The ``ultrapips-tusa`` preset holds those weights, converted to Keras, and
+    remains subject to that license. The encoder architecture follows MONAI's
+    ``SwinUNETR`` (Apache 2.0).
+
 .. citation:: grutman2026ultrapips
 
 """

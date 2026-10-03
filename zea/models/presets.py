@@ -120,7 +120,8 @@ ultrapips_presets = {
             "description": (
                 "UltraPIPS perceptual similarity for B-mode ultrasound with the TUSA "
                 "Swin transformer backbone. Original paper and code: "
-                "https://arxiv.org/abs/2608.26033"
+                "https://arxiv.org/abs/2608.26033. The weights are from TUSA "
+                "(https://github.com/talg2324/tusa) and licensed under GPL-3.0."
             ),
             "params": 9_120_756,
             "path": "ultrapips",
