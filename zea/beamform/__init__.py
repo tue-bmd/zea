@@ -7,6 +7,7 @@ Modules
 -------
 
 - :mod:`zea.beamform.beamformer` -- Main beamforming functions and time-of-flight correction.
+- :mod:`zea.beamform.bent_ray` -- Refraction-aware (bent-ray) travel times in heterogeneous media.
 - :mod:`zea.beamform.delays` -- Delay calculation routines for plane wave and focused transmissions.
 - :mod:`zea.beamform.lens_correction` -- Lens-corrected delay computation.
 - :mod:`zea.beamform.pfield` -- Pressure field computation for transmit compounding and adaptive beamforming.
@@ -17,4 +18,4 @@ see the pipeline example notebook: :doc:`../notebooks/pipeline/zea_pipeline_exam
 
 """
 
-from . import beamformer, delays, lens_correction, pfield, phantoms, pixelgrid
+from . import beamformer, bent_ray, delays, lens_correction, pfield, phantoms, pixelgrid

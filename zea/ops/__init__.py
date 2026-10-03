@@ -242,6 +242,7 @@ from .pipeline import (
     Pipeline,
     Refocus,
 )
+from .sound_speed import BentRayTravelTimes
 from .tensor import GaussianBlur, Normalize, Pad, Threshold
 from .usct import USCTReflectivityDAS
 from .ultrasound import (
@@ -324,6 +325,7 @@ __all__ = [
     "UpMix",
     "USCTReflectivityDAS",
     "CommonMidpointPhaseError",
+    "BentRayTravelTimes",
     # Keras operations
     "keras_ops",
     "Cast",

@@ -215,6 +215,9 @@ class TOFCorrection(Operation):
         sos_grid_x=None,
         sos_grid_z=None,
         focal_region_length=None,
+        travel_time_map=None,
+        travel_time_grid_x=None,
+        travel_time_grid_z=None,
         **kwargs,
     ):
         """Perform time-of-flight correction on raw RF data.
@@ -245,6 +248,11 @@ class TOFCorrection(Operation):
                 last-arrival delays are linearly blended. This smooths the
                 focal-plane transition while preserving the same model outside
                 the region. ``None`` or ``0`` disables it.
+            travel_time_map (Tensor): One-way travel times in seconds from every
+                element to a regular grid, of shape ``(n_el, Nz, Nx)``, e.g. from
+                :class:`BentRayTravelTimes`. Takes precedence over ``sos_map``.
+            travel_time_grid_x (Tensor): x-coordinates of ``travel_time_map`` columns.
+            travel_time_grid_z (Tensor): z-coordinates of ``travel_time_map`` rows.
 
         Returns:
             dict: Dictionary containing tof_corrected_data
@@ -273,6 +281,9 @@ class TOFCorrection(Operation):
             "sos_grid_x": sos_grid_x,
             "sos_grid_z": sos_grid_z,
             "focal_region_length": focal_region_length,
+            "travel_time_map": travel_time_map,
+            "travel_time_grid_x": travel_time_grid_x,
+            "travel_time_grid_z": travel_time_grid_z,
         }
 
         if not self.with_batch_dim:

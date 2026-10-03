@@ -10,6 +10,7 @@ import keras
 import numpy as np
 from keras import ops
 
+from zea.beamform.bent_ray import sample_travel_time_map
 from zea.beamform.geometry import compute_element_normals
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
@@ -134,23 +135,32 @@ def tof_correction(
     sos_grid_x=None,
     sos_grid_z=None,
     focal_region_length=None,
+    travel_time_map=None,
+    travel_time_grid_x=None,
+    travel_time_grid_z=None,
 ):
     """Time-of-flight (TOF) correction for ultrasound data on a flat pixel grid.
 
     Corrects raw RF or IQ data for differences in propagation time from the
-    transmitter through each pixel and back to every receiving element.  Two
+    transmitter through each pixel and back to every receiving element.  Three
     modes are supported:
 
     * **Homogeneous medium** (default) — a constant ``sound_speed`` is used
       to compute delays analytically via :func:`calculate_delays`.
     * **Heterogeneous medium** — a spatially-varying speed-of-sound map
-      (``sos_map``) is provided and delays are computed numerically via
-      :func:`calculate_delays_heterogeneous_medium`.
+      (``sos_map``) is provided and delays are computed numerically along
+      straight rays via :func:`calculate_delays_heterogeneous_medium`.
+    * **Travel-time map** — precomputed one-way travel times from every
+      element to a regular grid (``travel_time_map``) are interpolated at the
+      pixels via :func:`calculate_delays_travel_time_map`. Use this for
+      refraction-aware (bent-ray) delays, see
+      :func:`zea.beamform.bent_ray.compute_bent_ray_travel_times`. Takes
+      precedence over ``sos_map``.
 
     .. important::
 
-       The heterogeneous mode currently requires **multistatic** acquisitions
-       (``n_tx == n_el``).
+       The heterogeneous and travel-time map modes currently require
+       **multistatic** acquisitions (``n_tx == n_el``).
 
     After delay computation the data is interpolated to the requested pixel
     positions, masked with the receive f-number aperture, and — for IQ data —
@@ -206,6 +216,14 @@ def tof_correction(
             smooths the focal-plane transition while preserving the same model
             outside the region. See :func:`transmit_delays`. Defaults to
             ``None`` (disabled).
+        travel_time_map (Tensor, optional): One-way travel times in seconds
+            from every element to a regular grid, of shape ``(n_el, Nz, Nx)``.
+            When provided, delays are interpolated from it (multistatic only)
+            and ``sos_map`` is ignored. Defaults to ``None``.
+        travel_time_grid_x (Tensor, optional): x-coordinates of the
+            ``travel_time_map`` columns.
+        travel_time_grid_z (Tensor, optional): z-coordinates of the
+            ``travel_time_map`` rows.
 
     Returns:
         Tensor: Time-of-flight corrected data of shape
@@ -236,7 +254,8 @@ def tof_correction(
     # rxdel: receive delay from each pixel back to each element
     # After this block both have a consistent layout:
     #   txdel: (n_pix, n_tx)   rxdel: (n_pix, n_el)
-    if sos_map is None:
+    heterogeneous = sos_map is not None or travel_time_map is not None
+    if not heterogeneous:
         txdel, rxdel = calculate_delays(
             flatgrid,
             t0_delays,
@@ -258,21 +277,35 @@ def tof_correction(
     else:
         assert apply_lens_correction is False, (
             "Lens correction is not currently supported in heterogeneous SOS mode. "
-            "Either set apply_lens_correction=False or set sos_map=None."
+            "Either set apply_lens_correction=False or set sos_map=None "
+            "and travel_time_map=None."
         )
 
-        txdel, rxdel = calculate_delays_heterogeneous_medium(
-            flatgrid,
-            sos_map,
-            sos_grid_x,
-            sos_grid_z,
-            t0_delays,
-            probe_geometry,
-            initial_times,
-            sampling_frequency,
-            t_peak,
-        )
-        # calculate_delays_heterogeneous_medium returns txdel (n_tx, n_pix), rxdel (n_el, n_pix)
+        if travel_time_map is not None:
+            txdel, rxdel = calculate_delays_travel_time_map(
+                flatgrid,
+                travel_time_map,
+                travel_time_grid_x,
+                travel_time_grid_z,
+                t0_delays,
+                probe_geometry,
+                initial_times,
+                sampling_frequency,
+                t_peak,
+            )
+        else:
+            txdel, rxdel = calculate_delays_heterogeneous_medium(
+                flatgrid,
+                sos_map,
+                sos_grid_x,
+                sos_grid_z,
+                t0_delays,
+                probe_geometry,
+                initial_times,
+                sampling_frequency,
+                t_peak,
+            )
+        # Both heterogeneous delay functions return txdel (n_tx, n_pix), rxdel (n_el, n_pix)
         # Transpose both to the shared convention.
         txdel = ops.moveaxis(txdel, 1, 0)  # -> (n_pix, n_tx)
         rxdel = ops.moveaxis(rxdel, 1, 0)  # -> (n_pix, n_el)
@@ -284,7 +317,7 @@ def tof_correction(
         lambda: ops.ones((n_pix, n_el, 1)),
         lambda: fnumber_mask(flatgrid, probe_geometry, f_number, fnum_window_fn=fnum_window_fn),
     )
-    if sos_map is not None:
+    if heterogeneous:
         # Prevent gradients from flowing through the mask when optimising
         # through the heterogeneous beamformer (e.g. SOS estimation).
         mask = ops.stop_gradient(mask)
@@ -342,7 +375,7 @@ def tof_correction(
     # Reshape txdel from (n_pix, n_tx) -> (n_tx, n_pix, 1) for per-tx slicing
     txdel = ops.moveaxis(txdel, 1, 0)[..., None]
 
-    if sos_map is None:
+    if not heterogeneous:
         return vmap(_correct_single_tx)(data, txdel)
 
     # Heterogeneous path: apply transmit f-number mask and use gradient
@@ -1011,6 +1044,27 @@ def calculate_delays_heterogeneous_medium(
     )
 
     tof = mean_slowness * ray_lengths
+    return _multistatic_delays_from_tof(tof, t0_delays, initial_times, sampling_frequency, t_peak)
+
+
+def _multistatic_delays_from_tof(tof, t0_delays, initial_times, sampling_frequency, t_peak):
+    """Convert one-way travel times of a multistatic acquisition to delays in samples.
+
+    In a multistatic acquisition transmit ``i`` fires element ``i`` only, so the
+    transmit and receive legs share the same element-to-pixel travel times.
+
+    Args:
+        tof (Tensor): One-way travel times in seconds of shape ``(n_el, n_pix)``.
+        t0_delays (Tensor): Transmit delays of shape ``(n_tx, n_el)``.
+        initial_times (Tensor): Per-transmit time offsets of shape ``(n_tx,)``.
+        sampling_frequency (float): Sampling frequency in Hz.
+        t_peak (Tensor): Waveform peak times of shape ``(n_tx,)``.
+
+    Returns:
+        tuple[Tensor, Tensor]:
+            - **tx_delays** — Transmit delays in samples ``(n_tx, n_pix)``.
+            - **rx_delays** — Receive delays in samples ``(n_el, n_pix)``.
+    """
     rx_delays = tof * sampling_frequency
     tx_delays = (
         tof
@@ -1022,3 +1076,72 @@ def calculate_delays_heterogeneous_medium(
         + t_peak[:, None]
     ) * sampling_frequency
     return tx_delays, rx_delays
+
+
+def calculate_delays_travel_time_map(
+    grid,
+    travel_time_map,
+    travel_time_grid_x,
+    travel_time_grid_z,
+    t0_delays,
+    probe_geometry,
+    initial_times,
+    sampling_frequency,
+    t_peak,
+):
+    """Compute delays from precomputed one-way travel-time maps.
+
+    The travel time from every element to every pixel is interpolated from a
+    per-element travel-time map on a regular x-z grid with
+    :func:`zea.beamform.bent_ray.sample_travel_time_map`. This decouples the
+    (possibly expensive) propagation model from the beamforming grid: the map can
+    be computed once, e.g. with refraction-aware bent rays
+    (:func:`zea.beamform.bent_ray.compute_bent_ray_travel_times`), and then be
+    used for any number of pixels or patches.
+
+    .. important::
+
+       Only valid for **multistatic** acquisitions (``n_tx == n_el``).
+
+    .. note::
+
+        Only supports 2D grids in the x-z plane (the y coordinate is ignored).
+
+    Args:
+        grid (Tensor): Pixel coordinates of shape ``(n_pix, 3)``.
+        travel_time_map (Tensor): One-way travel times in seconds of shape
+            ``(n_el, Nz, Nx)``.
+        travel_time_grid_x (Tensor): Uniformly spaced x-coordinates of the
+            ``travel_time_map`` columns.
+        travel_time_grid_z (Tensor): Uniformly spaced z-coordinates of the
+            ``travel_time_map`` rows.
+        t0_delays (Tensor): Transmit delays of shape ``(n_tx, n_el)``,
+            shifted so that the smallest delay is 0.
+        probe_geometry (Tensor): Element positions of shape ``(n_el, 3)``.
+        initial_times (Tensor): Per-transmit time offsets of shape ``(n_tx,)``.
+        sampling_frequency (float): Sampling frequency in Hz.
+        t_peak (Tensor): Waveform peak times of shape ``(n_tx,)``.
+
+    Returns:
+        tuple[Tensor, Tensor]:
+            - **tx_delays** — Transmit delays in samples ``(n_tx, n_pix)``.
+            - **rx_delays** — Receive delays in samples ``(n_el, n_pix)``.
+    """
+    n_tx = ops.shape(t0_delays)[0]
+    n_el = ops.shape(probe_geometry)[0]
+    assert n_tx == n_el, (
+        "Computing delays from a travel-time map requires a multistatic dataset "
+        f"(n_tx == n_el), got n_tx={n_tx}, n_el={n_el}."
+    )
+    assert ops.shape(travel_time_map)[0] == n_el, (
+        "Expected travel_time_map to have shape (n_el, Nz, Nx) with "
+        f"n_el={n_el}, got {ops.shape(travel_time_map)}."
+    )
+    assert t_peak.shape == (n_tx,), (
+        f"Expected t_peak to have shape (n_tx,)=({n_tx},), got {t_peak.shape}."
+    )
+
+    tof = sample_travel_time_map(
+        travel_time_map, travel_time_grid_x, travel_time_grid_z, probe_geometry, grid
+    )
+    return _multistatic_delays_from_tof(tof, t0_delays, initial_times, sampling_frequency, t_peak)
