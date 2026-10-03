@@ -49,7 +49,7 @@ def test_smsle():
 def test_metrics(metric_name):
     """Test all losses and metrics.
     Most metrics do not have a batch axis, so we test with single images."""
-    if metric_name == "lpips":
+    if metric_name in ("lpips", "ultrapips"):
         metric = metrics.get_metric(metric_name, image_range=[0, 255])
     else:
         metric = metrics.get_metric(metric_name)
