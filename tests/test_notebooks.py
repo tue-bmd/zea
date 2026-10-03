@@ -105,6 +105,11 @@ NOTEBOOK_PARAMETERS = {
         "num_iterations": 2,
         "step_size": 1,
     },
+    "ultrabend_example.ipynb": {
+        "num_iterations": 2,
+        "step_size": 1,
+        "n_rays": 64,
+    },
     "nuclear_dehazing_example.ipynb": {
         "n_unconditional_samples": 1,
         "n_unconditional_steps": 2,
