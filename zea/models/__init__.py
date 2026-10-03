@@ -13,6 +13,7 @@ See the following dropdown for a list of available models:
     - :class:`zea.models.unet.UNet`: A simple U-Net implementation.
     - :class:`zea.models.lista.LISTA`: An unfolded convolutional ISTA (LISTA) model.
     - :class:`zea.models.lpips.LPIPS`: A model implementing the perceptual similarity metric.
+    - :class:`zea.models.ultrapips.UltraPIPS`: A perceptual similarity metric for B-mode ultrasound with an ultrasound foundation model backbone.
     - :class:`zea.models.taesd.TinyAutoencoder`: A tiny autoencoder model for image compression.
     - :class:`zea.models.regional_quality.MobileNetv2RegionalQuality`: A scoring model for myocardial regions in apical views.
     - :class:`zea.models.lv_segmentation.AugmentedCamusSeg`: A nnU-Net based left ventricle and myocardium segmentation model.
@@ -99,6 +100,7 @@ from . import (
     regional_quality,
     speckle2self,
     taesd,
+    ultrapips,
     unet,
     utils,
 )
