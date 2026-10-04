@@ -30,6 +30,7 @@ Check out the :doc:`about` page for more information and the motivation behind `
    getting-started
    installation
    examples
+   best-practices
 
 .. toctree::
    :caption: Development
