@@ -341,6 +341,49 @@ def test_low_pass_filter_iq():
     return output
 
 
+def test_filter_bandwidth_from_parameters():
+    """A config-built pipeline with ``low_pass_filter`` and ``band_pass_filter`` runs without an
+    explicit ``bandwidth``: it is derived from the probe metadata, and explicit values still win.
+    """
+    from zea import Config
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    center_frequency, sampling_frequency = 2e6, 12.5e6
+    derived_bandwidth = center_frequency * 60.0 / 100
+
+    def run(operation, data, parameters, **overrides):
+        pipeline = Pipeline.from_config(
+            Config({"pipeline": {"operations": [{"name": operation, "params": {"num_taps": 63}}]}})
+        )
+        inputs = pipeline.prepare_parameters(parameters, **overrides)
+        return keras.ops.convert_to_numpy(pipeline(data=data, **inputs)["data"])
+
+    def parameters(**kwargs):
+        return Parameters(
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
+            probe_bandwidth_percent=60.0,
+            **kwargs,
+        )
+
+    for operation, n_ch in (("low_pass_filter", 2), ("band_pass_filter", 1)):
+        data = rng.standard_normal((1, 256, 4, n_ch)).astype("float32")
+
+        derived = run(operation, data, parameters())
+        explicit_derived = run(operation, data, parameters(bandwidth=derived_bandwidth))
+        np.testing.assert_allclose(derived, explicit_derived, rtol=1e-5, atol=1e-6)
+
+        # An explicit bandwidth, on the parameters or as an override, wins over the derived one.
+        parameter_level = run(operation, data, parameters(bandwidth=3e6))
+        call_level = run(operation, data, parameters(), bandwidth=3e6)
+        np.testing.assert_allclose(parameter_level, call_level, rtol=1e-5, atol=1e-6)
+        assert not np.allclose(derived, parameter_level, rtol=1e-5, atol=1e-6)
+
+        # A call-time override also wins over a bandwidth set on the parameters.
+        overridden = run(operation, data, parameters(bandwidth=derived_bandwidth), bandwidth=3e6)
+        np.testing.assert_allclose(overridden, call_level, rtol=1e-5, atol=1e-6)
+
+
 @pytest.mark.parametrize(
     "factor, batch_size",
     [
