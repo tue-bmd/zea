@@ -8,6 +8,7 @@ import pytest
 from zea.beamform.admire import (
     ADMIREConfig,
     _aperture_growth,
+    _resolve_calibration,
     _ica_basis,
     apply_admire,
     elastic_net_ccd,
@@ -175,6 +176,38 @@ def test_generate_admire_models(iq_models):
     assert np.all((norms > 0).sum(axis=-1) <= 2 * n_active)
 
 
+def test_generate_admire_models_parallel(iq_models):
+    """Generating windows in worker processes gives the same models."""
+    depths, models = iq_models
+    with cache_disabled():
+        parallel = generate_admire_models(
+            depths,
+            sound_speed=SOUND_SPEED,
+            center_frequency=CENTER_FREQUENCY,
+            pitch=PITCH,
+            n_elements=16,
+            f_number=2.0,
+            analytic=True,
+            n_workers=2,
+        )
+    np.testing.assert_array_equal(parallel.models, models.models)
+    np.testing.assert_array_equal(parallel.roi_mask, models.roi_mask)
+
+
+@pytest.mark.parametrize(
+    "center_frequency, expected",
+    [
+        (7.8125e6, (1.295, 1.0, 0.855)),  # table key 7813000
+        (25e6 / 12, (1.32, 1.0, 0.845)),  # table key 2083300
+        (5e6, (1.29, 0.995, 0.85)),
+        (4.2e6, (1.135, 0.995, 0.925)),  # not in the table: default values
+    ],
+)
+def test_reference_wavenumber_calibration(center_frequency, expected):
+    """The reference calibration is looked up by the nearest (rounded) table frequency."""
+    np.testing.assert_allclose(_resolve_calibration("reference", center_frequency, 3), expected)
+
+
 @pytest.mark.parametrize(
     "z, n_el, expected",
     [
@@ -293,6 +326,8 @@ def test_admire_operation():
     with cache_disabled():
         operation = ops.ADMIRE(n_elements=9, with_batch_dim=True)
         output = np.asarray(operation(data=data, **params)["data"])
+        eager_operation = ops.ADMIRE(n_elements=9, with_batch_dim=True, jit_compile=False)
+        eager_output = np.asarray(eager_operation(data=data, **params)["data"])
     assert output.shape == (1, n_z * n_x, 2)
 
     # Columns sit on elements 6..10, so their 9-element sub-apertures are elements 2..14
@@ -300,7 +335,10 @@ def test_admire_operation():
     compounded = data[0].sum(axis=0).reshape(n_z, n_x, -1, 2)
     lines = np.stack([compounded[:, i, 2 + i : 11 + i] for i in range(n_x)], axis=1)
     expected = np.asarray(apply_admire(lines, models)).sum(axis=2).reshape(n_z * n_x, 2)
-    np.testing.assert_allclose(output[0], expected, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(eager_output[0], expected, rtol=1e-4, atol=1e-4)
+    # Compiled reductions may round differently (e.g. on GPU), which can shift the
+    # sweep at which the coarse CCD tolerance is met
+    np.testing.assert_allclose(output[0], expected, rtol=0, atol=1e-2)
 
     # A second call reuses the models and the compiled fit
     operation(data=data, **params)

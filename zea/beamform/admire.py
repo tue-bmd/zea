@@ -244,9 +244,12 @@ def _resolve_calibration(calibration, center_frequency, n_freqs):
                 f"Unknown wavenumber_calibration {calibration!r}, "
                 "expected 'reference', a tuple of values, or None."
             )
-        calibration = REFERENCE_WAVENUMBER_CALIBRATION.get(
-            int(round(center_frequency)), DEFAULT_WAVENUMBER_CALIBRATION
-        )
+        # The table keys are rounded (e.g. 7813000 for 7.8125 MHz), so match the nearest
+        nearest = min(REFERENCE_WAVENUMBER_CALIBRATION, key=lambda f: abs(f - center_frequency))
+        if abs(nearest - center_frequency) <= 1e3:
+            calibration = REFERENCE_WAVENUMBER_CALIBRATION[nearest]
+        else:
+            calibration = DEFAULT_WAVENUMBER_CALIBRATION
     calibration = np.asarray(calibration, dtype=float)
     if n_freqs > calibration.size:
         raise ValueError(
@@ -531,7 +534,19 @@ def _models_for_window(z_center, window_depths, element_positions, ks, params):
     return results
 
 
-@cache_output(verbose=True)
+def _single_threaded_blas():
+    """Worker initializer: one BLAS thread per process, so workers don't oversubscribe."""
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:
+        return
+    threadpool_limits(1)
+
+
+@cache_output(
+    "depths", "sound_speed", "center_frequency", "pitch", "n_elements", "f_number",
+    "analytic", "start_depth", "end_depth", "config", verbose=True,
+)  # fmt: skip
 def generate_admire_models(
     depths,
     sound_speed: float,
@@ -544,6 +559,7 @@ def generate_admire_models(
     end_depth: float | None = None,
     config: ADMIREConfig | None = None,
     verbose: bool = False,
+    n_workers: int | None = None,
 ) -> ADMIREModels:
     """Precompute the ADMIRE models for an imaging geometry.
 
@@ -574,6 +590,8 @@ def generate_admire_models(
         config (ADMIREConfig, optional): Model and fit settings. Defaults to the
             reference settings.
         verbose (bool): Show a progress bar.
+        n_workers (int, optional): Number of processes that generate windows in
+            parallel. Defaults to one. Does not affect the result (or its cache key).
 
     Returns:
         ADMIREModels: The models of every STFT window and selected frequency.
@@ -624,21 +642,36 @@ def generate_admire_models(
 
     element_positions = (np.arange(n_elements) - (n_elements - 1) / 2) * pitch
 
-    iterator = starts
-    if verbose:
-        from tqdm import tqdm
-
-        iterator = tqdm(starts, desc="Generating ADMIRE models")
-
-    per_window, aperture_masks = [], []
-    for start in iterator:
+    windows, aperture_masks = [], []
+    for start in starts:
         window_depths = (depths[start], depths[start + window_length - 1])
         z_center = depths[start : start + window_length].mean()
         aperture = _aperture_growth(z_center, n_elements, pitch, f_number, config.min_num_elements)
         aperture_masks.append(aperture)
-        per_window.append(
-            _models_for_window(z_center, window_depths, element_positions[aperture], ks, params)
-        )
+        windows.append((z_center, window_depths, element_positions[aperture], ks, params))
+
+    if n_workers is not None and n_workers > 1:
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+
+        # Spawn: the parent may hold a GPU context or threads that do not survive fork
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(
+            min(n_workers, len(windows)), mp_context=context, initializer=_single_threaded_blas
+        ) as pool:
+            per_window = pool.map(_models_for_window, *zip(*windows))
+            if verbose:
+                from tqdm import tqdm
+
+                per_window = tqdm(per_window, total=len(windows), desc="Generating ADMIRE models")
+            per_window = list(per_window)
+    else:
+        iterator = windows
+        if verbose:
+            from tqdm import tqdm
+
+            iterator = tqdm(windows, desc="Generating ADMIRE models")
+        per_window = [_models_for_window(*window) for window in iterator]
 
     n_predictors = max(model.shape[1] for window in per_window for model, _ in window)
     models = np.zeros((starts.size, ks.size, n_elements, n_predictors), dtype=np.complex64)
@@ -703,7 +736,9 @@ def elastic_net_ccd(
     Returns:
         Tensor: Coefficients of shape ``(..., B, P)``.
     """
+    X = ops.convert_to_tensor(X)
     dtype = X.dtype
+    y = ops.convert_to_tensor(y, dtype=dtype)
     row_mask = ops.cast(row_mask, dtype)[..., None, :]  # (..., 1, N)
     n_obs = ops.maximum(ops.sum(row_mask, axis=-1, keepdims=True), 1.0)  # (..., 1, 1)
 
