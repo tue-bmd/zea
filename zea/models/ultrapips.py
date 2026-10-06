@@ -536,6 +536,8 @@ class UltraPIPS(BaseModel):
 
     def build(self, input_shape=None):
         """Build the backbone (its input shape is fixed by ``image_size``)."""
+        if self.built:
+            return
         self.net.build((None, self.image_size, self.image_size, 1))
         self.built = True
 

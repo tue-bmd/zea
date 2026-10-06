@@ -139,7 +139,8 @@ class TestCall:
         batched = ops.convert_to_numpy(model([x, y]))
         single = [float(ops.convert_to_numpy(model([x[i], y[i]]))) for i in range(3)]
 
-        np.testing.assert_allclose(batched, single, rtol=1e-5)
+        # Batched GPU kernels may reduce in a different order (~1e-5 relative on TF).
+        np.testing.assert_allclose(batched, single, rtol=1e-4)
 
     def test_unbatched_input_gives_a_scalar(self, model, rng):
         x = rng.uniform(-1, 1, IMAGE_SHAPE).astype("float32")
@@ -250,6 +251,26 @@ def test_round_trips_through_a_local_preset(model, tmp_path, rng):
     """``save_to_preset`` and ``from_preset`` give back the same metric."""
     model.save_to_preset(str(tmp_path))
     reloaded = UltraPIPS.from_preset(str(tmp_path))
+
+    x = rng.uniform(-1, 1, (1, *IMAGE_SHAPE)).astype("float32")
+    y = rng.uniform(-1, 1, (1, *IMAGE_SHAPE)).astype("float32")
+    np.testing.assert_allclose(
+        ops.convert_to_numpy(reloaded([x, y])), ops.convert_to_numpy(model([x, y])), rtol=1e-6
+    )
+
+
+def test_loads_the_torch_checkpoint_from_a_preset(model, tmp_path, rng):
+    """``custom_load_weights(..., backend="torch")`` converts the ``unet.pt`` in the preset."""
+    torch = pytest.importorskip("torch")
+    model.save_to_preset(str(tmp_path))
+    state = _torch_state_dict_from(model.net)
+    torch.save(
+        {key: torch.from_numpy(np.ascontiguousarray(value)) for key, value in state.items()},
+        tmp_path / "unet.pt",
+    )
+
+    reloaded = UltraPIPS()
+    reloaded.custom_load_weights(str(tmp_path), backend="torch")
 
     x = rng.uniform(-1, 1, (1, *IMAGE_SHAPE)).astype("float32")
     y = rng.uniform(-1, 1, (1, *IMAGE_SHAPE)).astype("float32")
