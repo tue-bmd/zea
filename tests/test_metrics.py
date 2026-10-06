@@ -44,12 +44,26 @@ def test_smsle():
     return loss
 
 
+@pytest.fixture(scope="module")
+def ultrapips_preset(tmp_path_factory):
+    """Local UltraPIPS preset with random weights, so no (gated) download is needed."""
+    from zea.models.ultrapips import UltraPIPS
+
+    model = UltraPIPS()
+    model.build()
+    preset = tmp_path_factory.mktemp("ultrapips")
+    model.save_to_preset(str(preset))
+    return str(preset)
+
+
 @pytest.mark.parametrize("metric_name", metrics_registry.registered_names())
 @backend_equality_check(decimal=3)
-def test_metrics(metric_name):
+def test_metrics(metric_name, ultrapips_preset):
     """Test all losses and metrics.
     Most metrics do not have a batch axis, so we test with single images."""
-    if metric_name in ("lpips", "ultrapips"):
+    if metric_name == "ultrapips":
+        metric = metrics.get_metric(metric_name, image_range=[0, 255], preset=ultrapips_preset)
+    elif metric_name == "lpips":
         metric = metrics.get_metric(metric_name, image_range=[0, 255])
     else:
         metric = metrics.get_metric(metric_name)
