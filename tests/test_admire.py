@@ -398,6 +398,53 @@ def test_admire_in_beamform_requires_full_grid():
         operation(data=data[:, :, :-5], **params)
 
 
+def test_beamform_admire_uses_full_grid():
+    """Beamform with ADMIRE defaults to the full grid and rejects patching clearly."""
+    from zea import ops
+
+    beamform = ops.Beamform(beamformer="admire")
+    assert beamform.num_patches == 1
+    assert not any(isinstance(op, ops.PatchedGrid) for op in beamform.operations)
+    assert beamform.get_dict()["params"]["num_patches"] == 1
+
+    for patching in (dict(num_patches=4), dict(patch_size=2048)):
+        with pytest.raises(ValueError, match="num_patches=1"):
+            ops.Beamform(beamformer="admire", **patching)
+
+
+@pytest.mark.parametrize(
+    "geometry, message",
+    [
+        ("cartesian", None),
+        ("tilted", "not cartesian"),  # columns that are not straight down, as in a sector
+        ("off_array", "beyond the array"),
+    ],
+)
+def test_admire_warns_about_unsupported_geometry(geometry, message):
+    """Easy-to-spot geometries that ADMIRE does not model give a warning, once."""
+    from unittest.mock import patch
+
+    from zea import ops
+
+    data, params = _admire_inputs()
+    grid = params["grid"].copy()
+    if geometry == "tilted":
+        grid[..., 0] += 0.2 * (grid[..., 2] - grid[0, 0, 2])
+    elif geometry == "off_array":
+        grid[..., 0] += 16 * PITCH
+    params["grid"] = grid
+
+    operation = ops.ADMIRE(n_elements=9, with_batch_dim=True)
+    with cache_disabled(), patch("zea.ops.pipeline.log.warning") as warning:
+        operation(data=data, **params)
+        operation(data=data, **params)
+    messages = [call.args[0] for call in warning.call_args_list]
+    if message is None:
+        assert not messages
+    else:
+        assert len(messages) == 1 and message in messages[0]
+
+
 def test_admire_registered_as_beamformer():
     """ADMIRE is available to Beamform and keeps its settings in a config."""
     from zea import ops

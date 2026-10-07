@@ -315,7 +315,7 @@ class Pipeline:
                 - "coherence_factor"
                 - "generalized_coherence_factor"
                 - "minimum_variance"
-                - "admire" (requires ``num_patches=1``)
+                - "admire" (always beamforms the full grid at once: ``num_patches=1``)
                 - "able" (available once :mod:`zea.models.able` is imported)
                 Defaults to "delay_and_sum".
             num_patches (int, optional): Number of patches for the PatchedGrid operation.
@@ -1410,7 +1410,7 @@ class Beamform(Pipeline):
                 - "coherence_factor"
                 - "generalized_coherence_factor"
                 - "minimum_variance"
-                - "admire" (requires ``num_patches=1``)
+                - "admire" (always beamforms the full grid at once: ``num_patches=1``)
                 Defaults to "delay_and_sum".
             num_patches (int, optional): Number of patches to split the grid into for
                 patch-wise beamforming. If 1, no patching is performed. Prefer
@@ -1444,6 +1444,21 @@ class Beamform(Pipeline):
             raise ValueError(
                 "num_patches and patch_size are mutually exclusive. Please specify only one."
             )
+
+        if beamformer == "admire":
+            # ADMIRE fits every image line over its full depth, so it cannot be patched
+            if patch_size is not None or num_patches not in (None, 1):
+                requested = (
+                    f"patch_size={patch_size}"
+                    if patch_size is not None
+                    else f"num_patches={num_patches}"
+                )
+                raise ValueError(
+                    "The ADMIRE beamformer fits every image line over its full depth, so it "
+                    f"needs the whole grid at once and cannot be patched. Got {requested}; "
+                    "use num_patches=1 (the default for ADMIRE) or leave it unset."
+                )
+            num_patches = 1
 
         self.beamformer_type = beamformer
         self.num_patches = num_patches
@@ -2208,6 +2223,7 @@ class ADMIRE(Operation):
         self._jit_fit = kwargs.get("jit_compile", True)
         self._models_cache = {}
         self._fit_cache = {}
+        self._checked_geometry = None
 
     def get_dict(self, compact=True):
         """Serialize the operation, leaving out precomputed ``models``.
@@ -2328,22 +2344,57 @@ class ADMIRE(Operation):
 
         pitch = self._linear_array_pitch(probe_x)
         n_sub = self.n_elements if self.n_elements is not None else n_el
+
+        # For every grid column, the sub-aperture whose center lies closest to it
+        if self.models is not None:
+            relative = self.models.element_positions
+        else:  # the positions generate_admire_models will use
+            relative = (np.arange(n_sub) - (n_sub - 1) / 2) * pitch
+        columns = grid_np[0, :, 0]
+        first = np.round((columns + relative[0] - probe_x[0]) / pitch).astype(int)
+        indices = first[:, None] + np.arange(n_sub)
+        indices = np.where((indices >= 0) & (indices < n_el), indices, n_el)  # n_el: zeros
+
+        # Check the geometry once, before the (slow) model generation
+        geometry_key = (grid_np.tobytes(), indices.tobytes())
+        if geometry_key != self._checked_geometry:
+            self._warn_unsupported_geometry(grid_np, pitch, indices, n_el)
+            self._checked_geometry = geometry_key
+
         models = self._get_models(
             grid_np[:, 0, 2], pitch, n_sub, sound_speed, center_frequency, f_number or 0.0,
             analytic=n_ch == 2,
         )  # fmt: skip
-
-        # For every grid column, the sub-aperture whose center lies closest to it
-        relative = models.element_positions
-        columns = grid_np[0, :, 0]
-        first = np.round((columns + relative[0] - probe_x[0]) / pitch).astype(int)
-        indices = first[:, None] + np.arange(models.n_elements)
-        indices = np.where((indices >= 0) & (indices < n_el), indices, n_el)  # n_el: zeros
         key = (id(models), indices.tobytes(), data.shape, self.with_batch_dim)
         if key not in self._fit_cache:
             fn = self._make_fit(models, indices, n_z, n_x, n_el, n_ch)
             self._fit_cache = {key: jit(fn) if self._jit_fit else fn}
         return {self.output_key: self._fit_cache[key](data)}
+
+    @staticmethod
+    def _warn_unsupported_geometry(grid, pitch, indices, n_el):
+        """Warn about the easy-to-spot geometries that ADMIRE does not model.
+
+        Not exhaustive: it catches non-cartesian grids (such as polar sector grids)
+        and grids that extend well beyond the array.
+        """
+        x, z = grid[..., 0], grid[..., 2]
+        tol = 1e-3 * pitch
+        if not (np.allclose(x, x[:1], atol=tol) and np.allclose(z, z[:, :1], atol=tol)):
+            log.warning(
+                "ADMIRE models every grid column as an unsteered line straight below the "
+                "array, but this grid is not cartesian (for example a polar or sector grid). "
+                "The result will not be a valid ADMIRE image; use grid_type='cartesian'. "
+                "Steered lines, as in phased-array sector scans, are not supported."
+            )
+        mostly_off = np.mean(indices == n_el, axis=1) > 0.5
+        if np.mean(mostly_off) > 0.25:
+            log.warning(
+                f"For {np.mean(mostly_off):.0%} of the grid columns, more than half of the "
+                "ADMIRE sub-aperture lies beyond the array, where the channels are filled "
+                "with zeros. Limit the grid to the width of the array (xlims) or use a "
+                "smaller n_elements."
+            )
 
     def _make_fit(self, models, indices, n_z, n_x, n_el, n_ch):
         """Build the function that beamforms aligned data with ADMIRE."""
