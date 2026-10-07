@@ -982,10 +982,11 @@ def test_compute_time_to_peak():
 # "able", registered by zea.models.able) is not comparable across backends: its
 # weights are randomly initialized per backend, and under torch its output requires
 # grad, which this harness cannot convert to numpy. Those live with their model.
+# ADMIRE needs a real imaging geometry; it is tested in test_admire.py.
 _OPS_BEAMFORMERS = [
     name
     for name in beamformer_registry.registered_names()
-    if beamformer_registry[name].__module__.startswith("zea.ops.")
+    if beamformer_registry[name].__module__.startswith("zea.ops.") and name != "admire"
 ]
 
 
