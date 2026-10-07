@@ -201,7 +201,7 @@ class ADMIREModels:
     leaves the fit unchanged: padded columns get zero coefficients and padded rows
     carry no data.
 
-    Attributes:
+    Args:
         models (np.ndarray): Complex models of shape
             ``(n_windows, n_freqs, n_elements, n_predictors)``, with unit-norm columns.
         roi_mask (np.ndarray): Boolean mask of shape
