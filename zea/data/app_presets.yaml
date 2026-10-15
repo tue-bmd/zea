@@ -1,0 +1,135 @@
+# Example presets for the zea app (`zea app`), listed in its preset dropdown.
+#
+# How presets reach users:
+#   1. Edit this file in a pull request to tue-bmd/zea.
+#   2. On merge to main, the `sync-hf.yaml` workflow uploads it to
+#      hf://zeahub/app/presets.yaml (branch `main`).
+#   3. Every installed zea version downloads that file when the app starts, so the
+#      change is live without a zea release. Offline, the app falls back to the copy
+#      of this file shipped with the installed zea package.
+# Each release also snapshots this file to a `vX.Y.Z` branch on zeahub/app, which you can
+# load with `zea app --presets-revision vX.Y.Z`.
+#
+# Preset fields:
+#   name             Label in the dropdown (required, unique).
+#   dataset          Dataset path: hf://owner/repo[/subfolder] (required).
+#   config           Config path (optional; else the app looks for one next to the data).
+#   key              Data key to process (default: data/raw_data).
+#   file             File to pre-select; must lie inside `dataset`.
+#   n_frames         Number of frames to load for `file` (default: 1).
+#   revision         Branch, tag or PR ref (e.g. refs/pr/66) of the dataset and config.
+#   min_zea_version  Hide the preset in older zea versions, e.g. for a preset that needs
+#                    a feature added in that version.
+#
+# Bump `schema_version` only for changes older zea versions cannot read (e.g. renaming
+# a field); they then ignore the downloaded file and use their bundled copy instead.
+schema_version: 1
+
+presets:
+- name: PICMUS › Contrast speckle (RF)
+  dataset: hf://zeahub/picmus/database/experiments/contrast_speckle/contrast_speckle_expe_dataset_rf
+  config: hf://zeahub/picmus/config_rf.yaml
+  key: data/raw_data
+- name: PICMUS › Resolution distortion (IQ)
+  dataset: hf://zeahub/picmus/database/experiments/resolution_distorsion/resolution_distorsion_expe_dataset_iq
+  config: hf://zeahub/picmus/config_iq.yaml
+  key: data/raw_data
+- name: zea › Cardiac 2026
+  dataset: hf://zeahub/zea-cardiac-2026
+  config: hf://zeahub/zea-cardiac-2026/config.yaml
+  key: data/raw_data
+- name: zea › Carotid 2023
+  dataset: hf://zeahub/zea-carotid-2023
+  config: hf://zeahub/zea-carotid-2023/pipeline.yaml
+  key: data/raw_data
+- name: CAMUS › Cardiac echo
+  dataset: hf://zeahub/camus
+  config: hf://zeahub/configs/config_camus.yaml
+  key: data/image/values
+
+# OpenH-RF (https://huggingface.co/datasets/nvidia/OpenH-RF)
+- name: OpenH-RF › Concordia
+  dataset: hf://nvidia/OpenH-RF/concordia
+  config: hf://nvidia/OpenH-RF/concordia/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/concordia/data/image_0005.hdf5
+- name: OpenH-RF › KAIST-SNUBH › Barreleye
+  dataset: hf://nvidia/OpenH-RF/kaist-snubh-barreleye
+  config: hf://nvidia/OpenH-RF/kaist-snubh-barreleye/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/kaist-snubh-barreleye/data/S01_D1.hdf5
+- name: OpenH-RF › Technion › Bladder
+  dataset: hf://nvidia/OpenH-RF/technion/bladder
+  config: hf://nvidia/OpenH-RF/technion/bladder/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/technion/bladder/data/a1.hdf5
+  n_frames: 10
+- name: OpenH-RF › Technion › Cardiac
+  dataset: hf://nvidia/OpenH-RF/technion/cardiac
+  config: hf://nvidia/OpenH-RF/technion/cardiac/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/technion/cardiac/data/c1.hdf5
+  n_frames: 32
+- name: OpenH-RF › Technion › Phantom
+  dataset: hf://nvidia/OpenH-RF/technion/phantom
+  config: hf://nvidia/OpenH-RF/technion/phantom/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/technion/phantom/data/ph.hdf5
+- name: OpenH-RF › TU/e › AAA
+  dataset: hf://nvidia/OpenH-RF/tue-aaa
+  config: hf://nvidia/OpenH-RF/tue-aaa/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/tue-aaa/data/AAA_subject11.hdf5
+- name: OpenH-RF › TU/e › Carotid
+  dataset: hf://nvidia/OpenH-RF/tue-carotid
+  config: hf://nvidia/OpenH-RF/tue-carotid/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/tue-carotid/data/5_long_bifur_R_0000.hdf5
+- name: OpenH-RF › Vanderbilt
+  dataset: hf://nvidia/OpenH-RF/vanderbilt
+  config: hf://nvidia/OpenH-RF/vanderbilt/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/vanderbilt/data/Fundamental/118420_1_Focused_Uncoded_TX.hdf5
+  n_frames: 10
+
+# Oslo: the example acquisition from each sub-dataset's README; its pipeline.yaml is tuned
+# for that file, so other files in the subset may need another one. The per-subset
+# pipelines live in an open pull request for now; drop `revision` once
+# https://huggingface.co/datasets/nvidia/OpenH-RF/discussions/66 is merged.
+- name: OpenH-RF › Oslo › Cardiac
+  dataset: hf://nvidia/OpenH-RF/oslo/A_cardiac
+  config: hf://nvidia/OpenH-RF/oslo/A_cardiac/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/oslo/A_cardiac/Verasonics_P2-4_parasternal_long_subject_1.hdf5
+  revision: refs/pr/66
+- name: OpenH-RF › Oslo › Carotid
+  dataset: hf://nvidia/OpenH-RF/oslo/B_carotid
+  config: hf://nvidia/OpenH-RF/oslo/B_carotid/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/oslo/B_carotid/L7_FI_carotid_cross_1.hdf5
+  revision: refs/pr/66
+- name: OpenH-RF › Oslo › Verasonics phantom
+  dataset: hf://nvidia/OpenH-RF/oslo/C_verasonics_phantom
+  config: hf://nvidia/OpenH-RF/oslo/C_verasonics_phantom/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/oslo/C_verasonics_phantom/FI_P4_cysts_center.hdf5
+  revision: refs/pr/66
+- name: OpenH-RF › Oslo › Alpinion phantom
+  dataset: hf://nvidia/OpenH-RF/oslo/D_alpinion_phantom
+  config: hf://nvidia/OpenH-RF/oslo/D_alpinion_phantom/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/oslo/D_alpinion_phantom/Alpinion_L3-8_CPWC_hypoechoic.hdf5
+  revision: refs/pr/66
+- name: OpenH-RF › Oslo › Simulation
+  dataset: hf://nvidia/OpenH-RF/oslo/E_simulation
+  config: hf://nvidia/OpenH-RF/oslo/E_simulation/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/oslo/E_simulation/PICMUS_numerical_calib_v2.hdf5
+  revision: refs/pr/66
+- name: OpenH-RF › Oslo › Motion
+  dataset: hf://nvidia/OpenH-RF/oslo/F_motion
+  config: hf://nvidia/OpenH-RF/oslo/F_motion/pipeline.yaml
+  key: data/raw_data
+  file: hf://nvidia/OpenH-RF/oslo/F_motion/SWE_L7_type_III.hdf5
+  n_frames: 20
+  revision: refs/pr/66

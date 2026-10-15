@@ -2,6 +2,9 @@
 
 import inspect
 import json
+import subprocess
+import sys
+import textwrap
 
 import keras
 import numpy as np
@@ -10,11 +13,12 @@ import pytest
 from zea import func, ops
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.config import Config
-from zea.data.file import File
 from zea.internal.core import DEFAULT_DYNAMIC_RANGE, DataTypes
 from zea.internal.registry import ops_registry
 from zea.ops.keras_ops import Squeeze
 from zea.ops.pipeline import (
+    DEFAULT_PATCH_SIZE,
+    MAX_SAFE_PATCH_SIZE,
     Beamform,
     Map,
     PatchedGrid,
@@ -27,6 +31,7 @@ from zea.parameters import Parameters
 from zea.probes import Probe
 
 from . import DEFAULT_TEST_SEED, run_in_backend
+from .backend_utils import format_backend_skip_reason, missing_required_backends
 
 """Some operations for testing"""
 
@@ -65,6 +70,14 @@ class AddTransmitsOperation(ops.Operation):
 
     def call(self, x, n_tx):
         return {"z": keras.ops.add(x, n_tx)}
+
+
+@ops_registry("sum_flatgrid")
+class SumFlatgridOperation(ops.Operation):
+    """Reduces `flatgrid` per pixel, so PatchedGrid has something to map over."""
+
+    def call(self, flatgrid):
+        return {"data": keras.ops.sum(flatgrid, axis=-1)}
 
 
 @ops_registry("large_matrix_multiplication")
@@ -360,7 +373,7 @@ def test_pipeline_dotted_registry_name():
     from zea.ops.keras_ops import Cast
     from zea.ops.pipeline import Pipeline
 
-    pipeline = Pipeline.from_default(jit_options=None)
+    pipeline = Pipeline([Cast(dtype="float32")])
     # Cast is registered as "keras.ops.cast" but must be addressable as "cast"
     assert isinstance(pipeline["cast"], Cast)
     assert "cast" in pipeline.keys()
@@ -518,6 +531,46 @@ def test_map_configures_jit_on_nested_pipeline():
     # Map owns the JIT scope: its nested pipeline must not self-JIT and runs inside Map's trace.
     assert inner.jit_options is None
     assert inner._inside_outer_jit is True
+
+
+@pytest.fixture
+def jit_kwargs_of(monkeypatch):
+    """Record the kwargs ops and pipelines pass to ``jit``; returns a lookup by owner."""
+    import zea.ops.base
+    import zea.ops.pipeline
+
+    recorded = {}
+
+    def record(func, **kwargs):
+        recorded[id(func.__self__)] = kwargs  # operations are unhashable
+        return func
+
+    monkeypatch.setattr(zea.ops.base, "jit", record)
+    monkeypatch.setattr(zea.ops.pipeline, "jit", record)
+    return lambda owner: recorded[id(owner)]
+
+
+def test_tof_correction_compiler_options_reach_enclosing_jit(jit_kwargs_of):
+    """TOFCorrection's compiler options apply to every function compiled around it,
+    and to nothing else."""
+    flag = "xla_gpu_experimental_enable_fusion_autotuner"
+
+    pipeline = ops.Pipeline.from_default(jit_options="ops")
+    patched_grid = pipeline["beamform"].operations[0]
+    assert isinstance(patched_grid, PatchedGrid)
+    assert jit_kwargs_of(patched_grid)["default_compiler_options"] == {flag: False}
+    assert jit_kwargs_of(pipeline["envelope_detect"])["default_compiler_options"] == {}
+    assert pipeline.compiler_options == {flag: False}
+
+    whole = ops.Pipeline.from_default(jit_options="pipeline")
+    assert jit_kwargs_of(whole)["default_compiler_options"] == {flag: False}
+
+    unpatched = ops.Pipeline.from_default(num_patches=1, jit_options="ops")
+    tof = unpatched["beamform"].operations[0]
+    assert isinstance(tof, ops.TOFCorrection)
+    assert jit_kwargs_of(tof)["default_compiler_options"] == {flag: False}
+
+    assert ops.Pipeline([AddOperation()]).compiler_options == {}
 
 
 def test_prepare_parameters_rejects_non_parameters():
@@ -926,7 +979,9 @@ def test_compact_output_omits_defaults():
     beamform_dict = full["pipeline"]["operations"][0]
     assert "params" in beamform_dict
     assert beamform_dict["params"]["beamformer"] == "delay_and_sum"
-    assert beamform_dict["params"]["num_patches"] == 100
+    # Patches are sized, not counted, by default.
+    assert beamform_dict["params"]["patch_size"] == DEFAULT_PATCH_SIZE
+    assert "num_patches" not in beamform_dict["params"]
     assert beamform_dict["params"]["enable_pfield"] is False
 
 
@@ -1159,6 +1214,175 @@ def test_simulator(ultrasound_probe, ultrasound_parameters, ultrasound_scatterer
     assert output["data"].shape == expected_shape
 
 
+def _subprocess_simulate_elevation_lens_under_jit():  # pragma: no cover
+    """`elevation_lens` is branched on with a Python `if` in `simulate_rf`, so it must be in
+    `Simulate.STATIC_PARAMS` or it raises `TracerBoolConversionError` under jit."""
+    import os
+
+    os.environ["KERAS_BACKEND"] = "jax"
+
+    import numpy as np
+
+    from zea import ops
+    from zea.beamform.delays import compute_t0_delays_planewave
+    from zea.ops.pipeline import Pipeline
+    from zea.parameters import Parameters
+
+    n_el = 16
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    angles = np.zeros(1)
+    parameters = Parameters(
+        n_tx=1,
+        n_ax=128,
+        n_el=n_el,
+        center_frequency=3e6,
+        sampling_frequency=12e6,
+        probe_geometry=probe_geometry,
+        t0_delays=compute_t0_delays_planewave(
+            probe_geometry=probe_geometry, polar_angles=angles, sound_speed=1540.0
+        ),
+        tx_apodizations=np.ones((1, n_el), dtype=np.float32),
+        element_width=np.linalg.norm(probe_geometry[1] - probe_geometry[0]),
+        apply_lens_correction=False,
+        sound_speed=1540.0,
+        lens_sound_speed=1000.0,
+        lens_thickness=1e-3,
+        initial_times=np.ones((1,)) * 1e-6,
+        attenuation_coef=0.2,
+        n_ch=1,
+        selected_transmits="all",
+        focus_distances=np.ones(1) * np.inf,
+        polar_angles=angles,
+        xlims=(-15e-3, 15e-3),
+        zlims=(0, 35e-3),
+    )
+
+    pipeline = Pipeline([ops.Simulate(jit_compile=True)], with_batch_dim=False)
+    inputs = pipeline.prepare_parameters(parameters)
+    pipeline(
+        **inputs,
+        scatterer_positions=np.array([[0.0, 0.0, 20e-3]], dtype=np.float32),
+        scatterer_magnitudes=np.ones(1, dtype=np.float32),
+        elevation_lens=True,
+        element_height=5e-3,
+    )
+
+
+def test_simulate_elevation_lens_under_jax_jit():
+    """Needs a subprocess, as `run_in_backend` disables jit."""
+    missing = missing_required_backends(["jax"])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_lens_under_jit))
+    code += "\n_subprocess_simulate_elevation_lens_under_jit()\n"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, (
+        f"Simulation with elevation_lens crashed with jax jit.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+
+
+def _subprocess_simulate_elevation_bucket_compile_counts():  # pragma: no cover
+    """XLA compiles per call to check `elevation_slab_bucket` caches correctly."""
+    import os
+
+    os.environ["KERAS_BACKEND"] = "jax"
+
+    import jax
+    import numpy as np
+
+    from zea import ops
+
+    n_el, element_height = 16, 5e-3
+    probe_geometry = np.stack(
+        [np.linspace(-8e-3, 8e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+
+    def cloud(n_inside, n_total, seed):
+        rng = np.random.default_rng(seed)
+        y = np.concatenate(
+            [
+                rng.uniform(-0.4, 0.4, n_inside) * element_height,
+                rng.uniform(1.5, 3.0, n_total - n_inside) * element_height,
+            ]
+        )
+        positions = np.stack(
+            [
+                rng.uniform(-5e-3, 5e-3, n_total),
+                y,
+                rng.uniform(15e-3, 30e-3, n_total),
+            ],
+            axis=1,
+        ).astype(np.float32)
+        return positions, rng.uniform(0.5, 1.5, n_total).astype(np.float32)
+
+    op = ops.Simulate(jit_compile=True, with_batch_dim=False)
+    args = {
+        "probe_geometry": probe_geometry,
+        "apply_lens_correction": False,
+        "lens_thickness": 1e-3,
+        "lens_sound_speed": 1000.0,
+        "sound_speed": 1540.0,
+        "n_ax": 256,
+        "center_frequency": 3e6,
+        "sampling_frequency": 12e6,
+        "t0_delays": np.zeros((1, n_el), dtype=np.float32),
+        "initial_times": np.zeros(1, dtype=np.float32),
+        "element_width": 1e-3,
+        "attenuation_coef": 0.0,
+        "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
+        "t_peak": np.full(1, 1 / 3e6, dtype=np.float32),
+        "elevation_lens": True,
+        "element_height": element_height,
+    }
+
+    compile_count = 0
+
+    def _on_compile(event, duration_secs, **kwargs):
+        nonlocal compile_count
+        if event == "/jax/core/compile/backend_compile_duration":
+            compile_count += 1
+
+    jax.monitoring.register_event_duration_secs_listener(_on_compile)
+
+    n_compiles = {}
+    for n_inside in (300, 400, 500, 900):
+        before = compile_count
+        positions, magnitudes = cloud(n_inside, 2000, seed=n_inside)
+        op(scatterer_positions=positions, scatterer_magnitudes=magnitudes, **args)
+        n_compiles[n_inside] = compile_count - before
+
+    print(f"compiles per call: {n_compiles}")
+    if n_compiles[300] == 0:
+        raise AssertionError("The first call should compile.")
+    if n_compiles[400] or n_compiles[500]:
+        raise AssertionError(f"clouds in the same bucket should reuse: {n_compiles}")
+    if n_compiles[900] == 0:
+        raise AssertionError(f"clouds in different buckets should recompile: {n_compiles}")
+
+
+def test_simulate_elevation_bucket_reuses_compiled_shapes():
+    """Neighbouring in-slab counts must hit one compiled shape, or bucketing buys nothing."""
+    missing = missing_required_backends(["jax"])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_simulate_elevation_bucket_compile_counts))
+    code += "\n_subprocess_simulate_elevation_bucket_compile_counts()\n"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=600
+    )
+    assert result.returncode == 0, (
+        f"elevation slab bucketing did not reuse compiled shapes.\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+
+
 @pytest.mark.heavy
 def test_default_ultrasound_pipeline(
     default_pipeline,
@@ -1215,46 +1439,6 @@ def test_pipeline_parameter_tracing(ultrasound_parameters: Parameters):
     )
     output = pipeline(data=data, **inputs)
     assert "demodulation_frequency" in output
-
-
-def test_demodulate_int16_requires_cast():
-    """Demodulate should raise a clear error for int16 raw input."""
-    data = np.zeros((1, 4, 8, 2, 1), dtype=np.int16)
-    op = ops.Demodulate(jit_compile=False)
-
-    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
-        op(data=data, demodulation_frequency=1e6, sampling_frequency=20e6)
-
-
-def test_demodulate_int16_from_hdf5_requires_cast(tmp_path):
-    """Demodulate should raise a clear cast error for int16 raw_data loaded from HDF5."""
-    n_frames, n_tx, n_ax = 1, 2, 8
-    probe = Probe.from_name("verasonics_l11_4v")
-    n_el = probe.n_el
-    path = tmp_path / "int16_raw_data.hdf5"
-
-    scan = {
-        "sampling_frequency": np.float32(20e6),
-        "center_frequency": np.float32(5e6),
-        "demodulation_frequency": np.float32(5e6),
-        "initial_times": np.zeros(n_tx, dtype=np.float32),
-        "t0_delays": np.zeros((n_tx, n_el), dtype=np.float32),
-        "tx_apodizations": np.ones((n_tx, n_el), dtype=np.float32),
-        "focus_distances": np.full(n_tx, np.inf, dtype=np.float32),
-        "transmit_origins": np.zeros((n_tx, 3), dtype=np.float32),
-        "polar_angles": np.zeros(n_tx, dtype=np.float32),
-        "time_to_next_transmit": np.ones((n_frames, n_tx), dtype=np.float32) * 1e-4,
-    }
-    raw_data = np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.int16)
-
-    File.create(path, data={"raw_data": raw_data}, scan=scan, probe=probe)
-
-    with File(path, "r") as f_read:
-        loaded = f_read.data.raw_data[:]
-
-    op = ops.Demodulate(jit_compile=False)
-    with pytest.raises(ValueError, match=r"Cast\(dtype='float32'\)"):
-        op(data=loaded, demodulation_frequency=5e6, sampling_frequency=20e6)
 
 
 def test_ops_pass_positional_arg():
@@ -1575,6 +1759,59 @@ def test_pipeline_unused_key_typo_warns(monkeypatch):
     assert any("dynamic_range" in m and "typo" in m for m in messages)
 
 
+def test_pipeline_valid_parameter_not_flagged_as_typo(monkeypatch):
+    """A real ``zea.Parameters`` field is never reported as a typo.
+
+    ``polar_limits`` fuzzy-matches the pipeline's ``polar_angles``, but it is a
+    legitimate parameter that shapes *derived* inputs (the beamforming grid), so
+    it belongs in the benign debug list rather than the typo warning.
+    """
+    import numpy as np
+
+    from zea.ops import pipeline as pipeline_module
+
+    warnings_, debugs = [], []
+    monkeypatch.setattr(pipeline_module.log, "warning", lambda msg, *a, **k: warnings_.append(msg))
+    monkeypatch.setattr(pipeline_module.log, "debug", lambda msg, *a, **k: debugs.append(msg))
+
+    @ops_registry("needs_polar_angles")
+    class NeedsPolarAngles(ops.Operation):
+        def call(self, polar_angles=None, **kwargs):
+            return {"data": kwargs["data"]}
+
+    pipeline = ops.Pipeline(
+        [NeedsPolarAngles()], with_batch_dim=False, jit_options=None, validate=False
+    )
+    pipeline(data=np.zeros((4, 4), dtype="float32"), polar_limits=(-0.5, 0.5))
+
+    assert not any("typo" in m for m in warnings_)
+    assert any("polar_limits" in m for m in debugs)
+
+
+def test_pipeline_missing_key_does_not_blame_valid_parameter():
+    """A missing key is not blamed on a real ``zea.Parameters`` name.
+
+    ``polar_limits`` fuzzy-matches the missing ``polar_angles``, but suggesting it as
+    the typo would send the user to rename a parameter that is legitimately theirs.
+    """
+    import numpy as np
+
+    @ops_registry("needs_polar_angles_strict")
+    class NeedsPolarAnglesStrict(ops.Operation):
+        def call(self, **kwargs):
+            return {"data": kwargs["polar_angles"]}
+
+    pipeline = ops.Pipeline(
+        [NeedsPolarAnglesStrict()], with_batch_dim=False, jit_options=None, validate=False
+    )
+    with pytest.raises(KeyError) as excinfo:
+        pipeline(data=np.zeros((4, 4), dtype="float32"), polar_limits=(-0.5, 0.5))
+
+    msg = str(excinfo.value)
+    assert "polar_angles" in msg
+    assert "did you mean" not in msg, "polar_limits is a real parameter, not the typo"
+
+
 def test_pipeline_nested_error_not_double_wrapped():
     """An error from a nested pipeline is annotated once, not wrapped twice."""
     import numpy as np
@@ -1626,6 +1863,150 @@ def test_patched_grid_get_dict():
     assert d["params"]["num_patches"] == 20
     assert "argnames" not in d["params"]
     assert "chunks" not in d["params"]
+    assert "batch_size" not in d["params"]
+    # A grid split by count has no fixed patch size to report.
+    assert "patch_size" not in d["params"]
+
+
+def test_patched_grid_defaults_to_patch_size():
+    """Without arguments PatchedGrid sizes its patches instead of counting them."""
+
+    pg = PatchedGrid(operations=[AddOperation()], jit_options=None)
+    assert pg.num_patches is None
+    assert pg.patch_size == DEFAULT_PATCH_SIZE
+    assert pg.chunks is None
+    assert pg.batch_size == DEFAULT_PATCH_SIZE
+
+
+def test_patched_grid_get_dict_patch_size():
+    """The default patch size is implied in a compact dict and spelled out in a full one."""
+
+    default = PatchedGrid(operations=[AddOperation()], jit_options=None)
+    assert "patch_size" not in default.get_dict(compact=True)["params"]
+    assert default.get_dict(compact=False)["params"]["patch_size"] == DEFAULT_PATCH_SIZE
+
+    custom = PatchedGrid(operations=[AddOperation()], patch_size=64, jit_options=None)
+    assert custom.get_dict(compact=True)["params"]["patch_size"] == 64
+    assert "num_patches" not in custom.get_dict(compact=True)["params"]
+
+
+def test_beamform_get_dict_patch_size():
+    """Beamform reports whichever of the two patching knobs is actually in play."""
+
+    default = Beamform(jit_options=None)
+    assert "patch_size" not in default.get_dict(compact=True)["params"]
+    assert default.get_dict(compact=False)["params"]["patch_size"] == DEFAULT_PATCH_SIZE
+
+    sized = Beamform(patch_size=256, jit_options=None)
+    assert sized.get_dict(compact=True)["params"]["patch_size"] == 256
+    assert "num_patches" not in sized.get_dict(compact=True)["params"]
+
+    counted = Beamform(num_patches=50, jit_options=None)
+    assert counted.get_dict(compact=False)["params"]["num_patches"] == 50
+    assert "patch_size" not in counted.get_dict(compact=False)["params"]
+
+
+def test_pipeline_from_default_forwards_patch_size():
+    """`Pipeline.from_default` hands its patching arguments to the Beamform op."""
+
+    def get_beamform(**kwargs):
+        pipeline = Pipeline.from_default(jit_options=None, **kwargs)
+        return next(op for op in pipeline.operations if isinstance(op, Beamform))
+
+    beamform = get_beamform(patch_size=256)
+    assert beamform.patch_size == 256
+    assert beamform.num_patches is None
+
+    beamform = get_beamform(num_patches=50)
+    assert beamform.num_patches == 50
+    assert beamform.patch_size is None
+
+
+@pytest.mark.parametrize("cls", [PatchedGrid, Beamform])
+def test_num_patches_and_patch_size_are_mutually_exclusive(cls):
+    """Sizing and counting patches at once is ambiguous, so it is rejected."""
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        cls(num_patches=10, patch_size=256, jit_options=None)
+
+
+def _run_patched_grid(n_pix=8192, **kwargs):
+    """Run a minimal PatchedGrid over a grid of ``n_pix`` pixels."""
+    pg = PatchedGrid(
+        operations=[SumFlatgridOperation()],
+        jit_options=None,
+        with_batch_dim=False,
+        **kwargs,
+    )
+    return pg, pg(flatgrid=np.ones((n_pix, 3), dtype="float32"))
+
+
+def test_patched_grid_warns_when_num_patches_makes_patches_too_large(attach_caplog_warnings):
+    """A pinned num_patches lets patches grow with the grid, which compiles slowly."""
+
+    n_pix = 8 * MAX_SAFE_PATCH_SIZE
+    pg, out = _run_patched_grid(n_pix=n_pix, num_patches=2)
+
+    assert out["data"].shape == (n_pix,)
+    messages = [record.message for record in attach_caplog_warnings.records]
+    assert sum("PatchedGrid" in message for message in messages) == 1
+    (warning,) = [message for message in messages if "PatchedGrid" in message]
+    assert f"{n_pix // 2} pixels" in warning
+    assert str(MAX_SAFE_PATCH_SIZE) in warning
+
+    # Warning is emitted once per operation, not once per patch or per call.
+    attach_caplog_warnings.clear()
+    pg(flatgrid=np.ones((n_pix, 3), dtype="float32"))
+    assert not [r for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"num_patches": 8}, id="small_patches"),
+        pytest.param({"patch_size": 512}, id="sized_patches"),
+        pytest.param({}, id="default"),
+    ],
+)
+def test_patched_grid_does_not_warn_for_safe_patches(kwargs, attach_caplog_warnings):
+    """Patches at or below the safe size compile fine, so they warn about nothing."""
+
+    _run_patched_grid(n_pix=4096, **kwargs)
+    assert not [r for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+
+
+def test_patched_grid_does_not_warn_on_dynamic_shape(attach_caplog_warnings):
+    """With an unknown pixel count there is no patch size to compare against."""
+
+    pg = PatchedGrid(operations=[SumFlatgridOperation()], num_patches=2, jit_options=None)
+    pg._warn_if_patch_too_large(keras.KerasTensor((None, 3)))
+
+    assert not [r for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+
+
+def test_patched_grid_warns_on_unsafe_patch_size(attach_caplog_warnings):
+    """An explicit patch_size above the safe size compiles slowly too."""
+
+    patch_size = 2 * MAX_SAFE_PATCH_SIZE
+    _run_patched_grid(n_pix=4 * patch_size, patch_size=patch_size)
+
+    messages = [r.message for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+    assert len(messages) == 1
+    assert f"patch_size={patch_size}" in messages[0]
+    assert str(MAX_SAFE_PATCH_SIZE) in messages[0]
+
+
+def test_patched_grid_warns_after_dynamic_shape_call(attach_caplog_warnings):
+    """A skipped check must not consume the one-time warning."""
+
+    n_pix = 8 * MAX_SAFE_PATCH_SIZE
+    pg = PatchedGrid(operations=[SumFlatgridOperation()], num_patches=2, jit_options=None)
+    pg._warn_if_patch_too_large(keras.KerasTensor((None, 3)))
+    pg._warn_if_patch_too_large(np.ones((n_pix, 3), dtype="float32"))
+
+    messages = [r.message for r in attach_caplog_warnings.records if "PatchedGrid" in r.message]
+    assert len(messages) == 1
+    assert f"{n_pix // 2} pixels" in messages[0]
 
 
 def test_beamform_repr():

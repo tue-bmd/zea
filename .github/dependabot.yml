@@ -22,8 +22,10 @@ updates:
         versions:
           - ">6.0.0"
         # see https://github.com/tue-bmd/zea/issues/329
-      # The ML backends are pinned in the Dockerfile (ENV JAX_VERSION/TORCH_VERSION/TF_VERSION),
-      # which is what the images and CI actually install.
+      # The ML backends are pinned by uv.lock (the jax-*/torch-*/tf-* dependency-groups in
+      # pyproject.toml). They have to move together -- one shared CUDA runtime, matched to
+      # the PyTorch index -- so they are bumped by hand with
+      # ./scripts/resolve_backend_versions.sh + `uv lock --upgrade-package ...`, not per package.
       - dependency-name: "jax"
       - dependency-name: "jaxlib"
       - dependency-name: "tensorflow"

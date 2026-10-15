@@ -61,12 +61,20 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          See the :ref:`Docker <docker-information>` section of the installation guide
          for build and run instructions. Images built with ``DEV=true`` (the default)
-         already include the ``dev`` dependency-group (tests, docs and lint tools). If
-         you're in a container built with ``DEV=false``, install it first:
+         already include the ``dev`` dependency-group (tests, docs and lint tools).
+
+         Every shell prints a message of the day ending in the ``uv sync`` command for
+         that image. Use that one rather than copying from here: it names the backend
+         groups the image was built with, and ``uv sync`` removes any group you leave
+         out. Run it whenever ``uv.lock`` changes, after a rebase or a backend bump, to
+         update a running container without rebuilding it.
+
+         On a ``DEV=false`` image the command also has ``--no-default-groups``. Drop that
+         flag to add the ``dev`` group. For ``zeahub/all`` it becomes:
 
          .. code-block:: shell
 
-               pip install -e . --group dev
+               uv sync --group jax-gpu --group torch-gpu --group tf-gpu
                pre-commit install
 
     .. tab-item:: uv
@@ -80,10 +88,17 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          This creates a ``.venv`` with the exact locked dependencies and installs
          ``zea`` itself in **editable** mode, so your changes to the source take
-         effect immediately without reinstalling. This will also install the ``dev`` 
-         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands 
+         effect immediately without reinstalling. This will also install the ``dev``
+         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands
          with ``uv run`` (e.g. ``uv run pytest``) or activate the environment with
          ``source .venv/bin/activate``.
+
+         Backends are groups too, so add the ones you want — ``cpu`` or ``gpu``, and a
+         single backend is enough to run the test suite:
+
+         .. code-block:: shell
+
+               uv sync --group jax-cpu     # or jax-gpu, torch-cpu, tf-gpu, ...
 
     .. tab-item:: pip
 
@@ -96,8 +111,9 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
                pip install -e . --group dev
                pre-commit install
 
-For local environments (uv or pip), you also need to install a machine learning
-backend: JAX, PyTorch, or TensorFlow. See the
+The Docker images already come with a machine learning backend. For the uv and ``pip``
+routes you need one of JAX, PyTorch or TensorFlow: with uv use the backend groups shown
+above, with ``pip`` install it yourself — see the
 :ref:`backend installation <backend-installation>` guide.
 
 .. _running-tests:
@@ -241,6 +257,29 @@ The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is 
          if param1 < 0:
             raise ValueError("param1 must be non-negative")
          return True
+
+.. _citing-papers:
+
+**Citing papers.** If your contribution implements a method, model, algorithm or
+dataset from a paper, attribute the authors with the ``.. citation::`` directive
+instead of writing the reference out by hand:
+
+1. Add the paper to `docs/source/references.bib
+   <https://github.com/tue-bmd/zea/blob/main/docs/source/references.bib>`_, using a
+   ``<surname><year><first title word>`` key (``paper/paper.bib`` is only for
+   ``zea``'s own citation and the papers-using-``zea`` list).
+2. Cite it from the docstring:
+
+   .. code-block:: rst
+
+      .. citation:: luijten2020adaptive
+
+   Pass several keys at once with ``.. citation:: key1, key2``, and add a note --
+   a link to the reference implementation, say -- as an indented block below.
+3. Build the docs; an unknown key is reported as a warning.
+
+Keep any "this is a ``zea`` implementation" remark in its own ``.. important::``
+block, so the citation block holds nothing but the reference.
 
 The overall structure of the documentation is manually designed, but the API documentation is auto-generated based on the docstrings in the code. To generate the docs locally you can run:
 

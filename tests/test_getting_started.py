@@ -11,14 +11,10 @@ Run with:
     pytest -s -m 'heavy' tests/test_getting_started.py
 """
 
-import os
 import re
 from pathlib import Path
 
-# Must be set before matplotlib.pyplot is imported anywhere in this process.
-os.environ.setdefault("MPLBACKEND", "Agg")
-
-import pytest  # noqa: E402
+import pytest
 
 RST_PATH = Path("docs/source/getting-started.rst")
 

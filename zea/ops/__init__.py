@@ -166,7 +166,7 @@ pipeline looks like this:
         - name: beamform
           params:
             beamformer: delay_and_sum
-            num_patches: 100
+            patch_size: 1024
         - name: envelope_detect
         - name: normalize
         - name: log_compress
@@ -229,6 +229,7 @@ from zea.ops.keras_ops import Cast
 ops_registry.registry["cast"] = Cast
 
 from .base import Identity, Lambda, Mean, Operation, get_ops
+from .imports import import_ops_module, import_ops_modules
 from .pipeline import (
     Beamform,
     CoherenceFactor,
@@ -279,6 +280,9 @@ __all__ = [
     "Mean",
     "Operation",
     "get_ops",
+    # Custom operation modules
+    "import_ops_module",
+    "import_ops_modules",
     # Pipeline
     "DelayAndSum",
     "DelayMultiplyAndSum",

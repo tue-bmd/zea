@@ -223,12 +223,7 @@ def smsle(y_true, y_pred, *, dynamic_range: float = 60.0):
     Both inputs are normalized by their own maximum absolute value before log
     compression, so the metric is invariant to the overall scale of either input.
 
-    .. admonition:: Reference
-
-        Luijten, B., Cohen, R., de Bruijn, F. J., Schmeitz, H. A. W., Mischi, M.,
-        Eldar, Y. C., & van Sloun, R. J. G. (2020). Adaptive Ultrasound Beamforming
-        Using Deep Learning. *IEEE Transactions on Medical Imaging, 39*\\ (12),
-        3967-3978. https://doi.org/10.1109/TMI.2020.3008537
+    .. citation:: luijten2020adaptive
 
     Args:
         y_true (tensor): Ground truth values.
@@ -268,7 +263,9 @@ def ncc(x, y):
     return num / ops.maximum(denom, keras.config.epsilon())
 
 
-@metrics_registry(name="lpips", paired=True, jittable=True, torch_vmappable=False)
+@metrics_registry(
+    name="lpips", paired=True, jittable=True, torch_vmappable=False, torch_jittable=False
+)
 def get_lpips(image_range, clip=False):
     """
     Get the Learned Perceptual Image Patch Similarity (LPIPS) metric.
@@ -364,7 +361,10 @@ class Metrics:
             jittable = metrics_registry.get_parameter(m, "jittable")
             metric_fn = get_metric(m, **reduce_to_signature(metrics_registry[m], kwargs))
             if jit_compile and jittable:
-                metric_fn = jit(metric_fn)
+                metric_fn = jit(
+                    metric_fn,
+                    torch=metrics_registry.get_parameter(m, "torch_jittable", default=True),
+                )
             self.metrics[m] = metric_fn
             self.torch_vmappable[m] = metrics_registry.get_parameter(
                 m, "torch_vmappable", default=True

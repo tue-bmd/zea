@@ -20,17 +20,39 @@ fast and parallel (see :mod:`zea.data.chunk_reader`).
 from __future__ import annotations
 
 import os
-import tempfile
+import threading
 from pathlib import Path
 
 from zea import log
 from zea.internal.cache import ZEA_CACHE_DIR
+from zea.internal.utils import atomic_write
 
 #: Cache is enabled unless ZEA_CHUNK_CACHE=0.
 ENABLED = os.environ.get("ZEA_CHUNK_CACHE", "1") != "0"
 
 #: Byte budget for the whole cache. Overrun is pruned oldest-first (by access time).
 MAX_BYTES = int(os.environ.get("ZEA_CHUNK_CACHE_SIZE", 10 << 30))  # 10 GiB
+
+# Process-wide count of bytes fetched over the network by the streaming read paths (metadata
+# blocks through CachedFile, chunks through chunk_reader.HTTPFetcher). Cache hits do not count.
+_network_bytes = 0
+_network_lock = threading.Lock()
+
+
+def network_bytes() -> int:
+    """Bytes fetched over the network by streamed ``hf://`` reads since the process started.
+
+    Take the difference of two readings to measure a single operation, e.g. to drive a
+    progress display. Reads served from this cache are not counted.
+    """
+    return _network_bytes
+
+
+def _count_network_bytes(n: int) -> None:
+    global _network_bytes
+    with _network_lock:
+        _network_bytes += n
+
 
 #: Prune this often (in writes) rather than on every one — the check has to stat the tree.
 PRUNE_EVERY = 64
@@ -72,16 +94,12 @@ class ChunkCache:
         """Store this chunk. Failure to cache is never an error — it just costs a re-fetch."""
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
-            # Write to a temporary and rename: a reader (possibly another dataloader worker)
-            # must never observe a half-written chunk. os.replace is atomic within a filesystem.
-            fd, tmp = tempfile.mkstemp(dir=self.dir, suffix=".part")
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(data)
-                os.replace(tmp, self._path(offset, size))
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+            # A reader (possibly another dataloader worker) must never observe a
+            # half-written chunk, hence the atomic write. The `.part` suffix is not
+            # cosmetic: `prune` skips it, so a chunk still being written cannot be
+            # evicted out from under us before it is renamed into place.
+            with atomic_write(self._path(offset, size), suffix=".part") as tmp:
+                tmp.write_bytes(data)
 
             self._writes += 1
             if self._writes % PRUNE_EVERY == 0:
@@ -126,6 +144,7 @@ class CachedFile:
             return hit
         self._file.seek(offset)
         data = self._file.read(size)
+        _count_network_bytes(len(data))
         self._cache.put(offset, size, data)
         return data
 

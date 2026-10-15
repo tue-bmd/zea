@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Union
 import keras
 from keras import ops
 
-from zea import log
 from zea.backend import jit
 from zea.internal.checks import _assert_keys_and_axes
 from zea.internal.core import (
@@ -85,7 +84,22 @@ def get_ops(ops_name: str):
             "even after attempting to import module."
         )
 
-    return ops_registry[ops_name]  # raises KeyError with a helpful message
+    try:
+        return ops_registry[ops_name]
+    except KeyError as exc:
+        # A name that is in no registry is most often a custom operation whose
+        # defining module was never imported, so point at how to declare it.
+        raise KeyError(
+            f"Operation '{ops_name}' is not registered.\n\n"
+            f"If '{ops_name}' is defined outside zea, the module defining it has to be "
+            "imported first. Declare it in the config:\n"
+            "    pipeline:\n"
+            "        imports:\n"
+            "          - path/to/your_module.py\n"
+            "or pass --import path/to/your_module.py to `zea process`. See "
+            "https://zea.readthedocs.io/en/latest/pipeline.html#custom-operations\n\n"
+            f"{exc.args[0]}"
+        ) from exc
 
 
 def _to_native(value):
@@ -223,10 +237,7 @@ class Operation(keras.Operation):
         self._inside_outer_jit = False
 
         # Set the jit compilation flag and compile the `call` method
-        # Set zea logger level to suppress warnings regarding
-        # torch not being able to compile the function
-        with log.set_level("ERROR"):
-            self.set_jit(jit_compile)
+        self.set_jit(jit_compile)
 
     @property
     def output_keys(self) -> List[str]:
@@ -237,6 +248,16 @@ class Operation(keras.Operation):
     def static_params(self):
         """Get the static parameters of the operation."""
         return getattr(self.__class__, "STATIC_PARAMS", [])
+
+    @property
+    def compiler_options(self) -> dict:
+        """XLA options this operation needs in any JIT-compiled function that contains it.
+
+        Declared per class through ``COMPILER_OPTIONS``. They only apply on the JAX
+        backend, and an explicit ``compiler_options`` entry in ``jit_kwargs`` overrides
+        them.
+        """
+        return dict(getattr(self.__class__, "COMPILER_OPTIONS", {}))
 
     @property
     def jit_compile(self):
@@ -256,7 +277,9 @@ class Operation(keras.Operation):
         """Set the JIT compilation flag and set the `_call` method accordingly."""
         self._jit_compile = jit_compile
         if self._jit_compile and self.jittable:
-            self._call = jit(self.call, **self.jit_kwargs)
+            self._call = jit(
+                self.call, **self.jit_kwargs, default_compiler_options=self.compiler_options
+            )
         else:
             self._call = self.call
 

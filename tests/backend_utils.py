@@ -5,8 +5,6 @@ from __future__ import annotations
 import importlib.util
 from collections import Counter
 
-from zea import log
-
 ML_BACKENDS = ("tensorflow", "torch", "jax")
 DEFAULT_TEST_BACKEND = "tensorflow"
 FALLBACK_TEST_BACKEND = "jax"
@@ -68,6 +66,10 @@ def format_backend_skip_reason(missing_backends) -> str:
 
 
 def _record_backend_guard_skip(active_backend, required_backends, inclusive=True):
+    # Imported here, not at module level: this module runs before tests/__init__.py sets
+    # KERAS_BACKEND, and importing zea that early makes it resolve a backend on its own.
+    from zea import log
+
     if inclusive:
         msg = (
             f"Assert skipped. Only available on {required_backends}, "

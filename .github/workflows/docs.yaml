@@ -1,0 +1,152 @@
+# Rebuilds the Read the Docs version that tracks one of our rolling tags
+# (`latest`, `openh-rf-latest`) after that tag has been moved.
+#
+# Read the Docs' own webhook races the force-push: it starts a build while its
+# cached git ref still resolves to the previous release, so the build succeeds
+# while publishing the *old* docs -- nothing shows up as failed, the docs are
+# just silently stale. We therefore make Read the Docs re-read the refs first,
+# wait until the version resolves to the pushed commit, and only then build.
+#
+# Requires an `RTD_TOKEN` secret: a Read the Docs API token for a maintainer of
+# the project (https://app.readthedocs.org/accounts/tokens/).
+name: Rebuild Docs
+
+on:
+  push:
+    tags:
+      - latest
+      - openh-rf-latest
+  workflow_call:
+    inputs:
+      version:
+        description: "Read the Docs version slug to rebuild"
+        required: true
+        type: string
+    secrets:
+      RTD_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Read the Docs version slug to rebuild"
+        required: true
+        default: latest
+        type: choice
+        options:
+          - latest
+          - openh-rf-latest
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    name: Rebuild ${{ inputs.version || github.ref_name }} on Read the Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require RTD_TOKEN
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          if [ -z "${RTD_TOKEN}" ]; then
+            echo "::error::RTD_TOKEN is not set; the Read the Docs API would reject every call"
+            exit 1
+          fi
+
+      - name: Resolve tag
+        id: tag
+        env:
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Resolve the tag ourselves rather than trusting github.sha, so that a
+          # manual re-run targets the tag and not the branch head.
+          sha=$(git ls-remote "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "refs/tags/${VERSION}" | cut -f1)
+          if [ -z "${sha}" ]; then
+            echo "::error::tag ${VERSION} does not exist on origin"
+            exit 1
+          fi
+          echo "${VERSION} points at ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync Read the Docs and rebuild
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          RTD_PROJECT: zea
+          VERSION: ${{ inputs.version || github.ref_name }}
+          EXPECTED: ${{ steps.tag.outputs.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+
+          PROJECT = os.environ["RTD_PROJECT"]
+          VERSION = os.environ["VERSION"]
+          EXPECTED = os.environ["EXPECTED"]
+          API = f"https://app.readthedocs.org/api/v3/projects/{PROJECT}"
+
+          def fail(message):
+              print(f"::error::{message}")
+              raise SystemExit(1)
+
+          def api(path, method="GET", attempts=3):
+              """Call the Read the Docs API, retrying transport and server hiccups."""
+              request = urllib.request.Request(
+                  API + path,
+                  method=method,
+                  data=b"" if method == "POST" else None,
+                  headers={"Authorization": f"Token {os.environ['RTD_TOKEN']}"},
+              )
+              for attempt in range(1, attempts + 1):
+                  try:
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          body = response.read()
+                      return json.loads(body) if body else {}
+                  except Exception as error:
+                      # A rejected token will not start working on the next attempt.
+                      if isinstance(error, urllib.error.HTTPError) and error.code in (401, 403):
+                          fail(f"Read the Docs rejected RTD_TOKEN ({error.code}) for {method} {path}")
+                      print(f"  {method} {path} failed: {error}")
+                      if attempt == attempts:
+                          fail(f"Read the Docs API kept failing for {method} {path}")
+                      time.sleep(10)
+
+          # 1. Force Read the Docs to re-read the git refs. Without this, its
+          #    cached ref for a force-moved tag still points at the old release.
+          api("/sync-versions/", "POST")
+
+          # 2. Wait for the sync to land before asking for a build, otherwise we
+          #    just reproduce the race we are trying to avoid.
+          for attempt in range(40):
+              identifier = api(f"/versions/{VERSION}/").get("identifier")
+              print(f"  sync {attempt + 1}: {VERSION} -> {identifier}")
+              if identifier == EXPECTED:
+                  break
+              time.sleep(15)
+          else:
+              fail(f"Read the Docs still resolves {VERSION} to {identifier}, expected {EXPECTED}")
+
+          # 3. Build, then confirm the build really used the commit we expect --
+          #    a green build on the wrong commit is exactly the failure mode here.
+          build_id = (api(f"/versions/{VERSION}/builds/", "POST").get("build") or {}).get("id")
+          if not build_id:
+              fail("Read the Docs did not accept the build request")
+          print(f"Triggered build: https://app.readthedocs.org/projects/{PROJECT}/builds/{build_id}/")
+
+          for attempt in range(80):
+              build = api(f"/builds/{build_id}/")
+              state = (build.get("state") or {}).get("code")
+              print(f"  build {build_id}: state={state} success={build.get('success')} commit={build.get('commit')}")
+              if state == "finished":
+                  break
+              time.sleep(15)
+          else:
+              fail(f"build {build_id} did not finish within the timeout")
+
+          if not build.get("success"):
+              fail(f"build {build_id} failed")
+          if build.get("commit") != EXPECTED:
+              fail(f"build {build_id} published {build.get('commit')}, expected {EXPECTED}")
+
+          print(f"{VERSION} rebuilt from {EXPECTED}")
+          PY

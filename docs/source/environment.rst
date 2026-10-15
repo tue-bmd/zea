@@ -12,9 +12,9 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - **Default**
      - **Options**
    * - ``KERAS_BACKEND``
-     - Select the Keras backend to use. This defines the ML framework that will be used for all tensor operations.
-     - ``jax``
-     - ``tensorflow``, ``torch``, ``jax``, ``numpy``
+     - Select the Keras backend to use. This defines the ML framework that will be used for all tensor operations. Takes precedence over the backend in ``keras.json``. If neither is set, ``zea`` picks an installed backend on import (preferring ``tensorflow``, then ``jax``, then ``torch``).
+     - installed backend
+     - ``tensorflow``, ``jax``, ``torch``, ``numpy``
    * - ``ZEA_CACHE_DIR``
      - Directory to use for caching downloaded files, e.g. model weights or datasets from Hugging Face Hub.
      - ``~/.cache/zea``
@@ -27,6 +27,13 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - If set to ``1`` will write to a temporary cache directory that is deleted after the program exits.
      - ``0``
      - ``0``, ``1``
+   * - ``ZEA_TRUST_REMOTE_CODE``
+     - If set to ``1``, allow a pipeline config's ``imports`` to fetch and execute a
+       Python module from a remote location (``hf://``). Equivalent to passing
+       ``--trust-remote-code`` to ``zea process``. Off by default, because it runs code
+       from someone else's repository on your machine. See :ref:`pipeline-imports`.
+     - ``0``
+     - ``0``, ``1``
    * - ``ZEA_NVIDIA_SMI_TIMEOUT``
      - Timeout in seconds for calling ``nvidia-smi`` to get GPU information during :func:`zea.init_device`.
      - ``30``
@@ -36,7 +43,8 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - ``60``
      - Any positive integer, or ``<= 0`` to disable timeout.
    * - ``ZEA_FIND_H5_SHAPES_PARALLEL``
-     - If set to ``1``, will use parallel processing when searching for HDF5 file shapes.
+     - If set to ``1``, will use parallel processing for the per-file sweeps over a dataset
+       (reading HDF5 file shapes, and validating files against the zea format).
      - ``1``
      - ``0``, ``1``
    * - ``ZEA_TEST_DEVICE``

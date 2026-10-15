@@ -32,6 +32,7 @@ extensions = [
     "sphinx_reredirects",  # for redirecting empty toc entries
     "sphinx.ext.mathjax",  # for rendering math in the documentation
     "tyroprogram",  # local: auto-documents the tyro CLI (docs/source/_ext/tyroprogram.py)
+    "citation",  # local: the .. citation:: block (docs/source/_ext/citation.py)
 ]
 
 autodoc_mock_imports = [
@@ -55,6 +56,7 @@ exclude_patterns = [
     "_autosummary/zea.func.ultrasound.rst",
     "_autosummary/zea.func.usct.rst",
     "_autosummary/zea.ops.base.rst",
+    "_autosummary/zea.ops.imports.rst",
     "_autosummary/zea.ops.tensor.rst",
     "_autosummary/zea.ops.ultrasound.rst",
     "_autosummary/zea.ops.usct.rst",
@@ -116,8 +118,11 @@ html_favicon = "../_static/zea-logo-fav-32px.png"
 # for index
 modindex_common_prefix = ["zea."]
 
-# for bibtex
-bibtex_bibfiles = ["../../paper/paper.bib"]
+# for bibtex. Both files feed :cite: and the local .. citation:: directive,
+# so keys have to stay unique across the two:
+#   paper.bib      -- zea's own citation and the papers-using-zea list
+#   references.bib -- external work cited from the API docs and docstrings
+bibtex_bibfiles = ["../../paper/paper.bib", "references.bib"]
 
 # for redirecting empty toc items to their parent
 redirects = {

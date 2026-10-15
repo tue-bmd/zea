@@ -1,6 +1,7 @@
 import math
+import mmap
 import os
-import tempfile
+import re
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields
@@ -8,7 +9,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _get_pkg_version
 from pathlib import Path
-from typing import Any, ClassVar, List, NoReturn, Sequence, Tuple, cast
+from typing import Any, ClassVar, Iterator, List, NoReturn, Sequence, Tuple, cast
 
 import h5py
 import hdf5plugin
@@ -16,6 +17,7 @@ import numpy as np
 
 from zea import log
 from zea.internal.typing import Scalar
+from zea.internal.utils import atomic_write
 
 # Named dimensions whose sizes must agree wherever they appear.
 CONSISTENCY_DIMENSIONS = {"n_frames", "n_tx", "n_ax", "n_el", "n_ch", "n_spatial_ch"}
@@ -71,6 +73,13 @@ MAX_CHUNK_BYTES = 8 << 20  # 8 MiB
 # decodes it in well under a millisecond — while splitting costs B-tree entries, a worse
 # compression ratio per chunk, and extra round trips.
 SINGLE_CHUNK_BYTES = 1 << 20  # 1 MiB
+
+# Memory budget for one slab: the unit in which an array that is *not* held in RAM is
+# copied or reduced (see :func:`iter_slabs`). It bounds the memory of a whole-file
+# operation such as ``zea data resave``, which is why it is well under a typical machine's
+# RAM, while staying large enough that each read and each write spans many chunks —
+# a slab is what gets decompressed, handed to HDF5 and recompressed in one go.
+MAX_SLAB_BYTES = 64 << 20  # 64 MiB
 
 # Paged file-space strategy: HDF5 allocates in fixed-size pages, which collects the
 # metadata that a reader must walk on open (superblock, group and chunk B-trees) into
@@ -128,10 +137,216 @@ def check_dtype(value: Any, expected_dtype: List[type]) -> None:
     )
 
 
-def value_shape(value: Any) -> tuple:
-    """Return the shape tuple for numpy arrays and scalar values."""
+#: What an array has to provide to be stored by a spec: ``shape`` and ``dtype`` to
+#: validate it against the schema, ``ndim``/``size``/``nbytes`` to pick a chunk shape and
+#: a slab size, and indexing to read it. Everything downstream — :meth:`Spec.create_dataset`,
+#: :meth:`Spec._resolve_chunks`, :func:`iter_slabs` — uses only these, so an object with
+#: all of them can be saved, and one without them is not treated as an array at all rather
+#: than failing later with an ``AttributeError``.
+_ARRAY_ATTRIBUTES = ("shape", "dtype", "ndim", "size", "nbytes", "__getitem__")
+
+
+def is_array_like(value: Any) -> bool:
+    """Whether ``value`` is an n-dimensional array the spec can describe and store.
+
+    A :class:`numpy.ndarray`, but also any object providing :data:`_ARRAY_ATTRIBUTES`
+    without holding its contents in memory — an :class:`h5py.Dataset`, a
+    :class:`zea.data.file.ChunkedDataset`, and anything else that reads like one.  Such a
+    *lazy* array is validated from its metadata and copied slab by slab (see
+    :func:`iter_slabs`), so a file can be rewritten without ever fitting in RAM.
+
+    Strings and numpy scalars are excluded: they carry a ``dtype`` and a ``shape`` of
+    their own but are values, not arrays.
+    """
     if isinstance(value, np.ndarray):
-        return value.shape
+        return True
+    if isinstance(value, (str, bytes, np.generic)):
+        return False
+    return all(hasattr(value, attribute) for attribute in _ARRAY_ATTRIBUTES)
+
+
+def _maps_a_file(value: Any) -> bool:
+    """Whether an ndarray's buffer is a file mapping rather than memory it owns.
+
+    A :class:`numpy.memmap`, and any view of one, reaches an :class:`mmap.mmap` through
+    its ``base`` chain. Testing the buffer rather than the type is what tells those apart
+    from an array that merely came from a memmap — ``memmap.astype(...)`` returns a copy
+    in RAM that is still of type :class:`numpy.memmap` — and catches a view that numpy
+    handed back as a plain ndarray.
+    """
+    while isinstance(value, np.ndarray):
+        value = value.base
+    return isinstance(value, mmap.mmap)
+
+
+def is_lazy_array(value: Any) -> bool:
+    """Whether ``value`` is an array whose contents are not (yet) in memory.
+
+    See :func:`is_array_like`.  Reading one costs IO, so the spec only ever touches
+    a lazy array's metadata, and writing one goes through :func:`iter_slabs`.
+
+    Anything that is not a :class:`numpy.ndarray` keeps its contents elsewhere by
+    definition; an ndarray does so only when it maps a file (see :func:`_maps_a_file`).
+    """
+    return is_array_like(value) and (not isinstance(value, np.ndarray) or _maps_a_file(value))
+
+
+def _contents_in_memory(value: Any) -> bool:
+    """Whether a value's contents can be inspected without reading a file.
+
+    The sanity checks on data *contents* — an image in dB, a plausible speed of sound,
+    coordinates in metres — visit every element, so they are skipped for an array that is
+    still backed by a file: it was checked when that file was written, and reading it back
+    whole is precisely what the lazy path exists to avoid. Dtypes and shapes are validated
+    either way; those come from the file's metadata and cost nothing.
+    """
+    return not is_lazy_array(value)
+
+
+def _slab_selections(
+    shape: tuple[int, ...],
+    itemsize: int,
+    max_bytes: int,
+    chunks: tuple[int, ...] | None = None,
+    split_axes: bool = True,
+    axis: int = 0,
+    prefix: tuple = (),
+) -> "Iterator[tuple[slice, ...]]":
+    """Yield hyperslab selections tiling ``shape``, each at most ``max_bytes`` of data.
+
+    The array is cut along ``axis`` (the outermost, which is ``n_frames`` for every data
+    product), so each slab is a contiguous run of whole frames. Where ``chunks`` is given
+    the run is a whole number of chunks, so writing a slab never has to read back a
+    partially filled chunk to recompress it.
+
+    If a single index along ``axis`` is already over budget — one frame of a 149-transmit
+    acquisition is 166 MB — the next axis in is split as well, unless ``split_axes`` is
+    False, in which case the slab is left oversized (a reduction over an axis needs whole
+    frames to accumulate).
+    """
+    if axis >= len(shape):
+        yield prefix
+        return
+
+    inner = math.prod(shape[axis + 1 :]) * itemsize
+    step = min(max_bytes // inner, shape[axis])
+    if step < 1 and (not split_axes or axis == len(shape) - 1):
+        step = 1
+    if step >= 1:
+        if chunks is not None and step > chunks[axis]:
+            step -= step % chunks[axis]
+        for start in range(0, shape[axis], step):
+            yield prefix + (slice(start, min(start + step, shape[axis])),)
+        return
+
+    # One index along this axis does not fit the budget: keep it whole and split deeper.
+    for index in range(shape[axis]):
+        yield from _slab_selections(
+            shape,
+            itemsize,
+            max_bytes,
+            chunks,
+            split_axes,
+            axis + 1,
+            prefix + (slice(index, index + 1),),
+        )
+
+
+def iter_slabs(
+    array: Any,
+    max_bytes: int | None = None,
+    chunks: tuple[int, ...] | None = None,
+    split_axes: bool = True,
+) -> "Iterator[tuple[tuple, np.ndarray]]":
+    """Iterate over ``array`` in slabs of at most ``max_bytes``, as ``(selection, values)``.
+
+    The selections tile the array, so writing every ``values`` to ``dataset[selection]``
+    reproduces it exactly, and reducing them one by one reduces the whole array — all with
+    only one slab in memory at a time. Works the same for a lazy array (each slab is a
+    read) and for a :class:`numpy.ndarray` (each slab is a view), so callers do not need
+    to branch on where the data lives.
+
+    Args:
+        array: Any array-like (see :func:`is_array_like`).
+        max_bytes (int, optional): Memory budget for one slab, uncompressed, covering
+            everything a slab holds at once — including the source buffer where the array
+            converts on read (see :func:`_read_itemsize`). Read from :data:`MAX_SLAB_BYTES`
+            when not given, so that setting the module constant takes effect everywhere.
+        chunks (tuple, optional): The *destination* chunk shape, when copying into an HDF5
+            dataset; slab boundaries are aligned to it.
+        split_axes (bool): Whether a slab may cover only part of an outer index when a
+            single index exceeds ``max_bytes``. Pass False when the slabs are reduced
+            along an inner axis, which needs each outer index whole.
+
+    Yields:
+        tuple: ``(selection, values)``, where ``selection`` indexes ``array`` and
+        ``values`` is the :class:`numpy.ndarray` it selects.
+    """
+    if array.size == 0:
+        return
+    if array.ndim == 0:
+        yield (), np.asarray(array[()])
+        return
+    if max_bytes is None:
+        max_bytes = MAX_SLAB_BYTES
+    for selection in _slab_selections(
+        tuple(array.shape), _read_itemsize(array), max_bytes, chunks, split_axes
+    ):
+        yield selection, np.asarray(array[selection])
+
+
+class _CastArray:
+    """A lazy array read through a dtype conversion.
+
+    Reports ``dtype`` while its contents stay where they are: they are converted only as
+    (part of) the array is read.  A field an older file stored as float64 where the schema
+    says float32 is therefore still written out slab by slab, instead of being loaded whole
+    to be recast — which is exactly what the lazy path exists to avoid.
+
+    Provides :data:`_ARRAY_ATTRIBUTES`, so it is an array everywhere a spec looks.
+    """
+
+    __slots__ = ("_source", "dtype", "shape", "ndim", "size", "nbytes", "source_itemsize")
+
+    def __init__(self, source: Any, dtype: Any):
+        self._source = source
+        self.dtype = np.dtype(dtype)
+        # Fixed for the life of the wrapper (the source is a stored array), so they are
+        # resolved once here rather than on every slab.
+        self.shape = tuple(source.shape)
+        self.ndim = len(self.shape)
+        self.size = int(math.prod(self.shape))
+        self.nbytes = self.size * self.dtype.itemsize
+        self.source_itemsize = np.dtype(source.dtype).itemsize
+
+    def __getitem__(self, selection) -> np.ndarray:
+        """Read a selection from the source and convert just that much."""
+        return np.asarray(self._source[selection]).astype(self.dtype, copy=False)
+
+    def __array__(self, dtype=None, copy=None) -> np.ndarray:
+        """Materialise the whole array, for the callers that insist on one."""
+        values = self[...]
+        return values if dtype is None else values.astype(dtype)
+
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} shape={self.shape} dtype={self.dtype}>"
+
+
+def _read_itemsize(array: Any) -> int:
+    """Bytes one element of ``array`` costs to read, which is not always its dtype's.
+
+    Reading a slab of a :class:`_CastArray` holds the source element and the converted one
+    at the same time, so budgeting by the destination dtype alone would let a float64
+    source read twice :data:`MAX_SLAB_BYTES`. Any array that does not convert on read
+    reports ``source_itemsize`` of 0 by omission, and costs just its own dtype.
+    """
+    return array.dtype.itemsize + getattr(array, "source_itemsize", 0)
+
+
+def value_shape(value: Any) -> tuple:
+    """Return the shape tuple for arrays (lazy ones included) and scalar values."""
+    if is_array_like(value):
+        return tuple(value.shape)
     return ()
 
 
@@ -179,6 +394,10 @@ def find_matched_shape(value: Any, expected_shapes: Sequence[tuple]) -> tuple | 
         if match_shape(value, expected_shape):
             return expected_shape
     return None
+
+
+class InvalidZeaFileError(ValueError):
+    """Raised when data does not have the structure the zea format requires."""
 
 
 class Spec:
@@ -342,6 +561,10 @@ class Spec:
                 and np.issubdtype(value_dtype, np.floating)
                 and value_dtype != expected_float_dtype
             ):
+                # A lazy array is recast as it is read, one slab at a time, rather than
+                # being loaded whole just to change dtype.
+                if is_lazy_array(value):
+                    return _CastArray(value, expected_float_dtype)
                 return value.astype(expected_float_dtype, copy=False)
 
             return value
@@ -405,13 +628,54 @@ class Spec:
         ]
         return f"Dimension '{dim_name}' has inconsistent sizes:\n" + "\n".join(lines)
 
+    RECEIVE_CHANNEL_FIELDS: ClassVar[tuple[str, ...]] = ("raw_data", "aligned_data.values")
+
+    @classmethod
+    def _is_receive_channel_field(cls, field_path: str) -> bool:
+        """Whether ``field_path`` holds channel data.
+
+        These are the only fields whose ``n_el`` axis counts receive channels instead
+        of probe elements, and so the only ones that may hold a receive sub-aperture.
+        Field paths are prefixed per spec level, so the name is matched against the
+        tail of ``field_path`` (``"tracks[0].data.raw_data"``).
+        """
+        return any(
+            field_path == name or field_path.endswith(f".{name}")
+            for name in cls.RECEIVE_CHANNEL_FIELDS
+        )
+
+    @classmethod
+    def _is_receive_subaperture(cls, dim_name: str, field_sizes: dict[str, int]) -> bool:
+        """Whether an ``n_el`` disagreement is a legal receive sub-aperture.
+
+        Channel data counts receive channels on its ``n_el`` axis, which is a subset of
+        the probe on systems with a sliding receive window or a multiplexed front-end.
+        Such a file is self-consistent, so it is accepted when every other field agrees
+        on a single element count and no channel-data field claims more receivers than
+        there are elements. All other dimensions still have to agree exactly.
+        """
+        if dim_name != "n_el":
+            return False
+
+        receive_sizes = {
+            size for path, size in field_sizes.items() if cls._is_receive_channel_field(path)
+        }
+        element_sizes = {
+            size for path, size in field_sizes.items() if not cls._is_receive_channel_field(path)
+        }
+        if not receive_sizes or len(element_sizes) != 1:
+            return False
+        return max(receive_sizes) <= element_sizes.pop()
+
     @classmethod
     def _raise_if_inconsistent_dimensions(
         cls,
         dim_to_field_sizes: defaultdict[str, dict[str, int]],
     ) -> None:
         for dim_name, field_sizes in dim_to_field_sizes.items():
-            if len(set(field_sizes.values())) > 1:
+            if len(set(field_sizes.values())) > 1 and not cls._is_receive_subaperture(
+                dim_name, field_sizes
+            ):
                 raise ValueError(cls._format_inconsistent_dimension(dim_name, field_sizes))
 
     def _collect_dimension_info(self, prefix: str = "") -> defaultdict[str, dict[str, int]]:
@@ -492,7 +756,7 @@ class Spec:
         if isinstance(value, (str, np.str_, bytes, np.bytes_)):
             return True
 
-        if isinstance(value, np.ndarray):
+        if is_array_like(value):
             return value.dtype.kind in {"U", "S", "O"}
 
         return False
@@ -561,7 +825,7 @@ class Spec:
         or ``None``, the value is not an array, it is empty, or every resolved axis is a
         chunk axis — the latter would mean scalar-sized chunks, so h5py decides instead.
         """
-        if not chunk_axes or not isinstance(value, np.ndarray) or value.size == 0:
+        if not chunk_axes or not is_array_like(value) or value.size == 0:
             return None
         if value.nbytes <= SINGLE_CHUNK_BYTES:
             return cast(Tuple[int, ...], value.shape)
@@ -610,6 +874,13 @@ class Spec:
         dimension names or several alternatives) is provided, the chunk shape is
         derived from ``chunk_axes`` to match common subsampling patterns; see
         :meth:`_resolve_chunks`.
+
+        A lazy value — an ``h5py.Dataset`` or any other array-like whose contents are
+        still on disk (see :func:`is_lazy_array`) — is copied slab by slab rather than
+        materialised, so the peak memory is one slab instead of the whole array. A lazy
+        *string* array is the exception and is read whole: zea never defers strings (they
+        are channel labels and names, see :func:`zea.data.file._load_group_dict`), so the
+        read is bounded by construction.
         """
         dataset_is_scalar = np.isscalar(value) or value.ndim == 0
         chunks = None if dataset_is_scalar else Spec._resolve_chunks(value, dim_names, chunk_axes)
@@ -637,6 +908,16 @@ class Spec:
                 dtype=string_dtype,
                 **string_comp,
             )
+        elif is_lazy_array(value):
+            dataset = group.create_dataset(
+                field_name,
+                shape=value.shape,
+                dtype=value.dtype,
+                chunks=chunks,
+                **comp_kwargs,
+            )
+            for selection, slab in iter_slabs(value, chunks=chunks):
+                dataset[selection] = slab
         else:
             group.create_dataset(field_name, data=value, chunks=chunks, **comp_kwargs)
 
@@ -882,7 +1163,11 @@ class Map(Spec):
             # Sanity-check units: clinical ultrasound scan regions are at most a few tens of
             # centimetres across, so any finite coordinate magnitude above 1 m almost certainly
             # indicates the array was supplied in millimetres rather than metres.
-            max_abs = np.max(np.abs(self.coordinates[np.isfinite(self.coordinates)]), initial=0.0)
+            max_abs = (
+                np.max(np.abs(self.coordinates[np.isfinite(self.coordinates)]), initial=0.0)
+                if _contents_in_memory(self.coordinates)
+                else 0.0
+            )
             if max_abs > 1.0:
                 log.warning(
                     f"{type(self).__name__}: coordinates have a maximum absolute value of "
@@ -1016,7 +1301,7 @@ class Image(Map):
         super().__post_init__()
 
         # Check that image values are in dB scale (finite or -inf, and <= 0)
-        if self.values.dtype == np.float32:
+        if self.values.dtype == np.float32 and _contents_in_memory(self.values):
             if not np.all(np.isfinite(self.values) | np.isneginf(self.values)):
                 raise ValueError("Image values must be finite or -inf (dB scale).")
             if not np.all(self.values <= 0):
@@ -1154,7 +1439,7 @@ class SosMap(FloatMap):
             raise ValueError(f"Speed-of-sound map unit should be 'm/s', got '{self.unit}'")
 
         # Check sensible values for speed of sound
-        if np.any(self.values < 300):
+        if _contents_in_memory(self.values) and np.any(self.values < 300):
             log.warning(
                 "Speed-of-sound map contains values below 300 m/s, which is unusually low. "
                 "Please verify that the speed-of-sound values are correct and in m/s."
@@ -1228,7 +1513,7 @@ class AttenuationMap(FloatMap):
             raise ValueError(f"Attenuation map unit should be 'dB/m/Hz', got '{self.unit}'")
 
         # Attenuation coefficients describe energy loss and are therefore non-negative.
-        if np.any(self.values < 0):
+        if _contents_in_memory(self.values) and np.any(self.values < 0):
             log.warning(
                 "Attenuation map contains negative values, which is physically unexpected "
                 "for an attenuation coefficient. Please verify the values are in dB/m/Hz."
@@ -1237,7 +1522,11 @@ class AttenuationMap(FloatMap):
         # Guard against the coefficient being supplied in the common clinical unit
         # dB/cm/MHz (= 1e-4 dB/m/Hz) instead of the spec's dB/m/Hz base unit: even
         # highly attenuating media stay well below 1e-2 dB/m/Hz.
-        max_abs = float(np.max(np.abs(self.values), initial=0.0))
+        max_abs = (
+            float(np.max(np.abs(self.values), initial=0.0))
+            if _contents_in_memory(self.values)
+            else 0.0
+        )
         if max_abs > 1e-2:
             log.warning(
                 f"Attenuation map has a maximum absolute value of {max_abs:.4g} dB/m/Hz, which "
@@ -1328,7 +1617,12 @@ class DataSpec(Spec):
 
     Plain-array data products:
         raw_data: Raw channel data of shape (n_frames, n_tx, n_ax, n_el, n_ch)
-            and type float32 or int16.
+            and type float32 or int16. The fourth axis counts receive channels, which
+            normally means every probe element. Acquisitions using a receive
+            sub-aperture (a sliding receive window, or a multiplexed front-end with
+            fewer channels than elements) may carry fewer, in which case
+            :attr:`ScanSpec.rx_aperture_indices` records which element each channel
+            corresponds to.
 
     Grouped data products (values + optional metadata):
         - aligned_data: Time-of-flight corrected data and optional labels.
@@ -1433,7 +1727,7 @@ class DataSpec(Spec):
         for key, value in extra_maps.items():
             if key in reserved_keys:
                 raise TypeError(f"Invalid custom data key '{key}': reserved name")
-            if isinstance(value, np.ndarray):
+            if is_array_like(value):
                 raise TypeError(
                     f"Custom data key '{key}' must be a spatial map "
                     f"(a dict with at least a 'values' key), not a flat array. "
@@ -1466,7 +1760,7 @@ class DataSpec(Spec):
 
         # n_ch must be 1 (RF) or 2 (IQ) for raw_data (checked for aligned_data by AlignedData).
         arr = getattr(self, "raw_data", None)
-        if arr is not None and isinstance(arr, np.ndarray):
+        if arr is not None and is_array_like(arr):
             n_ch = arr.shape[-1]
             if n_ch not in (1, 2):
                 raise ValueError(
@@ -1528,6 +1822,12 @@ class ScanSpec(Spec):
             Shape is either (n_frames, n_tx) or flat (n_frames * n_tx - 1,).
         azimuth_angles: The azimuthal angles in radians of the transmit beams of
             shape (n_tx,).
+        rx_aperture_indices: Which probe element each receive channel of the channel
+            data corresponds to, of shape (n_tx, n_rx) and integer dtype. Needed only
+            when the receive aperture is a subset of the probe, such as a sliding
+            window or a multiplexed front-end, since the mapping is otherwise not
+            recoverable from the file. Omit it when every element receives on every
+            transmit, where the mapping is the identity.
         sound_speed: The speed of sound in meters per second.
         tgc_gain_curve: The time-gain-compensation that was applied to every
             sample in the raw_data of shape (n_ax,). Divide by this curve to
@@ -1551,6 +1851,7 @@ class ScanSpec(Spec):
     polar_angles: np.ndarray
     time_to_next_transmit: np.ndarray | None = None
     azimuth_angles: np.ndarray | None = None
+    rx_aperture_indices: np.ndarray | None = None
     sound_speed: np.ndarray | float | None = None
     tgc_gain_curve: np.ndarray | None = None
     waveforms_one_way: np.ndarray | None = None
@@ -1571,6 +1872,10 @@ class ScanSpec(Spec):
             "shape": (("n_frames", "n_tx"), ("n_timing_intervals",)),
         },
         "azimuth_angles": {"dtype": np.float32, "shape": ("n_tx",)},
+        "rx_aperture_indices": {
+            "dtype": (np.int16, np.int32, np.int64),
+            "shape": ("n_tx", "n_rx"),
+        },
         "sound_speed": {"dtype": np.float32, "shape": ()},
         "tgc_gain_curve": {"dtype": np.float32, "shape": ("n_ax",)},
         "waveforms_one_way": {
@@ -1611,6 +1916,16 @@ class ScanSpec(Spec):
         "polar_angles": {"unit": "rad", "description": "Polar angles of transmit beams."},
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
         "azimuth_angles": {"unit": "rad", "description": "Azimuthal angles of transmit beams."},
+        "rx_aperture_indices": {
+            "unit": "–",
+            "description": (
+                "Probe element index for each receive channel of the channel data, "
+                "shape (n_tx, n_rx). Required to interpret the channel axis when the "
+                "receive aperture is a subset of the probe. Omit it when every element "
+                "receives, where the mapping is the identity."
+            ),
+            "rare": True,
+        },
         "sound_speed": {"unit": "m/s", "description": "Speed of sound."},
         "tgc_gain_curve": {
             "unit": "–",
@@ -2280,6 +2595,33 @@ class MetricsSpec(Spec):
     }
 
 
+def check_track_rules(
+    *, has_data: bool, has_scan: bool, transmit_only: bool, has_raw: bool
+) -> None:
+    """Raise :class:`InvalidZeaFileError` if a track breaks one of the format's rules."""
+    if not has_data and not has_scan:
+        raise InvalidZeaFileError(
+            "A track must have at least one of 'data' or 'scan'. "
+            "'data' may be None (a transmit-only track) only when 'scan' is provided "
+            "and 'transmit_only=True' is explicitly set."
+        )
+    if not has_data and has_scan and not transmit_only:
+        raise InvalidZeaFileError(
+            "'data' is None but 'transmit_only' was not set to True. "
+            "Pass 'transmit_only=True' to explicitly create a transmit-only track "
+            "(one that records only the transmit sequence via 'scan', with no "
+            "corresponding receive data, e.g. a shear wave push pulse or "
+            "therapeutic ultrasound exposure)."
+        )
+    if transmit_only and has_data:
+        raise InvalidZeaFileError(
+            "'transmit_only=True' was set but 'data' is not None. "
+            "A transmit-only track must not carry data."
+        )
+    if has_raw and not has_scan:
+        raise InvalidZeaFileError("'scan' is required when 'raw_data' is provided in track data.")
+
+
 @dataclass
 class TrackSpec(Spec):
     """A single acquisition track with its own data and scan parameters.
@@ -2359,39 +2701,92 @@ class TrackSpec(Spec):
     def __post_init__(self):
         super().__post_init__()
 
-        if self.data is None and self.scan is None:
-            raise ValueError(
-                "A track must have at least one of 'data' or 'scan'. "
-                "'data' may be None (a transmit-only track) only when 'scan' is provided "
-                "and 'transmit_only=True' is explicitly set."
-            )
-
-        if self.data is None and self.scan is not None and not self.transmit_only:
-            raise ValueError(
-                "'data' is None but 'transmit_only' was not set to True. "
-                "Pass 'transmit_only=True' to explicitly create a transmit-only track "
-                "(one that records only the transmit sequence via 'scan', with no "
-                "corresponding receive data, e.g. a shear wave push pulse or "
-                "therapeutic ultrasound exposure)."
-            )
-
-        if self.transmit_only and self.data is not None:
-            raise ValueError(
-                "'transmit_only=True' was set but 'data' is not None. "
-                "A transmit-only track must not carry data."
-            )
-
         data = self.data
         has_raw = (isinstance(data, DataSpec) and data.raw_data is not None) or (
             isinstance(data, dict) and data.get("raw_data") is not None
         )
-        if has_raw and self.scan is None:
-            raise ValueError("'scan' is required when 'raw_data' is provided in track data.")
+        check_track_rules(
+            has_data=data is not None,
+            has_scan=self.scan is not None,
+            transmit_only=bool(self.transmit_only),
+            has_raw=has_raw,
+        )
 
         if self.label is not None and not isinstance(self.label, str):
             raise TypeError(f"'label' must be a str, got {type(self.label)}")
         if self.label is not None and not self.label.strip():
             raise ValueError("'label' must not be an empty or whitespace-only string.")
+
+        self._check_receive_aperture()
+
+    def _receive_channel_counts(self) -> dict[str, int]:
+        """Receive-channel count of each channel-data field present in this track."""
+        data = self.data
+        if not isinstance(data, DataSpec):
+            return {}
+
+        counts = {}
+        if data.raw_data is not None:
+            counts["raw_data"] = value_shape(data.raw_data)[3]
+        aligned = data.aligned_data
+        if aligned is not None and getattr(aligned, "values", None) is not None:
+            counts["aligned_data.values"] = value_shape(aligned.values)[3]
+        return counts
+
+    def _check_receive_aperture(self) -> None:
+        """Cross-check receive-channel counts against the probe's element count.
+
+        A receive sub-aperture is legal but still bounded by the probe: there can be no
+        more receive channels than elements, and when the two differ the channel axis
+        can only be interpreted if ``scan.rx_aperture_indices`` records the mapping.
+        """
+        scan = self.scan
+        if not isinstance(scan, ScanSpec):
+            return
+
+        counts = self._receive_channel_counts()
+        if not counts:
+            return
+
+        n_el = scan.n_el
+        indices = scan.rx_aperture_indices
+
+        for field_name, n_rx in counts.items():
+            if n_rx > n_el:
+                raise ValueError(
+                    f"{field_name} has {n_rx} receive channels but the probe has {n_el} "
+                    f"elements (from scan.t0_delays); there cannot be more receive "
+                    f"channels than probe elements."
+                )
+
+        if indices is None:
+            subaperture = {name: n for name, n in counts.items() if n != n_el}
+            if subaperture:
+                fields = ", ".join(f"{name} ({n})" for name, n in sorted(subaperture.items()))
+                log.warning(
+                    f"{fields} has fewer receive channels than the probe has elements "
+                    f"({log.yellow(str(n_el))}), so the receive aperture is a subset of the "
+                    "probe. Set 'scan.rx_aperture_indices' (shape (n_tx, n_rx)) to record "
+                    "which element each receive channel corresponds to, which is "
+                    "otherwise not recoverable from the file."
+                )
+            return
+
+        lo, hi = int(np.min(indices)), int(np.max(indices))
+        if lo < 0 or hi >= n_el:
+            raise ValueError(
+                f"scan.rx_aperture_indices must index the {n_el} probe elements, "
+                f"but values range from {lo} to {hi}."
+            )
+
+        n_rx_mapping = value_shape(indices)[1]
+        mismatched = {name: n for name, n in counts.items() if n != n_rx_mapping}
+        if mismatched:
+            fields = ", ".join(f"{name} has {n}" for name, n in sorted(mismatched.items()))
+            raise ValueError(
+                f"scan.rx_aperture_indices maps {n_rx_mapping} receive channels per "
+                f"transmit, but {fields}."
+            )
 
     def store_in_group(
         self,
@@ -2764,7 +3159,13 @@ class FileSpec(Spec):
         chunk_axes: tuple[str, ...] | None = DEFAULT_CHUNK_AXES,
         warn_missing_optional_fields: bool = True,
     ) -> None:
-        """Save the dataset to the specified path."""
+        """Save the dataset to the specified path.
+
+        Fields that are lazy arrays — still backed by an open file rather than held in
+        memory (see :func:`is_lazy_array`) — are copied across slab by slab, so a file
+        far larger than RAM can be written. The source file has to stay open for the
+        duration of the call; this is what ``zea data resave`` does.
+        """
         try:
             _zea_version = _get_pkg_version("zea")
         except PackageNotFoundError:
@@ -2808,22 +3209,10 @@ class FileSpec(Spec):
                     "regulations. Ensure you have appropriate authorization and "
                     "de-identification measures in place before sharing this file."
                 )
-        # Write to a temporary file in the destination directory, then atomically
-        # rename it into place.
-        fd, tmp_name = tempfile.mkstemp(
-            dir=str(_path.parent), prefix=f".{_path.stem}.tmp-", suffix=".hdf5"
-        )
-        os.close(fd)
-        tmp_path = Path(tmp_name)
-        try:
+        with atomic_write(_path, suffix=".hdf5") as tmp_path:
             self._write_hdf5(
                 tmp_path, _zea_version, compression, chunk_axes, warn_missing_optional_fields
             )
-            os.replace(tmp_path, _path)
-        except BaseException:
-            # Includes KeyboardInterrupt/SystemExit: clean up the partial temp file.
-            tmp_path.unlink(missing_ok=True)
-            raise
 
         log.info(f"File saved to {log.yellow(path)}")
 
@@ -2887,8 +3276,98 @@ class FileSpec(Spec):
                         if element.group_name
                         else custom_group
                     )
-                    self.create_dataset(
-                        group, element.name, np.asarray(element.data), compression=compression
-                    )
+                    # Lazy custom data is passed through untouched so it, too, streams.
+                    data = element.data if is_array_like(element.data) else np.asarray(element.data)
+                    self.create_dataset(group, element.name, data, compression=compression)
                     group[element.name].attrs["description"] = element.description
                     group[element.name].attrs["unit"] = element.unit
+
+
+#: Roots of a path into a zea file that are not fields of :class:`FileSpec` itself:
+#: ``data`` and ``scan`` are the single-track shorthands that
+#: :meth:`zea.File.__getitem__` remaps onto ``tracks/track_0/``.
+ROOT_SPECS = {"data": DataSpec, "scan": ScanSpec}
+
+# A single track group name (``track_0``), and that name as a path prefix (``tracks/track_0/``).
+_TRACK_RE = re.compile(r"track_\d+")
+_TRACK_PREFIX_RE = re.compile(r"^/?tracks/track_\d+/")
+
+
+def strip_track_prefix(key: str) -> str:
+    """Strip a leading ``tracks/track_N/`` off a path into a zea file.
+
+    Turns a fully qualified path into the single-track shorthand
+    :meth:`zea.File.__getitem__` also accepts, so ``tracks/track_0/data/raw_data``
+    and ``data/raw_data`` can be treated alike. Paths without the prefix are
+    returned unchanged.
+    """
+    return _TRACK_PREFIX_RE.sub("", key)
+
+
+def _walk_to_schema_entry(parts: Sequence[str]) -> dict | None:
+    """Follow ``parts`` down the spec tree, returning the SCHEMA entry it lands on."""
+    spec_cls: type[Spec] | None = FileSpec
+    entry: dict | None = None
+    if parts and parts[0] in ROOT_SPECS:
+        spec_cls, parts = ROOT_SPECS[parts[0]], parts[1:]
+    for part in parts:
+        if spec_cls is None:
+            return None  # a leaf was reached with path segments left over
+        entry = getattr(spec_cls, "SCHEMA", {}).get(part)
+        if entry is None:
+            return None
+        spec_cls = entry.get("spec")
+    if spec_cls is not None:
+        # Landed on a group (``data/image``); the array itself lives in ``values``.
+        entry = getattr(spec_cls, "SCHEMA", {}).get("values")
+    return entry
+
+
+def dim_names_for_key(key: str, ndim: int) -> tuple[str | None, ...] | None:
+    """Resolve a path into a zea file to one dimension name per axis of its array.
+
+    Lets a reader ask *what does this axis mean* — most usefully, which axis (if
+    any) holds frames — without opening a file.  The path is the same one
+    :meth:`zea.File.__getitem__` takes: ``"data/raw_data"``,
+    ``"data/image/values"``, or the group ``"data/image"``, which resolves to the
+    group's ``values`` field.  Dots and slashes are interchangeable and a
+    ``tracks/track_N/`` prefix is stripped.
+
+    Args:
+        key: Path to a data array within the file.
+        ndim: Rank of the array actually stored there, used to pick between the
+            alternative shapes a field may declare (``Image.values`` is 2-D or 3-D
+            plus frames, say).
+
+    Returns:
+        One name per axis, ``None`` for axes the spec gives no name (a literal
+        size, such as the trailing ``3`` of ``coordinates``).  ``None`` instead of
+        a tuple when the spec cannot say: the path is not part of the spec, no
+        declared shape has this rank, or the matching shape uses a ``"..."``
+        wildcard, which leaves the meaning of the absorbed axes unknown.
+
+    Example:
+        .. doctest::
+
+            >>> from zea.data.spec import dim_names_for_key
+            >>> dim_names_for_key("data/raw_data", 5)
+            ('n_frames', 'n_tx', 'n_ax', 'n_el', 'n_ch')
+            >>> dim_names_for_key("data/image", 3)
+            ('n_frames', 'z', 'x')
+            >>> dim_names_for_key("probe/probe_geometry", 2)
+            ('n_el', None)
+            >>> dim_names_for_key("custom/my_array", 3) is None
+            True
+    """
+    parts = [part for part in key.replace(".", "/").split("/") if part]
+    if len(parts) >= 2 and parts[0] == "tracks" and _TRACK_RE.fullmatch(parts[1]):
+        parts = parts[2:]
+    entry = _walk_to_schema_entry(parts)
+    if entry is None:
+        return None
+    for alternative in Spec._expected_shapes(entry.get("shape")):
+        if "..." in alternative:
+            continue  # the wildcard absorbs an unknown number of unnamed axes
+        if len(alternative) == ndim:
+            return tuple(dim if isinstance(dim, str) else None for dim in alternative)
+    return None

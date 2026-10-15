@@ -3,3 +3,38 @@ figure figcaption p {
   color: var(--color-foreground-secondary, #666);
   text-align: center;
 }
+
+/* ``.. citation::`` blocks -- see docs/source/_ext/citation.py.
+   Every paper zea builds on is attributed in this one block style, so a
+   reference looks the same whether it sits in an operation's docstring, a
+   model page or a dataset converter. Colours come from furo's admonition
+   variables so light and dark themes both stay consistent. */
+.admonition.citation-admonition {
+  --color-admonition-title: #4c6ef5;
+  --color-admonition-title--background: rgba(76, 110, 245, 0.1);
+  --icon: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h9l5 5v15H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5L14 3.5zM8 12h8v1.5H8V12zm0 3.5h8V17H8v-1.5zm0-7h4V10H8V8.5z'/%3E%3C/svg%3E");
+}
+
+body[data-theme="dark"] .admonition.citation-admonition {
+  --color-admonition-title: #91a7ff;
+  --color-admonition-title--background: rgba(145, 167, 255, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .admonition.citation-admonition {
+    --color-admonition-title: #91a7ff;
+    --color-admonition-title--background: rgba(145, 167, 255, 0.15);
+  }
+}
+
+/* Hanging indent, so a block listing several papers reads as a bibliography
+   rather than as a wall of wrapped lines. */
+.admonition.citation-admonition p.citation-entry {
+  padding-left: 1.5rem;
+  text-indent: -1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.admonition.citation-admonition p.citation-entry:last-child {
+  margin-bottom: 0;
+}
