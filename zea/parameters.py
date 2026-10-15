@@ -104,7 +104,12 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.geometry import compute_element_normals
+from zea.beamform.geometry import (
+    compute_element_normals,
+    is_diverging,
+    is_focused,
+    is_plane_wave,
+)
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -782,20 +787,19 @@ class Parameters(BaseParameters):
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select focused transmits")
-            # Plane waves use inf (or 0); a finite positive focus marks a focused transmit.
-            return np.where((value > 0) & np.isfinite(value))[0].tolist()
+            return np.where(is_focused(value))[0].tolist()
 
         if selection == "diverging":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select diverging transmits")
-            return np.where(value < 0)[0].tolist()
+            return np.where(is_diverging(value))[0].tolist()
 
         if selection == "plane":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select plane wave transmits")
-            return np.where((value == 0) | np.isinf(value))[0].tolist()
+            return np.where(is_plane_wave(value))[0].tolist()
 
         # Handle integer - select evenly spaced transmits
         if isinstance(selection, (int, np.integer)):

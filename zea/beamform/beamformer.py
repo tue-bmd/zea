@@ -10,7 +10,7 @@ import keras
 import numpy as np
 from keras import ops
 
-from zea.beamform.geometry import compute_element_normals
+from zea.beamform.geometry import compute_element_normals, is_focused
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 from zea.internal.checks import _check_raw_data
@@ -39,7 +39,7 @@ def _warn_if_focal_region_length_unused(focus_distances, focal_region_length):
         fd = np.asarray(ops.convert_to_numpy(focus_distances), dtype=float)
     except Exception:  # e.g. a tracer inside jit; skip silently
         return
-    if not np.any(np.isfinite(fd) & (fd > 0)):
+    if not np.any(is_focused(fd)):
         _warning_once(
             "`focal_region_length` is set but none of the transmits are focused "
             "(no finite positive focus_distance); it will have no effect. "

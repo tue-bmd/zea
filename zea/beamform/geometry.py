@@ -7,7 +7,64 @@ imported from :mod:`zea.beamform.beamformer`, :mod:`zea.simulator` and
 """
 
 import keras
+import numpy as np
 from keras import ops
+
+
+def is_plane_wave(focus_distances):
+    """Mask of the transmits that are plane waves.
+
+    A plane wave is marked by an infinite focus distance (``np.inf``, the
+    canonical value) or by ``0``.
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. Must not
+            contain ``NaN``.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = _as_focus_distances(focus_distances)
+    return (focus_distances == 0) | np.isinf(focus_distances)
+
+
+def is_focused(focus_distances):
+    """Mask of the transmits that are focused.
+
+    A focused transmit has a finite, positive focus distance.
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. Must not
+            contain ``NaN``.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = _as_focus_distances(focus_distances)
+    return np.isfinite(focus_distances) & (focus_distances > 0)
+
+
+def is_diverging(focus_distances):
+    """Mask of the transmits that are diverging waves.
+
+    A diverging wave has a finite, negative focus distance (a virtual source
+    behind the array).
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. Must not
+            contain ``NaN``.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = _as_focus_distances(focus_distances)
+    return np.isfinite(focus_distances) & (focus_distances < 0)
+
+
+def _as_focus_distances(focus_distances):
+    focus_distances = np.asarray(focus_distances, dtype=float)
+    assert not np.any(np.isnan(focus_distances)), "focus_distances must not contain NaN"
+    return focus_distances
 
 
 def compute_element_normals(probe_geometry, eps=1e-12):
