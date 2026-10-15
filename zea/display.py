@@ -192,14 +192,10 @@ def histogram_match(
     visual as well as quantitative comparison. Matching the histogram of an image to a
     reference (typically a conventional B-mode image) puts the two on a common scale.
 
-    .. admonition:: Reference
+    .. citation:: bottenus2021histogram
 
-        N. Bottenus, B. Byram, and D. Hyun, "Histogram Matching for Visual Ultrasound
-        Image Comparison," *IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency
-        Control*, vol. 68, no. 5, pp. 1487-1495, 2021.
-        https://doi.org/10.1109/TUFFC.2020.3035965
-
-        Their MATLAB implementation, referred to above as the reference implementation:
+        Their MATLAB implementation, referred to above as the reference
+        implementation:
         https://github.com/nbottenus/histogram_matching/blob/main/histmatch.m
 
     Args:

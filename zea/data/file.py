@@ -21,6 +21,7 @@ from zea.data.spec import (
     _TRACK_RE,
     DEFAULT_CHUNK_AXES,
     DEFAULT_COMPRESSION,
+    SINGLE_CHUNK_BYTES,
     DataSpec,
     FileSpec,
     InvalidZeaFileError,
@@ -83,13 +84,16 @@ class CustomElement:
     group_name: str = ""
 
 
-def _load_dataset_element_from_group(file, path: str) -> CustomElement:
+def _load_dataset_element_from_group(file, path: str, lazy: bool = False) -> CustomElement:
     """Loads a specific dataset element from a group.
 
     Args:
         file (h5py.File): The HDF5 file object.
         path (str): The full path to the dataset element.
             e.g., "non_standard_elements/lens/lens_profile"
+        lazy (bool, optional): Leave a dataset larger than
+            :data:`~zea.data.spec.SINGLE_CHUNK_BYTES` unread, as an ``h5py.Dataset``
+            valid while ``file`` is open. Defaults to False.
 
     Returns:
         CustomElement: The loaded dataset element.
@@ -98,7 +102,10 @@ def _load_dataset_element_from_group(file, path: str) -> CustomElement:
     dataset = file[path]
     description = dataset.attrs.get("description", "")
     unit = dataset.attrs.get("unit", "")
-    data = dataset[()]
+    defer = (
+        lazy and dataset.nbytes > SINGLE_CHUNK_BYTES and not h5py.check_string_dtype(dataset.dtype)
+    )
+    data = dataset if defer else dataset[()]
 
     path_parts = path.split("/")
 
@@ -111,14 +118,14 @@ def _load_dataset_element_from_group(file, path: str) -> CustomElement:
     )
 
 
-def _load_custom_elements_from_group(file, path: str) -> List[CustomElement]:
+def _load_custom_elements_from_group(file, path: str, lazy: bool = False) -> List[CustomElement]:
     """Recursively loads additional dataset elements from a group."""
     elements = []
     for name, item in file[path].items():
         if isinstance(item, h5py.Dataset):
-            elements.append(_load_dataset_element_from_group(file, f"{path}/{name}"))
+            elements.append(_load_dataset_element_from_group(file, f"{path}/{name}", lazy))
         elif isinstance(item, h5py.Group):
-            elements.extend(_load_custom_elements_from_group(file, f"{path}/{name}"))
+            elements.extend(_load_custom_elements_from_group(file, f"{path}/{name}", lazy))
     return elements
 
 
@@ -449,9 +456,9 @@ class _GroupProxy:
         """Return the keys of the underlying group."""
         return self._group.keys()
 
-    def load_group(self) -> dict:
+    def load_group(self, lazy: bool = False) -> dict:
         """Recursively load this group into a plain dict. See :meth:`File.load_group`."""
-        return _load_group_dict(self._group, self._fetcher)
+        return _load_group_dict(self._group, self._fetcher, lazy)
 
     def __contains__(self, key):
         return key in self._group
@@ -605,42 +612,34 @@ class Track:
     @property
     def n_frames(self) -> int:
         """Number of frames."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=0,
-            name="n_frames",
-            requires_raw=False,
-        )
+        return _shape_from_data_group(self._group["data"], index=0, name="n_frames")
 
     @property
     def n_tx(self) -> int:
         """Number of transmit events."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=1,
-            name="n_tx",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._group["data"], index=1, name="n_tx")
 
     @property
     def n_ax(self) -> int:
         """Number of axial samples."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=2,
-            name="n_ax",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._group["data"], index=2, name="n_ax")
 
     @property
     def n_el(self) -> int:
-        """Number of elements."""
-        return _shape_from_data_group(
-            self._group["data"],
-            index=3,
-            name="n_el",
-            requires_raw=True,
-        )
+        """Number of probe elements."""
+        n_el = _n_el_from_scan_group(self._group)
+        if n_el is not None:
+            return n_el
+        return _channel_data_dim(self._group["data"], index=3, name="n_el")
+
+    @property
+    def n_rx(self) -> int:
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture, in
+        which case ``scan.rx_aperture_indices`` maps these channels onto elements.
+        """
+        return _channel_data_dim(self._group["data"], index=3, name="n_rx")
 
     def load_parameters(self, **overrides) -> "Parameters":
         """Load this track's parameters (merged probe + scan) as :class:`~zea.Parameters`.
@@ -709,12 +708,20 @@ class Track:
         return f"<Track[{self._index}]{label_part} data={keys}>"
 
 
-def _load_group_dict(group: "h5py.Group", fetcher) -> dict:
+def _load_group_dict(group: "h5py.Group", fetcher, lazy: bool = False) -> dict:
     """Recursively load *group* into a dict, reading arrays through *fetcher*.
 
     ``fetcher`` may be ``None``, in which case every read falls back to h5py. Reads too
     small to be worth the concurrent path fall back too, so wrapping is free for the
     scalars that make up a scan or metadata group.
+
+    With ``lazy=True`` an array bigger than :data:`~zea.data.spec.SINGLE_CHUNK_BYTES` is
+    left as the :class:`ChunkedDataset` that wraps it instead of being read: it still
+    reports its shape and dtype, so a spec built from it validates as usual, but its
+    contents are only fetched when (part of) it is indexed. Smaller datasets, and strings,
+    are read either way — they are the scalars a spec computes with, and reading them is
+    cheaper than deferring them. The file must stay open for as long as a lazy array is
+    used.
     """
     ans = {}
     for key, item in group.items():
@@ -724,10 +731,12 @@ def _load_group_dict(group: "h5py.Group", fetcher) -> dict:
                 if isinstance(val, np.ndarray) and val.dtype == object:
                     val = val.astype(np.str_)
                 ans[key] = val
+            elif lazy and item.nbytes > SINGLE_CHUNK_BYTES:
+                ans[key] = ChunkedDataset(item, fetcher)
             else:
                 ans[key] = ChunkedDataset(item, fetcher)[()]
         elif isinstance(item, h5py.Group):
-            ans[key] = _load_group_dict(item, fetcher)
+            ans[key] = _load_group_dict(item, fetcher, lazy)
     return ans
 
 
@@ -769,18 +778,60 @@ def _get_data_array_shape(data_group: "h5py.Group") -> "tuple[tuple | None, bool
     return None, has_raw_data
 
 
-def _shape_from_data_group(
-    data_group: "h5py.Group", index: int, name: str = "", requires_raw: bool = False
-) -> int:
-    shape, has_raw_data = _get_data_array_shape(data_group)
-    if requires_raw and not has_raw_data:
-        raise TypeError(f"`{name}` is only available if the file contains a `raw_data` dataset")
-
+def _shape_from_data_group(data_group: "h5py.Group", index: int, name: str = "") -> int:
+    shape, _ = _get_data_array_shape(data_group)
     if shape is None:
         raise TypeError(
             f"Cannot determine `{name}`, no recognized data arrays found in the data group."
         ) from None
     return shape[index]
+
+
+def _channel_data_shape(data_group: "h5py.Group") -> "tuple | None":
+    """Shape of a data group's channel data, from ``raw_data`` or ``aligned_data``.
+
+    These are the only data products with a receive axis, both laid out as
+    ``(n_frames, n_tx, n_ax, n_rx, n_ch)``. Returns ``None`` when the group holds
+    neither.
+    """
+    raw_data = data_group.get("raw_data")
+    if isinstance(raw_data, h5py.Dataset):
+        return raw_data.shape
+
+    aligned_data = data_group.get("aligned_data")
+    if isinstance(aligned_data, h5py.Group):
+        values = aligned_data.get("values")
+        if isinstance(values, h5py.Dataset):
+            return values.shape
+    return None
+
+
+def _channel_data_dim(data_group: "h5py.Group", index: int, name: str) -> int:
+    """Size of one axis of a data group's channel data.
+
+    ``n_tx``, ``n_ax`` and ``n_rx`` are only defined for channel data, which is laid
+    out as ``(n_frames, n_tx, n_ax, n_rx, n_ch)``. Other data products, an image for
+    instance, have no such axes.
+    """
+    shape = _channel_data_shape(data_group)
+    if shape is None:
+        raise TypeError(
+            f"`{name}` is only available if the file contains channel data "
+            "(a `raw_data` or `aligned_data` dataset)"
+        )
+    return shape[index]
+
+
+def _n_el_from_scan_group(track_group: "h5py.Group") -> "int | None":
+    """Number of probe elements recorded in a track's scan metadata, if present.
+
+    Preferred over the channel axis of the data, which counts receive channels and is
+    smaller than the element count when the acquisition uses a receive sub-aperture.
+    """
+    t0_delays = track_group.get("scan/t0_delays")
+    if t0_delays is None or t0_delays.ndim != 2:
+        return None
+    return int(t0_delays.shape[1])
 
 
 def _compute_all_track_timestamps(
@@ -1775,7 +1826,7 @@ class File(h5py.File):
             return _StringDataset(child)
         return ChunkedDataset(child, self._chunk_fetcher)
 
-    def load_group(self, group: "str | h5py.Group") -> dict:
+    def load_group(self, group: "str | h5py.Group", lazy: bool = False) -> dict:
         """Recursively load an HDF5 group into a plain dict, on the fast read path.
 
         The dict mirrors the group structure: datasets become numpy arrays or scalars
@@ -1786,13 +1837,18 @@ class File(h5py.File):
         Args:
             group: Either a key resolved like ``file[key]`` (e.g. ``"metadata"``), or an
                 already-opened :class:`h5py.Group` belonging to this file.
+            lazy (bool, optional): Leave arrays larger than
+                :data:`~zea.data.spec.SINGLE_CHUNK_BYTES` unread, as
+                :class:`ChunkedDataset` handles that only fetch what is indexed. They stay
+                valid for as long as this file is open. Defaults to False, which reads
+                everything into memory.
 
         Returns:
             dict: Nested dictionary mirroring the group structure.
         """
         if isinstance(group, str):
             group = self._resolve(group)
-        return _load_group_dict(group, self._chunk_fetcher)
+        return _load_group_dict(group, self._chunk_fetcher, lazy)
 
     @property
     def _is_legacy_file(self) -> bool:
@@ -1809,14 +1865,14 @@ class File(h5py.File):
         ``group_name="lens"`` element named ``"profile"``.
         """
 
-        if self._is_legacy_file:
-            if "non_standard_elements" not in self:
-                return CustomElements([])
-            return CustomElements(_load_custom_elements_from_group(self, "non_standard_elements"))
+        return self._custom_elements()
 
-        if "custom" not in self:
+    def _custom_elements(self, lazy: bool = False) -> "CustomElements":
+        """:attr:`custom`, optionally leaving large blobs on disk (see :meth:`load_group`)."""
+        group = "non_standard_elements" if self._is_legacy_file else "custom"
+        if group not in self:
             return CustomElements([])
-        return CustomElements(_load_custom_elements_from_group(self, "custom"))
+        return CustomElements(_load_custom_elements_from_group(self, group, lazy))
 
     @property
     def name(self):
@@ -1842,48 +1898,43 @@ class File(h5py.File):
             raise AttributeError(
                 f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_frames."
             )
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=0,
-            name="n_frames",
-            requires_raw=False,
-        )
+        return _shape_from_data_group(self._get_single_track_data_group(), index=0, name="n_frames")
 
     @property
     def n_tx(self) -> int:
         """Number of transmit events."""
         if self._n_tracks > 1:
             raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_tx.")
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=1,
-            name="n_tx",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._get_single_track_data_group(), index=1, name="n_tx")
 
     @property
     def n_ax(self) -> int:
         """Number of axial samples."""
         if self._n_tracks > 1:
             raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_ax.")
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=2,
-            name="n_ax",
-            requires_raw=True,
-        )
+        return _channel_data_dim(self._get_single_track_data_group(), index=2, name="n_ax")
 
     @property
     def n_el(self) -> int:
-        """Number of elements."""
+        """Number of probe elements."""
         if self._n_tracks > 1:
             raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_el.")
-        return _shape_from_data_group(
-            self._get_single_track_data_group(),
-            index=3,
-            name="n_el",
-            requires_raw=True,
-        )
+        data_group = self._get_single_track_data_group()
+        n_el = _n_el_from_scan_group(data_group.parent)
+        if n_el is not None:
+            return n_el
+        return _channel_data_dim(data_group, index=3, name="n_el")
+
+    @property
+    def n_rx(self) -> int:
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture, in
+        which case ``scan.rx_aperture_indices`` maps these channels onto elements.
+        """
+        if self._n_tracks > 1:
+            raise AttributeError(f"This file has {self._n_tracks} tracks. Use file.tracks[i].n_rx.")
+        return _channel_data_dim(self._get_single_track_data_group(), index=3, name="n_rx")
 
     def shape(self, key) -> tuple:
         """Return shape of some key."""
@@ -2300,20 +2351,31 @@ class File(h5py.File):
             log.error(f"File {self.path} is not a valid zea file.\n{e}\n")
             raise
 
-    def _to_file_spec(self) -> FileSpec:
+    def _to_file_spec(self, lazy: bool = False) -> FileSpec:
         """Load the whole file into a validated :class:`~zea.data.spec.FileSpec`.
 
         Unlike the lazy :attr:`data` / :attr:`scan` accessors, every dataset is
-        read into memory here.  Both the multi-track ``tracks/track_N/`` layout
-        and the flat ``data/`` + ``scan/`` layout (files without a tracks group) are supported.
+        read into memory here, unless ``lazy`` is set.  Both the multi-track
+        ``tracks/track_N/`` layout and the flat ``data/`` + ``scan/`` layout (files
+        without a tracks group) are supported.
+
+        Args:
+            lazy (bool, optional): Leave the data products (and any custom elements) on
+                disk, as :class:`ChunkedDataset` handles (see :meth:`load_group`). The
+                spec validates from their shapes and dtypes exactly as it would in RAM,
+                and :meth:`~zea.data.spec.FileSpec.save` copies them across slab by slab,
+                so a file bigger than memory can be read, sliced and rewritten. The arrays
+                are only valid while this file is open. Defaults to False.
 
         Returns:
-            FileSpec: A fully validated spec object, with all arrays in RAM.
+            FileSpec: A fully validated spec object, with all arrays in RAM
+            (or, with ``lazy=True``, still backed by this file).
         """
-        kwargs: dict = {"tracks": self._load_tracks(), "probe": self.probe}
+        kwargs: dict = {"tracks": self._load_tracks(lazy), "probe": self.probe}
 
-        if self.custom:
-            kwargs["custom"] = self.custom
+        custom = self._custom_elements(lazy)
+        if custom:
+            kwargs["custom"] = custom
         if self.track_schedule is not None:
             kwargs["track_schedule"] = self.track_schedule
         if "metadata" in self:
@@ -2329,17 +2391,20 @@ class File(h5py.File):
 
         return FileSpec(**kwargs)
 
-    def _load_tracks(self) -> "list[dict]":
+    def _load_tracks(self, lazy: bool = False) -> "list[dict]":
         """Read every track's ``data`` and ``scan`` fully into a list of dicts.
 
         Each dict is shaped for :class:`~zea.data.spec.TrackSpec`. Flat-layout
         files (no tracks group) are returned as a single, unlabelled track.
+
+        With ``lazy=True`` the data products are left on disk; see :meth:`load_group`.
+        Scan parameters are always read: they are small, and every spec computes with them.
         """
         # Flat layout: one unlabelled track at the file root.
         if "tracks" not in self:
             track: dict = {}
             if super().__contains__("data"):
-                data = self.load_group("data")
+                data = self.load_group("data", lazy)
                 track["data"] = legacy_data(data) if _is_legacy_file(self) else data
             if self.scan is not None:
                 track["scan"] = self.scan
@@ -2350,7 +2415,7 @@ class File(h5py.File):
         for track in self.tracks:
             track_dict: dict = {"label": track.label}
             if "data" in track._group:
-                track_dict["data"] = self.load_group(track._group["data"])
+                track_dict["data"] = self.load_group(track._group["data"], lazy)
             if "scan" in track._group:
                 track_dict["scan"] = track.scan
             # Preserve transmit-only tracks (data=None); without this the rebuilt TrackSpec

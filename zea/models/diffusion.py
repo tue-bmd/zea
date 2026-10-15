@@ -1138,7 +1138,7 @@ class DDS(DiffusionGuidance):
     """
     Decomposed Diffusion Sampling guidance.
 
-    Reference paper: https://arxiv.org/pdf/2303.05754
+    .. citation:: chung2024decomposed
     """
 
     def setup(self):
@@ -1351,12 +1351,7 @@ class NuclearDiffusion(DPS):
         operator: Forward operator defining the measurement model.
         disable_jit: Whether to disable JIT compilation.
 
-    .. admonition:: Reference
-
-        T. Stevens, O. Nolan, J. L. Robert, and R. J. G. van Sloun,
-        "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
-        *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
-        https://arxiv.org/abs/2509.20886
+    .. citation:: stevens2026nuclear
 
     """  # noqa: E501
 

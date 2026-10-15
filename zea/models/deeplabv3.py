@@ -1,4 +1,7 @@
-"""DeepLabV3+ architecture for multi-class segmentation. For more details see https://arxiv.org/abs/1802.02611."""
+"""DeepLabV3+ architecture for multi-class segmentation.
+
+.. citation:: chen2018encoder
+"""
 
 import keras
 from keras import layers, ops
@@ -52,7 +55,7 @@ def DilatedSpatialPyramidPooling(dspp_input):
     - 1x1 convolution branch
     - 3x3 convolutions with dilation rates 6, 12, and 18
 
-    Reference: https://arxiv.org/abs/1706.05587
+    .. citation:: chen2017rethinking
 
     Args:
         dspp_input (Tensor): Input feature tensor from encoder
@@ -92,7 +95,7 @@ def DeeplabV3Plus(image_shape, num_classes, pretrained_weights=None):
     3. Decoder: Simple decoder with skip connections
     4. Output: Final segmentation prediction
 
-    Reference: https://arxiv.org/abs/1802.02611
+    .. citation:: chen2018encoder
 
     Args:
         image_shape (tuple): Input image shape as (height, width, channels)

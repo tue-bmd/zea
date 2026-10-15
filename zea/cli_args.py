@@ -19,7 +19,7 @@ from typing import Annotated, Literal, Union
 import numpy as np
 import tyro
 
-SUPPORTED_FORMATS = ["gif", "mp4", "hdf5"]
+SUPPORTED_FORMATS = ["gif", "mp4", "png", "hdf5"]
 sitk = importlib.util.find_spec("SimpleITK")
 if sitk is not None:
     SUPPORTED_FORMATS += ["nii.gz"]
@@ -45,23 +45,47 @@ class AppArgs:
             "port starting at 7860. Defaults to None."
         ),
     ] = None
+    presets: Annotated[
+        str,
+        tyro.conf.arg(
+            help="Presets YAML file (local or hf:// path) for the example dropdown. Defaults to "
+            "the presets maintained on hf://zeahub/app, so they update without a zea release."
+        ),
+    ] = "hf://zeahub/app/presets.yaml"
+    presets_revision: Annotated[
+        str,
+        tyro.conf.arg(
+            help="Branch, tag or PR ref of an hf:// presets file: 'latest' (= 'main'), a "
+            "release snapshot such as 'v0.1.8', or e.g. 'refs/pr/1' to preview a change."
+        ),
+    ] = "latest"
+    inbrowser: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Open the app in the default browser once it is running. Use --no-inbrowser "
+            "on a machine without a browser, or to open the link yourself."
+        ),
+    ] = True
 
     def run(self) -> None:
         """Launch the Gradio dataset visualizer."""
         try:
-            import gradio as gr
+            import gradio  # noqa: F401
         except ImportError as exc:
             raise ImportError(
                 "gradio is required for the zea app. Install with: pip install 'zea[app]'"
             ) from exc
 
-        from zea.data.app import CSS, build_interface
+        from zea.data.app import CSS, JS, build_interface, build_theme, load_presets
 
-        build_interface().launch(
+        presets = load_presets(self.presets, self.presets_revision)
+        build_interface(presets).launch(
             share=self.share,
             server_port=self.server_port,
-            theme=gr.themes.Soft(primary_hue="violet", secondary_hue="yellow"),
+            inbrowser=self.inbrowser,
+            theme=build_theme(),
             css=CSS,
+            js=JS,
         )
 
 
@@ -140,11 +164,13 @@ class ProcessArgs:
         ),
     ] = None
     save_as: Annotated[
-        Literal[tuple(SUPPORTED_FORMATS)],  # ty: ignore[invalid-type-form]
+        Literal[tuple(SUPPORTED_FORMATS)] | None,  # ty: ignore[invalid-type-form]
         tyro.conf.arg(
-            help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}.",
+            help=f"Output format. One of: {', '.join(SUPPORTED_FORMATS)}. "
+            "png writes one image per frame. Omitted, the format follows the data: "
+            "png for a single frame, gif for a sequence.",
         ),
-    ] = "gif"
+    ] = None
     keep_keys: Annotated[
         list[str],
         tyro.conf.arg(
@@ -190,6 +216,22 @@ class ProcessArgs:
             "Only valid when --save-as hdf5."
         ),
     ] = False
+    imports: Annotated[
+        list[str],
+        tyro.conf.arg(
+            aliases=["-i", "--import"],
+            help="Modules defining custom operations, imported before the pipeline is built. "
+            "Each is a dotted module path, a path to a .py file, or an hf:// URI. "
+            "Configs can declare these themselves under 'pipeline: imports:'.",
+        ),
+    ] = field(default_factory=list)
+    trust_remote_code: Annotated[
+        bool,
+        tyro.conf.arg(
+            help="Allow imports fetched from a remote location (hf://) to be executed. "
+            "Off by default because that runs code from the repo on your machine.",
+        ),
+    ] = False
 
     def run(self) -> None:
         """Beamform the dataset with the configured pipeline."""
@@ -210,6 +252,8 @@ class ProcessArgs:
             revision=self.revision,
             config_revision=self.config_revision,
             track=self.track,
+            imports=self.imports,
+            trust_remote_code=self.trust_remote_code,
         )
 
 
@@ -280,7 +324,11 @@ class _CompoundTransmits:
 
 @dataclass
 class _Resave:
-    """Resave a file to change format version."""
+    """Resave a file to change format version.
+
+    The data is copied one slab at a time and never held whole in memory, so a file
+    larger than RAM can be resaved.
+    """
 
     input_path: tyro.conf.Positional[str]
     """Input HDF5 file or folder. Also accepts an 'hf://' path."""
@@ -801,6 +849,36 @@ class _EchoXFlow:
         convert_echoxflow(self)
 
 
+@dataclass
+class _Us4us:
+    """Convert us4us (ARRUS + gui4us) recordings to zea format."""
+
+    src: tyro.conf.Positional[str]
+    """Source path: a single .pkl recording, or a directory holding one or more .pkl files.
+    An hf:// path is downloaded first (e.g. hf://zeahub/pytest/us4us/recording.pkl)."""
+    dst: tyro.conf.Positional[Path]
+    """Destination path: a .hdf5 file when src is a file, or a directory when src is a
+    directory (each <name>.pkl is written as <dst>/<name>.hdf5)."""
+    mapping: list[str] = field(default_factory=lambda: ["0:image"])
+    """Which pipeline output becomes which zea data type, as '<index>:<data type>' entries
+    (e.g. --mapping 0:image 1:beamformed_data). A JSON object is also accepted. Supported
+    data types: raw_data, beamformed_data, envelope_data, image."""
+    metadata: str | None = None
+    """Pickle holding the ARRUS metadata, for recordings that store data and metadata
+    separately (local or hf://). A sibling '<name>_metadata.pkl' is picked up
+    automatically, from the same repo for an hf:// recording."""
+    separate_tracks: bool = False
+    """Write every mapped output to its own zea track instead of storing them side by side
+    in a single track."""
+    overwrite: bool = False
+    """Overwrite existing destination .hdf5 files."""
+
+    def run(self):
+        from zea.data.convert.us4us import convert_us4us
+
+        convert_us4us(self)
+
+
 ConvertDataset = Union[
     Annotated[_Echonet, tyro.conf.subcommand("echonet")],
     Annotated[_EchonetLVH, tyro.conf.subcommand("echonetlvh")],
@@ -809,6 +887,7 @@ ConvertDataset = Union[
     Annotated[_Picmus, tyro.conf.subcommand("picmus")],
     Annotated[_Verasonics, tyro.conf.subcommand("verasonics")],
     Annotated[_EchoXFlow, tyro.conf.subcommand("echoxflow")],
+    Annotated[_Us4us, tyro.conf.subcommand("us4us")],
 ]
 
 

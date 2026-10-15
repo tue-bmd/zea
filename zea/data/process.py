@@ -8,7 +8,7 @@ import types
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Sequence
 
 import numpy as np
 import tyro
@@ -26,6 +26,7 @@ from zea.data.spec import strip_track_prefix
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.internal.device import init_device
+from zea.ops.imports import import_ops_modules
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer, ProgressBar
 
@@ -119,20 +120,55 @@ def _check_track_consistency(file: File, track_index: int | None, track_label: s
         )
 
 
+def _resolve_save_as(save_as: str | None, n_frames: int) -> str:
+    """Pick the output format for a file of ``n_frames`` frames.
+
+    An explicit ``--save-as`` always wins. Left out, the format follows the data:
+    a single frame is a still, so it is written as a PNG rather than as a
+    one-frame GIF, and anything longer stays a GIF. The count is the number of
+    frames actually written, so a file that simply holds one frame gets a PNG
+    too, not only a run limited with ``--n-frames 1``.
+    """
+    if save_as is not None:
+        return save_as
+    return "png" if n_frames == 1 else "gif"
+
+
+def _save_frames_as_png(frames: np.ndarray, save_path: Path, overwrite: bool) -> None:
+    """Write every frame of ``frames`` as its own PNG.
+
+    A single frame is written to ``save_path`` unchanged, which is what makes
+    ``--save-as png --n-frames 1`` produce ``<filestem>.png``. Several frames are
+    numbered ``<filestem>_0000.png``, ``…_0001.png``, … so that the frames of one
+    file do not overwrite each other.
+    """
+    paths = (
+        [save_path]
+        if len(frames) == 1
+        else [save_path.with_name(f"{save_path.stem}_{i:04d}.png") for i in range(len(frames))]
+    )
+    for frame, path in zip(frames, paths):
+        if output_blocked(path, overwrite):
+            log.warning(f"File {path} already exists. Use --overwrite to replace it.")
+            continue
+        io_lib.save_image(frame, path)
+        log.info(f"Saved {log.yellow(path)}")
+
+
 def _run_passthrough(
     dataset_path: str,
     key: str,
     n_frames: int | None,
     save_dir: Path,
-    save_as: str,
+    save_as: str | None,
     overwrite: bool,
     track_index: int | None = None,
     track_label: str | None = None,
     **hf_kwargs,
 ) -> None:
     """Save data frames directly without a beamforming pipeline."""
-    if save_as not in ("gif", "mp4", "hdf5"):
-        raise ValueError(f"Passthrough mode only supports gif/mp4/hdf5, got {save_as!r}")
+    if save_as is not None and save_as not in ("gif", "mp4", "png", "hdf5"):
+        raise ValueError(f"Passthrough mode only supports gif/mp4/png/hdf5, got {save_as!r}")
     save_dir.mkdir(parents=True, exist_ok=True)
 
     with Dataset(dataset_path, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
@@ -165,13 +201,17 @@ def _run_passthrough(
                     else np.zeros_like(arr, dtype=np.uint8)
                 )
 
-            save_path = save_dir / f"{filestem}.{save_as}"
-            if output_blocked(save_path, overwrite):
+            fmt = _resolve_save_as(save_as, len(arr))
+            save_path = save_dir / f"{filestem}.{fmt}"
+            if fmt == "png":
+                # One path per frame, so the overwrite guard lives in the helper.
+                _save_frames_as_png(arr, save_path, overwrite)
+            elif output_blocked(save_path, overwrite):
                 log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             else:
-                if save_as in ("gif", "mp4"):
+                if fmt in ("gif", "mp4"):
                     io_lib.save_video(arr, save_path, fps=20)
-                elif save_as == "hdf5":
+                elif fmt == "hdf5":
                     File.create(save_path, data={"image": {"values": arr}}, overwrite=overwrite)
                 log.info(f"Saved {log.yellow(save_path)}")
 
@@ -184,7 +224,7 @@ def run_processing(
     key: str,
     n_frames: int | None,
     save_dir: Path,
-    save_as: str = "gif",
+    save_as: str | None = None,
     keep_keys=("maxval",),
     timings=False,
     num_threads=16,
@@ -193,12 +233,14 @@ def run_processing(
     revision: str | None = None,
     config_revision: str | None = None,
     track: str | None = None,
+    imports: Sequence[str] = (),
+    trust_remote_code: bool = False,
 ) -> None:
     if keep_dynamic_range and save_as != "hdf5":
         raise ValueError("--keep_dynamic_range is only supported with --save_as hdf5.")
     if save_as == "nii.gz" and sitk is None:
         raise ValueError("SimpleITK is not installed; cannot save as nii.gz.")
-    if save_as not in SUPPORTED_FORMATS:
+    if save_as is not None and save_as not in SUPPORTED_FORMATS:
         raise ValueError(f"save_as must be one of {SUPPORTED_FORMATS}, got {save_as!r}")
 
     dataset_hf_kwargs = {"revision": revision} if revision is not None else {}
@@ -207,6 +249,11 @@ def run_processing(
         if (config_revision or revision)
         else {}
     )
+
+    # Imported after init_device has run (custom operations may touch keras at import
+    # time) and before anything resolves an operation name.
+    import_ops_modules(imports, trust_remote_code=trust_remote_code)
+
     config = Config.from_path(config_path, **config_hf_kwargs)
     config_params = _get_config_parameters(config)
 
@@ -238,7 +285,15 @@ def run_processing(
                     pass  # fall back to runtime slicing if the peek fails
 
     try:
-        pipeline = Pipeline.from_path(config_path, with_batch_dim=False, **config_hf_kwargs)
+        pipeline = Pipeline.from_path(
+            config_path,
+            with_batch_dim=False,
+            trust_remote_code=trust_remote_code,
+            **config_hf_kwargs,
+        )
+    # A missing/unbuildable pipeline is recoverable for keys that need no beamforming.
+    # Failures from the config's own ``imports`` are not: those raise RemoteCodeError /
+    # OpsModuleImportError, which deliberately fall outside this except clause.
     except (ValueError, KeyError) as exc:
         if _key_requires_pipeline(data_key):
             raise
@@ -304,13 +359,18 @@ def run_processing(
         save_path: Path,
         parameters,
         fps: int,
+        fmt: str,
     ):
+        if fmt == "png":
+            # One path per frame, so the overwrite guard lives in the helper.
+            _save_frames_as_png(video, save_path, overwrite)
+            return
         if output_blocked(save_path, overwrite):
             log.warning(f"File {save_path} already exists. Use --overwrite to replace it.")
             return
-        if save_as in ["mp4", "gif"]:
+        if fmt in ["mp4", "gif"]:
             io_lib.save_video(video, save_path, fps=fps)
-        elif save_as == "hdf5":
+        elif fmt == "hdf5":
             scan_dict = parameters.to_scan_dict()
             probe_dict = parameters.to_probe_dict()
             File.create(
@@ -320,7 +380,7 @@ def run_processing(
                 probe=probe_dict or None,
                 overwrite=overwrite,
             )
-        elif save_as == "nii.gz":
+        elif fmt == "nii.gz":
             assert sitk is not None, "SimpleITK must be installed to save as nii.gz"
             sitk.WriteImage(sitk.GetImageFromArray(video), str(save_path))
             log.info(f"Saved NIfTI to {log.yellow(save_path)}")
@@ -347,11 +407,12 @@ def run_processing(
             if file_path != prev_file_path:
                 if prev_file_path is not None:
                     video = ops.convert_to_numpy(data_output)
-                    save_path = save_dir / f"{filestem}.{save_as}"
+                    fmt = _resolve_save_as(save_as, len(video))
+                    save_path = save_dir / f"{filestem}.{fmt}"
                     if save_future is not None:
                         save_future.result()
                     save_future = executor.submit(
-                        save_video_worker, video, save_path, parameters, fps
+                        save_video_worker, video, save_path, parameters, fps, fmt
                     )
                     data_output = []
                     if file_path is None:
@@ -372,7 +433,7 @@ def run_processing(
                 except (ValueError, AttributeError):
                     fps = _DEFAULT_FPS
 
-                params = prepare_parameters(parameters, **config_params)
+                params = prepare_parameters(parameters)
 
             # Sentinel iteration (no more data — also covers an empty dataset
             # where total_batches == 0); nothing to process, so stop here.

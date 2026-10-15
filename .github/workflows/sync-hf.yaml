@@ -1,0 +1,93 @@
+# Mirrors files from this repo to Hugging Face, so zea can load them without a release:
+#
+#   configs/                     -> hf://zeahub/configs   (load configs by name)
+#   zea/data/app_presets.yaml    -> hf://zeahub/app/presets.yaml   (`zea app` presets)
+#
+# When it runs:
+#   - Push to main (touching either source): updates the `main` branch on the hub.
+#     Every installed zea version reads the app presets from `main`, so a merged PR is
+#     live for all users. Presets needing a newer zea set `min_zea_version`.
+#   - Release: snapshots both to a branch named after the tag (e.g. `v0.1.8`), for
+#     reproducibility (`zea app --presets-revision v0.1.8`).
+#   - Manual run (Actions tab): re-syncs `main`, e.g. after a failed run. Only runs
+#     from the main branch; started from any other branch, the job is skipped.
+#
+# Please change these files through a PR here, not by editing them on the hub:
+# the next sync overwrites hub edits.
+name: Sync to Hugging Face
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - "configs/**"
+      - "zea/data/app_presets.yaml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Hugging Face writes use HF_TOKEN; the GitHub token only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only main may write to the hub's `main`: a manual run can pick any branch, which
+    # would otherwise publish unreviewed files. Releases run on a tag ref instead.
+    if: >-
+      github.repository == 'tue-bmd/zea' &&
+      (github.event_name == 'release' || github.ref == 'refs/heads/main')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install huggingface_hub
+
+      - name: Sync to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.event.release.tag_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          python << 'EOF'
+          import os
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+
+          if os.environ["EVENT"] == "release":
+              revision = os.environ["TAG"]
+              message = f"Sync for release {revision}"
+          else:
+              revision = "main"
+              message = f"Sync from tue-bmd/zea@{os.environ['SHA'][:7]}"
+
+          for repo_id in ("zeahub/configs", "zeahub/app"):
+              api.create_repo(repo_id, repo_type="dataset", exist_ok=True)
+              if revision != "main":
+                  api.create_branch(repo_id, branch=revision, repo_type="dataset", exist_ok=True)
+
+          common = dict(repo_type="dataset", revision=revision, commit_message=message)
+          api.upload_folder(repo_id="zeahub/configs", folder_path="configs", **common)
+          api.upload_file(
+              repo_id="zeahub/app",
+              path_or_fileobj="zea/data/app_presets.yaml",
+              path_in_repo="presets.yaml",
+              **common,
+          )
+          for repo_id in ("zeahub/configs", "zeahub/app"):
+              print(f"✅ https://huggingface.co/datasets/{repo_id}/tree/{revision}")
+          EOF

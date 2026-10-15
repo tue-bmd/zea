@@ -10,11 +10,9 @@ To try this model, simply load one of the available presets:
 
 .. important::
     This is a ``zea`` implementation of the model.
-    For the original paper and code, see `here <https://github.com/richzhang/PerceptualSimilarity>`_.
+    For the original code, see `here <https://github.com/richzhang/PerceptualSimilarity>`_.
 
-    Zhang, Richard, et al.
-    "The Unreasonable Effectiveness of Deep Features as a Perceptual Metric."
-    *https://arxiv.org/abs/1801.03924*
+.. citation:: zhang2018unreasonable
 
 .. seealso::
     A tutorial notebook where this model is used:

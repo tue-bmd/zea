@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="140" alt="zea logo">
+  <a href="https://zea.readthedocs.io/en/latest/getting-started.html"><img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="140" alt="zea logo"></a>
 </p>
 
 <h1 align="center">zea</h1>

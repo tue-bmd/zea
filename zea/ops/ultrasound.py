@@ -181,6 +181,11 @@ class TOFCorrection(Operation):
     # Define operation-specific static parameters
     STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
 
+    # Compiled together with the beamformer that sums its output, XLA's GPU fusion
+    # autotuner can take minutes on large inputs without making the result any faster
+    # (see #599). Only functions that contain this operation are affected.
+    COMPILER_OPTIONS = {"xla_gpu_experimental_enable_fusion_autotuner": False}
+
     def __init__(self, **kwargs):
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
@@ -515,7 +520,13 @@ class Demodulate(Operation):
 
     ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
 
-    def __init__(self, axis=-3, **kwargs):
+    def __init__(self, axis=-3, pad_fast_time=True, **kwargs):
+        """
+        Args:
+            axis (int): Fast-time (axial) axis to demodulate along. Defaults to -3.
+            pad_fast_time (bool): Avoid circular wraparound in the analytic-signal
+                transform. See :func:`~zea.func.ultrasound.demodulate`. Defaults to True.
+        """
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -523,6 +534,7 @@ class Demodulate(Operation):
             **kwargs,
         )
         self.axis = axis
+        self.pad_fast_time = pad_fast_time
 
     def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
@@ -535,6 +547,7 @@ class Demodulate(Operation):
             demodulation_frequency=demodulation_frequency,
             sampling_frequency=sampling_frequency,
             axis=self.axis,
+            pad_fast_time=self.pad_fast_time,
         )
 
         return {
@@ -1015,9 +1028,11 @@ class Downsample(Operation):
 class AnisotropicDiffusion(Operation):
     """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
 
-    Reference:
-    - https://doi.org/10.1109/TIP.2002.804276
-    - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
+    .. citation:: yu2002speckle
+
+        See also the `Image Despeckle Filtering Toolbox
+        <https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox>`_
+        on MATLAB Central.
     """
 
     def call(self, niter=100, lmbda=0.1, rect=None, eps=1e-6, **kwargs):

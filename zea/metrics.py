@@ -223,12 +223,7 @@ def smsle(y_true, y_pred, *, dynamic_range: float = 60.0):
     Both inputs are normalized by their own maximum absolute value before log
     compression, so the metric is invariant to the overall scale of either input.
 
-    .. admonition:: Reference
-
-        Luijten, B., Cohen, R., de Bruijn, F. J., Schmeitz, H. A. W., Mischi, M.,
-        Eldar, Y. C., & van Sloun, R. J. G. (2020). Adaptive Ultrasound Beamforming
-        Using Deep Learning. *IEEE Transactions on Medical Imaging, 39*\\ (12),
-        3967-3978. https://doi.org/10.1109/TMI.2020.3008537
+    .. citation:: luijten2020adaptive
 
     Args:
         y_true (tensor): Ground truth values.

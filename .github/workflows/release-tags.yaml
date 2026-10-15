@@ -1,0 +1,83 @@
+# Moves the rolling tags (`latest`, `openh-rf-latest`) onto the commit of a newly
+# published release, then rebuilds the Read the Docs versions that track them.
+#
+# Runs automatically when a release is published (the release itself stays a
+# manual step), and can be re-run by hand against any existing tag.
+#
+# The tags are pushed with GITHUB_TOKEN on purpose: pushes made with it do not
+# trigger `push` workflows, so moving `latest` does not kick off a second full
+# `docker.yaml` build of the images the release tag just produced. The docs
+# rebuild is therefore wired up explicitly below rather than via its tag trigger.
+name: Move Release Tags
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag the rolling tags should point at (e.g. v0.1.7)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-tags
+  cancel-in-progress: false
+
+jobs:
+  move-tags:
+    name: Move rolling tags
+    # Pre-releases should not move what users get by default.
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Move `latest` and `openh-rf-latest`
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          # Fetch both refs explicitly rather than relying on what the checkout left behind.
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" "refs/heads/main:refs/remotes/origin/main"
+          sha=$(git rev-list -n 1 "refs/tags/${TAG}")
+          echo "${TAG} points at ${sha}"
+
+          if ! git merge-base --is-ancestor "${sha}" origin/main; then
+            echo "::error::${TAG} (${sha}) is not on main; refusing to move the rolling tags"
+            exit 1
+          fi
+
+          for rolling in latest openh-rf-latest; do
+            git tag --force "${rolling}" "${sha}"
+          done
+          # Atomic so the two rolling tags can never end up on different commits.
+          git push --atomic --force origin refs/tags/latest refs/tags/openh-rf-latest
+
+          echo "Moved \`latest\` and \`openh-rf-latest\` to \`${TAG}\` ([\`${sha:0:7}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${sha}))." >> "$GITHUB_STEP_SUMMARY"
+
+  rebuild-docs:
+    name: Rebuild docs
+    needs: [move-tags]
+    strategy:
+      fail-fast: false
+      # Both versions live in the same Read the Docs project and each run starts
+      # with a `sync-versions` call, so serialise them.
+      max-parallel: 1
+      matrix:
+        version: [latest, openh-rf-latest]
+    uses: ./.github/workflows/docs.yaml
+    with:
+      version: ${{ matrix.version }}
+    secrets:
+      RTD_TOKEN: ${{ secrets.RTD_TOKEN }}

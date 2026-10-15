@@ -33,7 +33,6 @@ pipeline:
       params:
         beamformer: delay_and_sum
         enable_pfield: false
-        num_patches: 200
     - name: envelope_detect
     - name: normalize
     - name: log_compress

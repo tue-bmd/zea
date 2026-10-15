@@ -63,6 +63,7 @@ def run_subprocess(cmd, **kwargs):
         "cetus",
         "picmus",
         "verasonics",
+        "us4us",
     ],
 )
 @pytest.mark.heavy
@@ -148,6 +149,8 @@ def create_test_data_for_dataset(dataset, src):
         create_picmus_test_data(src)
     elif dataset == "verasonics":
         create_verasonics_test_data(src)
+    elif dataset == "us4us":
+        extra_args = create_us4us_test_data(src)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
     return extra_args
@@ -177,6 +180,8 @@ def verify_converted_test_dataset(dataset, src, dst):
         verify_converted_picmus_test_data(dst)
     elif dataset == "verasonics":
         verify_converted_verasonics_test_data(src, dst)
+    elif dataset == "us4us":
+        verify_converted_us4us_test_data(src, dst)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -565,6 +570,65 @@ def create_verasonics_test_data(src):
         yaml.dump(convert_yaml, f)
 
 
+def create_us4us_test_data(src):
+    """For us4us we have a small gui4us capture (.pkl) on huggingface.
+
+    The two-entry mapping converts both pipeline outputs of that recording, so
+    the test covers writing several data types side by side in one track.
+    """
+    pkl_file = _hf_resolve_path("hf://zeahub/pytest/us4us/zea_us4us_converter_test_data.pkl")
+    shutil.copy(pkl_file, src / pkl_file.name)
+    return ["--mapping", "0:image", "1:beamformed_data"]
+
+
+@pytest.mark.heavy
+@pytest.mark.parametrize("pass_metadata_explicitly", [False, True])
+def test_us4us_conversion_with_separate_metadata(tmp_path, pass_metadata_explicitly):
+    """A real us4us recording whose ARRUS metadata is a separate pickle converts.
+
+    Some us4us setups pickle the frames on their own -- a bare list of per-frame tuples
+    with no ``metadata`` key -- and write the ARRUS metadata next to it. The fixture is
+    two frames of pipeline output 0 taken verbatim from a 1.75 GB chicken-breast
+    recording, kept small enough for CI; its metadata is the sidecar of that recording.
+
+    Both routes to the metadata are covered: found automatically in the Hugging Face
+    repo, and named explicitly the way ``--metadata`` does.
+    """
+    from zea.data.convert.us4us import convert_us4us_file
+
+    src = "hf://zeahub/pytest/us4us/zea_us4us_separate_metadata_test_data.pkl"
+    metadata_path = (
+        "hf://zeahub/pytest/us4us/data_2024-03-01_17-27-07_metadata.pkl"
+        if pass_metadata_explicitly
+        else None
+    )
+
+    dst = convert_us4us_file(
+        src, tmp_path / "separate_metadata.hdf5", ["0:image"], metadata_path=metadata_path
+    )
+
+    with File(dst, "r") as f:
+        f.validate()
+        image = f.tracks[0].data.image
+        assert image.values.shape == (2, 450, 468)
+        # The metadata describes this recording, so its grid matches the image and the
+        # per-pixel coordinates are kept rather than dropped.
+        assert image.coordinates.shape == (450, 468, 3)
+        # ARRUS marks pixels outside the scan-converted region with NaN, which the
+        # converter stores as -inf on the dB scale.
+        values = image.values[:]
+        assert np.isneginf(values).any(), "the out-of-region pixels should be -inf"
+        assert values[np.isfinite(values)].max() <= 0, "float zea images are in dB, max 0"
+
+        scan = f.tracks[0].scan
+        assert scan.t0_delays.shape == (64, 192)
+        assert np.isclose(scan.sound_speed, 1483)
+        # Scan parameters come from the pipeline output with the highest sampling
+        # frequency -- here the raw-data entry at the 65 MHz ADC rate, not the 16.25 MHz
+        # of the image itself.
+        assert np.isclose(scan.sampling_frequency, 65e6)
+
+
 def verify_converted_echonet_test_data(dst):
     """
     Verify that the converted EchoNet test dataset has the correct structure with hdf5 files
@@ -823,6 +887,60 @@ def verify_converted_verasonics_test_data(src, dst):
         assert "data" in f, f"Missing 'data' in {h5_file}"
         assert "scan" in f, f"Missing 'scan' in {h5_file}"
         f.validate()
+
+
+def verify_converted_us4us_test_data(src, dst):
+    """Verify the converted us4us recording against the source pickle.
+
+    The CLI mapping ``0:image 1:beamformed_data`` writes both outputs into a
+    single track: ``image`` keeps the per-frame shape of the pickle, and the
+    ARRUS IQ output becomes ``(n_frames, z, x, 2)``.
+    """
+    from zea.data.convert.us4us import _get_context, load_us4us_pickle
+
+    h5_files = list(dst.rglob("*.hdf5"))
+    assert len(h5_files) == 1, f"Expected 1 converted hdf5 file, got {h5_files}."
+
+    src_pkl = next(Path(src).glob("*.pkl"))
+    payload = load_us4us_pickle(src_pkl)
+    frames = payload["data"]
+    n_frames = len(frames)
+    n_tx = len(_get_context(payload["metadata"][0]).raw_sequence.ops)
+
+    def per_frame_shape(array):
+        """Shape of one pipeline output, without ARRUS' leading singleton axis."""
+        return array.shape[1:] if array.ndim > 1 and array.shape[0] == 1 else array.shape
+
+    def stored_shape(array):
+        """Per-frame shape as the converter stores it (scan lines become columns)."""
+        shape = per_frame_shape(array)
+        return shape[::-1] if len(shape) == 2 and shape[0] == n_tx else shape
+
+    image_shape = stored_shape(frames[0][0])
+    beamformed_shape = stored_shape(frames[0][1])
+
+    with File(h5_files[0], "r") as f:
+        f.validate()
+        assert "probe" in f, f"Missing 'probe' in {h5_files[0]}"
+        assert len(f.tracks) == 1, f"Expected a single track, got {len(f.tracks)}"
+
+        data = f.tracks[0].data
+        assert set(data.keys()) >= {"image", "beamformed_data"}, (
+            f"Expected 'image' and 'beamformed_data', got {list(data.keys())}"
+        )
+        image = data.image.values[:]
+        assert image.shape == (n_frames, *image_shape)
+        if np.issubdtype(image.dtype, np.floating):
+            assert image.max() <= 0, "float zea images are in dB with a maximum of 0"
+        assert data.beamformed_data.values.shape == (n_frames, *beamformed_shape, 2), (
+            f"beamformed_data shape {data.beamformed_data.values.shape} does not match the "
+            f"per-frame pickle output {per_frame_shape(frames[0][1])} stacked across "
+            f"{n_frames} frames."
+        )
+        assert list(data.beamformed_data.labels[:]) == ["I", "Q"]
+
+        assert f.tracks[0].scan.t0_delays.shape[0] == n_tx
+        assert f.probe.probe_geometry.shape[1] == 3
 
 
 def _install_fake_echoxflow(monkeypatch, src, recordings):

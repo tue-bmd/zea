@@ -17,12 +17,12 @@ from typing import Annotated, Union
 import tyro
 
 from zea.cli_args import (
+    DEFAULT_DEVICE,
+    DEVICE_HELP,
     AppArgs,
     ConvertArgs,
     DataArgs,
     DataPathsArgs,
-    DEFAULT_DEVICE,
-    DEVICE_HELP,
     ProcessArgs,
     ToolsArgs,
 )

@@ -16,11 +16,9 @@ it is the state-of-the-art model for left ventricle segmentation on the CAMUS da
 
 .. important::
     This is a ``zea`` implementation of the model.
-    For the original paper and code, see `here <https://github.com/GillesVanDeVyver/EchoGAINS>`_.
+    For the original code, see `here <https://github.com/GillesVanDeVyver/EchoGAINS>`_.
 
-    Van De Vyver, Gilles, et al.
-    "Generative augmentations for improved cardiac ultrasound segmentation using diffusion models."
-    *https://arxiv.org/abs/2502.20100*
+.. citation:: vandevyver2025generative
 
 .. seealso::
     A tutorial notebook where this model is used:

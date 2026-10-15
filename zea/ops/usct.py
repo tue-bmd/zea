@@ -46,13 +46,7 @@ class USCTReflectivityDAS(Operation):
     based on the reflection ultrasound computed tomography (RUCT) approach for
     ring-array systems described below.
 
-    .. admonition:: Reference
-
-       B. Lafci, J. Robin, X. L. Deán-Ben and D. Razansky.
-       *Expediting Image Acquisition in Reflection Ultrasound Computed Tomography.*
-       IEEE Transactions on Ultrasonics, Ferroelectrics, and Frequency Control,
-       69(10):2837-2848, 2022.
-       `DOI: 10.1109/TUFFC.2022.3172713 <https://doi.org/10.1109/TUFFC.2022.3172713>`_
+    .. citation:: lafci2022expediting
 
     .. seealso::
 

@@ -172,6 +172,107 @@ class TestJit:
 
         assert jit(func, torch=False) is func
 
+    @staticmethod
+    @run_in_backend("jax")
+    def test_default_compiler_options_on_jax():
+        """Supported defaults reach ``jax.jit``, unsupported ones are dropped, and an
+        explicit ``compiler_options`` entry overrides a default."""
+        import unittest.mock
+
+        import jax
+        import numpy as np
+
+        import zea.backend
+        from zea.backend import jit
+
+        flag = "xla_gpu_experimental_enable_fusion_autotuner"
+        with unittest.mock.patch.object(zea.backend.jax_mod, "jit", wraps=jax.jit) as jax_jit:
+            compiled = jit(
+                lambda x: x * 2,
+                default_compiler_options={flag: False, "xla_no_such_option": 1},
+            )
+            jax_jit.assert_not_called()  # the support check waits for the first call
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+            assert jax_jit.call_args.kwargs["compiler_options"] == {flag: False}
+
+            compiled = jit(
+                lambda x: x * 2,
+                default_compiler_options={flag: False},
+                compiler_options={flag: True},
+            )
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+            assert jax_jit.call_args.kwargs["compiler_options"] == {flag: True}
+
+            # With nothing left, the keyword is left out: jax<0.4.36 does not accept it.
+            compiled = jit(lambda x: x * 2, default_compiler_options={"xla_no_such_option": 1})
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+            assert "compiler_options" not in jax_jit.call_args.kwargs
+
+    @staticmethod
+    @run_in_backend("jax")
+    def test_compiler_options_inside_outer_jit():
+        """JAX refuses ``compiler_options`` on a nested jit; the function then compiles
+        as part of the outer one instead of raising (e.g. a pipeline under ``jax.jit``),
+        with a single warning on how to apply the options there."""
+        import unittest.mock
+
+        import jax
+        import numpy as np
+
+        import zea.backend
+        from zea.backend import jit
+
+        flag = "xla_gpu_experimental_enable_fusion_autotuner"
+        for kwargs in (
+            {"default_compiler_options": {flag: False}},
+            {"compiler_options": {flag: False}},
+        ):
+            compiled = jit(lambda x: x * 2, **kwargs)
+            # The test worker disables jit, which would leave nothing to nest in.
+            with (
+                jax.disable_jit(False),
+                unittest.mock.patch.object(zea.backend.log, "warning") as warning,
+            ):
+                outer = jax.jit(jax.value_and_grad(lambda x: compiled(x).sum()))
+                value, grad = outer(np.ones(2, dtype="float32"))
+                jax.jit(lambda x: compiled(x) + 1)(np.ones(2, dtype="float32"))
+            warning.assert_called_once()
+            assert f"XLA_FLAGS='--{flag}=false'" in warning.call_args.args[0]
+            np.testing.assert_allclose(value, 4.0)
+            np.testing.assert_allclose(grad, 2.0)
+            # Still usable at the top level afterwards.
+            np.testing.assert_allclose(compiled(np.ones(2)), 2.0)
+
+    @staticmethod
+    def _check_default_compiler_options_ignored():
+        import keras
+        import numpy as np
+
+        from zea.backend import jit
+
+        compiled = jit(
+            lambda x: keras.ops.sum(x),
+            default_compiler_options={"xla_gpu_experimental_enable_fusion_autotuner": False},
+        )
+        x = keras.ops.convert_to_tensor(np.ones(3, dtype="float32"))
+        np.testing.assert_allclose(keras.ops.convert_to_numpy(compiled(x)), 3.0)
+
+    @staticmethod
+    @run_in_backend("tensorflow")
+    def test_default_compiler_options_ignored_on_tensorflow():
+        """``default_compiler_options`` is JAX-only and never reaches ``tf.function``."""
+        from tests.test_backend import TestJit
+
+        TestJit._check_default_compiler_options_ignored()
+
+    @staticmethod
+    @run_in_backend("torch")
+    def test_default_compiler_options_ignored_on_torch():
+        """``default_compiler_options`` is JAX-only and never reaches ``torch.compile``."""
+        from tests.test_backend import TestJit
+
+        TestJit._check_default_compiler_options_ignored()
+
 
 class TestAdam:
     """Tests for the backend-agnostic Adam optimizer in ``zea.backend.optimizer``."""

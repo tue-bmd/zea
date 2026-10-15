@@ -12,6 +12,8 @@ To try this model, simply load one of the available presets:
     This is a ``zea`` implementation of the model.
     For the original code, see `here <https://github.com/swpenninga/hvae>`_.
 
+.. citation:: penninga2025deep
+
 .. seealso::
     A tutorial notebook where this model is used:
     :doc:`../notebooks/models/hvae_model_example`.
