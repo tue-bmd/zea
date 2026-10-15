@@ -113,6 +113,7 @@ from zea.beamform.geometry import (
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
+    check_for_aliasing,
     polar_pixel_grid,
     scanline_aligned_apodization,
     scanline_pixel_grid,
@@ -158,6 +159,11 @@ class Parameters(BaseParameters):
 
     probe_bandwidth_percent: float
     """Probe bandwidth as a percentage of the center frequency. Defaults to 200.0."""
+
+    bandwidth: float
+    """Width of the RF band kept by processing [Hz], centered on the
+    ``demodulation_frequency``. Used by :class:`~zea.ops.BandPassFilter` and by
+    :meth:`check_for_aliasing`."""
 
     n_el: int
     """Number of elements in the transducer array."""
@@ -322,6 +328,7 @@ class Parameters(BaseParameters):
         "n_tx": {"dtype": np.int32},
         "n_ax": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
+        "bandwidth": {"dtype": np.float32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
@@ -444,6 +451,71 @@ class Parameters(BaseParameters):
                 "'cartesian' and 'polar'."
             )
 
+    def check_for_aliasing(self, pipeline=None, demodulated=None, bandwidth=None) -> list:
+        """Warn when the beamforming grid under-samples the data it will carry.
+
+        Whether a pixel pitch under-samples depends on whether the data reaching
+        the grid is RF or baseband IQ, which the parameters alone do not tell. Pass
+        the ``pipeline`` they are fed into to infer it, or state it with
+        ``demodulated``. See :func:`zea.beamform.pixelgrid.aliasing_limits` for the
+        criteria. Only regular cartesian grids, 2D or 3D, are checked.
+
+        Args:
+            pipeline: The :class:`~zea.Pipeline` these parameters are fed into. A
+                pipeline that never forms a grid has nothing to check.
+            demodulated: Whether the data reaching the grid is baseband IQ. Takes
+                priority over ``pipeline``. When neither says so, ``n_ch == 2``
+                (zea's IQ convention) marks the data as IQ.
+            bandwidth: Overrides the ``bandwidth`` parameter. When neither is
+                set, the carrier is used instead.
+
+        Returns:
+            list of str: The warnings emitted; empty when the grid is adequate.
+
+        Example:
+            .. code-block:: python
+
+                parameters.check_for_aliasing(pipeline)
+        """
+        if self.grid_type != "cartesian" or self.enable_scanline:
+            return []
+
+        if demodulated is None and pipeline is not None:
+            # Imported here: `zea.ops` imports this module.
+            from zea.ops.ultrasound import demodulates_before_grid
+
+            demodulated = demodulates_before_grid(pipeline)
+            if demodulated is None:
+                return []
+        if not demodulated:
+            # The pipeline may be handed IQ rather than demodulate it itself.
+            demodulated = getattr(self, "n_ch", None) == 2
+
+        if bandwidth is None:
+            bandwidth = getattr(self, "bandwidth", None)
+
+        return check_for_aliasing(
+            self.xlims,
+            self.zlims,
+            self.grid_size_x,
+            self.grid_size_z,
+            self.sound_speed,
+            self.center_frequency,
+            self.f_number,
+            demodulation_frequency=self.demodulation_frequency,
+            focus_distances=self.focus_distances,
+            probe_geometry=self.probe_geometry,
+            tx_apodizations=self.tx_apodizations,
+            polar_angles=self.polar_angles,
+            transmit_origins=self.transmit_origins,
+            demodulated=demodulated,
+            bandwidth=bandwidth,
+            # The raw parameter avoids the "using zeros" warning for 2D data.
+            azimuth_angles=self.azimuth_angles if "azimuth_angles" in self._params else None,
+            ylims=self.ylims if self.is_3d else (0.0, 0.0),
+            grid_size_y=self.grid_size_y if self.is_3d else 1,
+        )
+
     @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
     def flat_aligned_apodization(self):
         """Per-pixel, per-transmit compounding apodization weight of shape (n_pix, n_tx).
@@ -500,8 +572,9 @@ class Parameters(BaseParameters):
         if grid_size_x is not None:
             return grid_size_x
 
+        # Pixels sit on both limits, so n pixels span n - 1 pitches.
         width = self.xlims[1] - self.xlims[0]
-        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_x, 1)
 
     @cache_with_dependencies(
@@ -519,7 +592,7 @@ class Parameters(BaseParameters):
             return grid_size_y
 
         height = self.ylims[1] - self.ylims[0]
-        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_y, 1)
 
     @cache_with_dependencies(
@@ -536,7 +609,7 @@ class Parameters(BaseParameters):
             return grid_size_z
 
         depth = self.zlims[1] - self.zlims[0]
-        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_z, 1)
 
     @cache_with_dependencies("sound_speed", "center_frequency")
@@ -660,18 +733,29 @@ class Parameters(BaseParameters):
             ]
         )
 
-    @cache_with_dependencies("extent")
+    @cache_with_dependencies("extent", "grid", "grid_type")
     def extent_imshow(self):
-        """The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+        """The extent of the image, for matplotlib's ``plt.imshow``.
+
+        For a cartesian grid these are the outer edges of its pixels: the pixels sit on
+        the limits of :attr:`extent`, so their edges lie half a pitch beyond. A polar
+        grid is displayed after scan conversion, whose pixels the grid does not know, so
+        there these are the limits of :attr:`extent` themselves.
 
         Returns:
-            np.ndarray: The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
-                This format can be used directly in matplotlib's ``plt.imshow``.
+            np.ndarray: ``(xmin, xmax, zmax, zmin)``.
         """
         xlims_0, xlims_1, ylims_0, ylims_1, zlims_0, zlims_1 = self.extent
         if ylims_0 != ylims_1:
             log.warning("Are you sure you want to use 2D imshow extent for a 3D grid?")
-        return np.array([xlims_0, xlims_1, zlims_1, zlims_0])
+        half_dx = half_dz = 0.0
+        if self.grid_type == "cartesian":
+            n_z, n_x = self.grid.shape[:2]
+            half_dx = (xlims_1 - xlims_0) / (n_x - 1) / 2 if n_x > 1 else 0.0
+            half_dz = (zlims_1 - zlims_0) / (n_z - 1) / 2 if n_z > 1 else 0.0
+        return np.array(
+            [xlims_0 - half_dx, xlims_1 + half_dx, zlims_1 + half_dz, zlims_0 - half_dz]
+        )
 
     @cache_with_dependencies("grid")
     def flatgrid(self):
