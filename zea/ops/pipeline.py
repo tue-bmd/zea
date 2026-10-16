@@ -116,7 +116,6 @@ class Pipeline:
         jit_kwargs: dict | None = None,
         name="pipeline",
         validate=True,
-        check_parameters: bool = True,
         timed: bool = False,
         device: Union[str, None] = None,
         imports: Sequence[str] | None = None,
@@ -143,14 +142,7 @@ class Pipeline:
 
             jit_kwargs (dict, optional): Additional keyword arguments for the JIT compiler.
             name (str, optional): The name of the pipeline. Defaults to "pipeline".
-            validate (bool, optional): Whether to validate the pipeline *structure*
-                (operation data-type compatibility) at construction. Defaults to True.
-            check_parameters (bool, optional): Whether :meth:`prepare_parameters` also
-                runs :meth:`check_parameters`, which inspects the incoming
-                :class:`~zea.Parameters` for problems this pipeline would hit at
-                run time (currently: grid aliasing). Warns only, never raises.
-                Set to ``False`` to silence it, or override per call with
-                ``prepare_parameters(..., check=False)``. Defaults to True.
+            validate (bool, optional): Whether to validate the pipeline. Defaults to True.
             timed (bool, optional): Whether to time each operation. Defaults to False.
             device (str, optional): Default device for all pipeline calls, e.g.
                 ``'cpu'``, ``'gpu:0'``, ``'cuda:1'``.  Can be overridden per-call
@@ -180,7 +172,6 @@ class Pipeline:
 
         self.with_batch_dim = with_batch_dim
         self._validate_flag = validate
-        self._check_parameters_flag = check_parameters
 
         # Setup timer
         if jit_options == "pipeline" and timed:
@@ -998,7 +989,6 @@ class Pipeline:
         self,
         parameters: Union["Parameters", None] = None,
         device: Union[str, None] = None,
-        check: Union[bool, None] = None,
         **overrides,
     ) -> Dict[str, Any]:
         """Prepare a :class:`~zea.Parameters` object for the pipeline.
@@ -1015,8 +1005,6 @@ class Pipeline:
                 converted, so derivation is lazy and minimal.
             device: Device to place the tensors on. Defaults to the pipeline
                 device.
-            check: Whether to also run :meth:`check_parameters`. ``None``
-                (default) uses the pipeline's ``check_parameters`` setting.
             **overrides: Additional parameters to include in the inputs
                 (converted to tensors). These overwrite values taken from
                 ``parameters``.
@@ -1033,11 +1021,6 @@ class Pipeline:
         from zea.parameters import Parameters
 
         _device = device if device is not None else self.device
-
-        # Deliberately before the tensor conversion below: the checks need
-        # concrete values, and this is the last point at which they are.
-        if parameters is not None and (self._check_parameters_flag if check is None else check):
-            self.check_parameters(parameters, **overrides)
 
         params_dict = {}
         override_keys = set(overrides.keys())
