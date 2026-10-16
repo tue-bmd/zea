@@ -720,114 +720,13 @@ class Pipeline:
                     f"of operation {operations[i + 1].__class__.__name__}"
                 )
 
-    def _flat_operations(self):
+    def flat_operations(self):
         """Yield the operations in execution order, flattening nested pipelines."""
         for operation in self.operations:
             if isinstance(operation, Pipeline):
-                yield from operation._flat_operations()
+                yield from operation.flat_operations()
             else:
                 yield operation
-
-    def _grid_input_is_demodulated(self, parameters: Union["Parameters", None] = None):
-        """Whether the data has been demodulated by the time it first hits the grid.
-
-        Answered by walking the operations rather than by inspecting tensors: the
-        op that maps channel data onto the grid (:class:`~zea.ops.TOFCorrection`)
-        always runs inside a JIT trace -- it sits in the nested ``Beamform`` /
-        ``PatchedGrid`` pipeline, which compiles itself as a whole even at
-        ``jit_options="ops"`` -- so at that point every value is a tracer and
-        nothing about it can be tested eagerly.
-
-        A pipeline may also be *handed* baseband IQ rather than demodulating it
-        itself -- beamformer-only pipelines that start at
-        :class:`~zea.ops.TOFCorrection` do exactly that -- so when this pipeline
-        contains no :class:`~zea.ops.Demodulate` the caller's ``n_ch`` decides:
-        ``2`` is zea's IQ convention, and is what ``Demodulate`` itself sets.
-
-        Args:
-            parameters: The :class:`~zea.Parameters` about to be fed in, used
-                only for the ``n_ch`` fallback. May be ``None``.
-
-        Returns:
-            bool or None: ``None`` when this pipeline never forms a grid, in
-            which case there is nothing to check.
-        """
-        forms_grid = False
-        for operation in self._flat_operations():
-            if isinstance(operation, Demodulate):
-                return True
-            if isinstance(operation, TOFCorrection):
-                forms_grid = True
-                break
-        if not forms_grid:
-            return None
-
-        n_ch = None if parameters is None else getattr(parameters, "n_ch", None)
-        return n_ch is not None and int(n_ch) == 2
-
-    def check_parameters(
-        self,
-        parameters: "Parameters",
-        demodulated: Union[bool, None] = None,
-        **overrides,
-    ) -> list:
-        """Check incoming parameters against what this pipeline will do to them.
-
-        A separate step from :meth:`validate`, which checks the pipeline's own
-        structure: this one looks at the :class:`~zea.Parameters` the caller is
-        about to feed in. It warns and never raises, so a questionable
-        configuration still runs.
-
-        Currently it checks the beamforming grid for spatial aliasing
-        (:func:`~zea.beamform.pixelgrid.check_for_aliasing`). That check lives
-        here because it is undecidable anywhere earlier: whether a given pitch
-        under-samples depends on whether this pipeline demodulates, and on the
-        band its band-pass keeps -- neither of which ``Parameters`` knows.
-        Running it here also means it runs eagerly on concrete values, before
-        anything is traced.
-
-        Args:
-            parameters: The :class:`~zea.Parameters` to check.
-            demodulated: Whether the data reaching the grid is baseband IQ.
-                ``None`` (default) infers it from the operations and ``n_ch``;
-                pass it explicitly when that inference cannot see the truth.
-            **overrides: The same overrides passed to :meth:`prepare_parameters`;
-                they take priority over ``parameters``, exactly as they do there.
-
-        Returns:
-            list of str: The warnings emitted; empty when nothing looks wrong.
-        """
-        # Imported here, not at module scope: `zea.internal.parameters` reaches
-        # back into `zea.ops` via the data specs, so a top-level import is circular.
-        from zea.beamform.pixelgrid import check_for_aliasing
-
-        if demodulated is None:
-            demodulated = self._grid_input_is_demodulated(parameters)
-        if demodulated is None:
-            return []
-
-        def resolve(key):
-            if key in overrides:
-                return overrides[key]
-            try:
-                return getattr(parameters, key)
-            except Exception:  # unset, or underivable from what is available
-                return None
-
-        if resolve("grid_type") != "cartesian" or resolve("enable_scanline"):
-            # `check_for_aliasing` is written for a regular cartesian grid.
-            return []
-
-        try:
-            return check_for_aliasing(
-                parameters,
-                demodulated=demodulated,
-                bandwidth=resolve("bandwidth"),
-            )
-        except Exception as exc:
-            # A diagnostic must never be the reason a run fails.
-            log.debug(f"[zea.Pipeline] Skipping parameter checks: {exc!r}")
-            return []
 
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""

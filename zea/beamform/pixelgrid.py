@@ -5,205 +5,359 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from zea import log
-
-if TYPE_CHECKING:
-    from zea.parameters import Parameters
+from zea.beamform.geometry import is_plane_wave
 
 eps = 1e-10
 
 
-def transmit_sin_theta(parameters: "Parameters") -> float | None:
-    """Largest transmit-side aperture angle ``sin(theta_t)`` over the selected transmits.
+def transmit_direction_range(
+    focus_distances,
+    probe_geometry,
+    tx_apodizations,
+    polar_angles,
+    transmit_origins,
+    azimuth_angles=None,
+) -> np.ndarray | None:
+    r"""Range of the ray directions of each transmit.
 
-    This is the transmit half of the lateral bandwidth (see
+    This is the transmit half of the image's k-space support (see
     :func:`aliasing_limits`). Two cases, both taken from the transmit geometry:
 
-    * **focused / diverging** -- the active aperture ``W`` (the elements with
-      non-zero ``tx_apodizations``) seen from the focus at depth ``z_f``:
-      ``sin(theta_t) = (W/2) / hypot(z_f, W/2)``.
-    * **plane** -- a single steered direction, so ``sin(theta_t) = |sin(angle)|``.
+    * **focused / diverging** -- the focal point lies at
+      :math:`\mathbf{o} + z_f \hat{\mathbf{d}}` for origin :math:`\mathbf{o}`,
+      focus distance :math:`z_f` and steering direction
+      :math:`\hat{\mathbf{d}} = (\sin\alpha\cos\beta, \sin\alpha\sin\beta, \cos\alpha)`
+      with polar angle :math:`\alpha` and azimuth :math:`\beta`. The range spans
+      the rays from the active elements (non-zero ``tx_apodizations``) through
+      it. For an unsteered focus centred on an aperture of width :math:`W` the
+      x component spans :math:`\pm s` with
+      :math:`s = \frac{W/2}{\sqrt{z_f^2 + (W/2)^2}}`; steering shifts and skews it.
+    * **plane** -- a single direction :math:`\hat{\mathbf{d}}`, so each range
+      collapses to a point. The sign is kept: a single steered plane wave shifts
+      the support but does not widen it.
 
-    .. note::
-        For focused transmits this is evaluated **at the focal depth**, which is
-        where the beam is laterally tightest and where the image is judged. The
-        same aperture subtends a much wider angle in the near field (e.g. 0.43
-        instead of 0.23 at a quarter of the focal depth), so the true bound is
-        depth-dependent and this returns its *focal-plane* value. Sampling the
-        near field to the letter would demand a grid several times finer than
-        any that is used in practice, and the transmit deposits little energy
-        there anyway.
+    The ``z`` range runs from the most oblique ray to the ray nearest the axis.
+    The rays fill the aperture, so the latter is taken on axis wherever the ``x``
+    and ``y`` ranges straddle zero.
+
+    Args:
+        focus_distances: Focus distance per transmit along the steering
+            direction, shape ``(n_tx,)``. Negative for diverging waves. See
+            :func:`zea.beamform.geometry.is_plane_wave` for how plane waves are marked.
+        probe_geometry: Element positions, shape ``(n_el, 3)``.
+        tx_apodizations: Transmit apodization per transmit, shape ``(n_tx, n_el)``.
+        polar_angles: Steering angle per transmit in radians, shape ``(n_tx,)``.
+            ``None`` means zeros, i.e. unsteered.
+        transmit_origins: Origin of each transmit, shape ``(n_tx, 3)``.
+        azimuth_angles: Azimuth of the steering per transmit in radians, shape
+            ``(n_tx,)``. ``None`` means zeros, i.e. steering in the x-z plane.
 
     Returns:
-        float or None: ``None`` when the transmit geometry is unavailable, in
-        which case callers should fall back to the symmetric assumption.
+        np.ndarray or None: ``(lo, hi)`` of the ``x``, ``y`` and ``z`` components
+        of the unit ray direction per transmit, shape ``(n_tx, 3, 2)``, with
+        transmits that have no active elements or a ``NaN`` focus distance left
+        out. ``None`` when the
+        transmit geometry is empty or malformed, in which case callers should fall
+        back to the symmetric assumption.
     """
-    try:
-        focus_distances = np.asarray(parameters.focus_distances, dtype=float)
-        probe_geometry = np.asarray(parameters.probe_geometry, dtype=float)
-        tx_apodizations = np.asarray(parameters.tx_apodizations, dtype=float)
-        polar_angles = parameters.polar_angles
-    except Exception:
-        # Best-effort geometry probe feeding a warn-only diagnostic: any parameter
-        # set that cannot answer (unset, unresolved transmit selection, ...) simply
-        # falls back to the symmetric assumption rather than breaking the run.
-        return None
+    focus_distances = np.asarray(focus_distances, dtype=float)
+    probe_geometry = np.asarray(probe_geometry, dtype=float)
+    tx_apodizations = np.asarray(tx_apodizations, dtype=float)
 
     if focus_distances.size == 0 or tx_apodizations.ndim != 2:
         return None
 
-    polar_angles = None if polar_angles is None else np.asarray(polar_angles, dtype=float)
+    if polar_angles is None:
+        polar_angles = np.zeros_like(focus_distances)
+    polar_angles = np.asarray(polar_angles, dtype=float)
+    transmit_origins = np.asarray(transmit_origins, dtype=float)
+    if azimuth_angles is None:
+        azimuth_angles = np.zeros_like(polar_angles)
+    azimuth_angles = np.asarray(azimuth_angles, dtype=float)
 
-    sin_thetas = []
+    plane = is_plane_wave(focus_distances)
+    ranges = []
     for tx, focus in enumerate(focus_distances):
-        if not np.isfinite(focus) or focus == 0.0:
-            # Plane wave: a single steered direction, no aperture spread.
-            angle = 0.0 if polar_angles is None else float(polar_angles[tx])
-            sin_thetas.append(abs(np.sin(angle)))
+        polar, azimuth = float(polar_angles[tx]), float(azimuth_angles[tx])
+        steering = np.array(
+            [np.sin(polar) * np.cos(azimuth), np.sin(polar) * np.sin(azimuth), np.cos(polar)]
+        )
+        if plane[tx]:
+            ranges.append(np.stack([steering, steering], axis=-1))
             continue
         active = np.nonzero(np.abs(tx_apodizations[tx]) > eps)[0]
-        if active.size == 0:
+        if active.size == 0 or np.isnan(focus):
             continue
-        half_width = (probe_geometry[active, 0].max() - probe_geometry[active, 0].min()) / 2
-        if half_width <= 0:
-            continue
-        sin_thetas.append(half_width / np.hypot(abs(float(focus)), half_width))
+        focal_point = transmit_origins[tx] + float(focus) * steering
+        # Rays run from each element towards a focus, or away from the virtual
+        # source of a diverging wave, so flip the direction behind the probe.
+        rays = focal_point - probe_geometry[active]
+        rays *= np.where(rays[:, 2:] < 0, -1.0, 1.0) / np.maximum(
+            np.linalg.norm(rays, axis=1, keepdims=True), eps
+        )
+        lo, hi = rays.min(axis=0), rays.max(axis=0)
+        nearest = np.where(lo * hi <= 0, 0.0, np.minimum(np.abs(lo), np.abs(hi)))
+        lo[2] = rays[:, 2].min()
+        hi[2] = np.sqrt(max(1.0 - nearest[0] ** 2 - nearest[1] ** 2, 0.0))
+        ranges.append(np.stack([lo, hi], axis=-1))
 
-    return max(sin_thetas) if sin_thetas else None
+    return np.array(ranges) if ranges else None
 
 
 def aliasing_limits(
-    parameters: "Parameters",
+    sound_speed: float,
+    center_frequency: float | np.ndarray,
+    f_number: float,
+    focus_distances,
+    probe_geometry,
+    tx_apodizations,
+    polar_angles,
+    transmit_origins,
+    demodulation_frequency: float | np.ndarray | None = None,
     demodulated: bool = False,
     bandwidth: float | None = None,
+    azimuth_angles=None,
 ) -> dict:
     """Largest pixel pitch the beamforming grid can carry without spatial aliasing.
 
-    The two axes are limited by different things, and only the axial one is
-    helped by demodulation.
+    A transmit in unit direction ``t`` and a receive in unit direction ``r`` at
+    temporal frequency ``f`` put a plane wave in the image with spatial frequency
+    ``k = f * (t + r) / c``. In the x-z plane, with angles ``theta`` to the z axis::
 
-    **Axial.** A grid holding RF carries the round-trip carrier, so its axial
-    spatial frequency reaches ``2 * f_c / c``. Demodulation removes that carrier
-    and leaves only the band around it: for baseband IQ filtered to ``bandwidth``
-    the support is ``|k_z| <= B / c``, hence ``dz <= c / (2 B)``. That is a much
-    weaker requirement -- at ``B = 4.5 MHz`` and ``c = 1540 m/s`` it is 171 um,
-    against 99 um for the carrier at 7.8 MHz.
+        k_x = f * (sin(theta_t) + sin(theta_r)) / c
+        k_z = f * (cos(theta_t) + cos(theta_r)) / c
 
-    **Lateral.** There is no carrier to remove here, so demodulation buys
-    nothing. The pulse-echo lateral bandwidth is set by the aperture angles on
-    both sides at the *shortest* retained wavelength::
+    Sweeping ``f`` over the band, ``r`` over the receive cone of half-angle
+    ``sin(theta_r) = 1 / sqrt(1 + 4 F^2)`` and ``t`` over the transmit rays (see
+    :func:`transmit_direction_range`) gives the image's k-space support, a single patch
+    at positive ``k_z``. The limits below use the bounding box of that patch.
 
-        |k_x| <= (sin(theta_t) + sin(theta_r)) / lambda_min
-        dx    <= lambda_min / (2 * (sin(theta_t) + sin(theta_r)))
+    **Axial.** An RF image is real, so the mirror patch at ``-k`` is present too
+    and the grid must reach the top of the patch: ``dz <= 1 / (2 * k_z_max)``,
+    i.e. ``lambda_min / 4`` for an unsteered transmit. An IQ image (carrier phase
+    restored by the beamformer) only needs the patch height to fit in one grid
+    period: ``dz <= 1 / (k_z_max - k_z_min)``, on axis ``c / (2 B)``. Oblique
+    paths make the patch taller, so wide apertures need a finer IQ grid.
 
-    with ``sin(theta_r) = 1 / sqrt(1 + 4 F^2)`` from the receive ``f_number``
-    and ``sin(theta_t)`` from :func:`transmit_sin_theta`. Paraxially
-    (``sin(theta) ~ 1/2F``) this is the textbook ``dx <= lambda_min / (1/F_tx +
-    1/F_rx)``, and ``dx <= lambda_min * F / 2`` for a symmetric aperture. When
-    the transmit geometry is unavailable the symmetric case is assumed.
+    **Lateral.** RF and IQ share one limit, since the mirror patch lies at
+    negative ``k_z``: ``dx <= 1 / (k_x_max - k_x_min)``, paraxially
+    ``lambda_min * F / 2`` for equal apertures. A steered plane wave shifts the
+    patch sideways, while compounding over ``+-alpha`` widens it. When no
+    transmit has active elements, ``sin(theta_t)`` is assumed to span
+    ``+-sin(theta_r)``.
+
+    **Elevation.** For 3D grids, ``dy`` follows from ``k_y`` exactly as ``dx``
+    does from ``k_x``, using the y components of ``t`` and ``r``.
 
     Args:
-        parameters: The :class:`~zea.Parameters` describing the grid and probe.
+        sound_speed: Speed of sound in m/s.
+        center_frequency: Transmit center frequency in Hz, scalar or per transmit.
+        f_number: Receive f-number; ``0`` means the full half-space aperture.
+        focus_distances: Focus depth per transmit, see :func:`transmit_direction_range`.
+        probe_geometry: Element positions, see :func:`transmit_direction_range`.
+        tx_apodizations: Transmit apodizations, see :func:`transmit_direction_range`.
+        polar_angles: Steering angle per transmit, see :func:`transmit_direction_range`.
+        transmit_origins: Origin of each transmit, see :func:`transmit_direction_range`.
+        demodulation_frequency: Demodulation frequency in Hz. ``None`` or ``0``
+            falls back to ``center_frequency`` for the band's RF position.
         demodulated: Whether the data reaching the grid is baseband IQ.
         bandwidth: The RF band retained by the pipeline's band-pass, in Hz.
-            ``None`` means unknown, and the carrier is used instead.
+            ``None`` means unknown: the band is then just its centre, and IQ
+            falls back to the RF limit.
+        azimuth_angles: Azimuth of the steering per transmit, see
+            :func:`transmit_direction_range`.
 
     Returns:
-        dict: ``dx_max`` / ``dz_max`` in metres plus the ``lambda_min``,
-        ``sin_theta_t``, ``sin_theta_r`` and ``axial_basis`` used, so callers can
-        report *why* a limit is what it is.
+        dict: The limits plus the quantities behind them, so callers can report
+        *why* a limit is what it is:
+
+        - ``dx_max`` / ``dy_max`` / ``dz_max``: Maximum lateral / elevational /
+          axial pixel spacing in metres.
+        - ``lambda_min``: Shortest RF wavelength used.
+        - ``transmit_direction``: ``(lo, hi)`` of the x, y and z components of the
+          transmit directions over all transmits, shape ``(3, 2)``.
+        - ``sin_theta_r``: Largest receive angle sine, set by ``f_number``.
+        - ``axial_basis``: Readable string on what sets the axial limit.
+        - ``kx_range`` / ``ky_range`` / ``kz_range``: Bounding box of the support
+          in cycles per metre.
     """
-    sound_speed = float(parameters.sound_speed)
+    sound_speed = float(sound_speed)
 
-    if demodulated and bandwidth is not None:
-        dz_max = sound_speed / (2.0 * float(bandwidth))
-        axial_basis = f"baseband IQ, c / (2 * bandwidth) with bandwidth = {bandwidth / 1e6:.2f} MHz"
-    else:
-        # Historical zea criterion: 2 pixels per wavelength. This is one octave
-        # looser than the round-trip Nyquist (lambda/4) that `pixels_per_wavelength`
-        # uses to auto-size the grid; kept so that hand-set RF grids that were
-        # accepted before stay accepted.
-        dz_max = float(parameters.wavelength) / 2
-        axial_basis = "RF carrier, wavelength / 2"
-
-    # The lateral limit needs the shortest *RF* wavelength, so it needs the band's
-    # position on the RF axis. Either frequency can legitimately read 0 --
-    # `demodulation_frequency` when the data was stored at baseband,
-    # `center_frequency` once `Demodulate` has zeroed it -- so take whichever is
-    # still carrying the carrier.
-    band_center = float(parameters.demodulation_frequency)
-    if band_center <= 0:
-        band_center = float(parameters.center_frequency)
-    f_max = band_center + (float(bandwidth) / 2 if bandwidth is not None else 0.0)
+    # Both the RF axial limit and the lateral limit need the shortest *RF*
+    # wavelength, so they need the band's position on the RF axis. Either
+    # frequency can legitimately read 0 -- `demodulation_frequency` when the data
+    # was stored at baseband, `center_frequency` once `Demodulate` has zeroed it --
+    # so take whichever is still carrying the carrier. Per-transmit carriers widen
+    # the band to cover all of them.
+    if demodulation_frequency is None:
+        demodulation_frequency = 0.0
+    band_center = np.ravel(np.asarray(demodulation_frequency, dtype=float))
+    if np.all(band_center <= 0):
+        band_center = np.ravel(np.asarray(center_frequency, dtype=float))
+    half_band = float(bandwidth) / 2 if bandwidth is not None else 0.0
+    f_min = max(float(band_center.min()) - half_band, 0.0)
+    f_max = float(band_center.max()) + half_band
     lambda_min = sound_speed / f_max if f_max > 0 else np.inf
 
-    f_number = float(parameters.f_number)
+    f_number = float(f_number)
     sin_theta_r = 1.0 / np.sqrt(1.0 + 4.0 * f_number**2) if f_number > 0 else 1.0
-    sin_theta_t = transmit_sin_theta(parameters)
-    if sin_theta_t is None:
-        sin_theta_t = sin_theta_r  # symmetric aperture: the textbook lambda * F / 2
+    cos_r_min = np.sqrt(1.0 - sin_theta_r**2)
+    ranges = transmit_direction_range(
+        focus_distances,
+        probe_geometry,
+        tx_apodizations,
+        polar_angles,
+        transmit_origins,
+        azimuth_angles,
+    )
+    if ranges is None:
+        # Symmetric, the transmit cone matching the receive cone: lambda * F / 2.
+        ranges = np.array(
+            [[[-sin_theta_r, sin_theta_r], [-sin_theta_r, sin_theta_r], [cos_r_min, 1.0]]]
+        )
 
-    total_sin = sin_theta_t + sin_theta_r
-    dx_max = lambda_min / (2.0 * total_sin) if total_sin > 0 else np.inf
+    # Lateral and elevational: k = f * u / c with u = t + r along the axis. Each
+    # edge of u reaches furthest from zero at the frequency that scales it outwards.
+    def transverse_band(axis):
+        u_lo = ranges[:, axis, 0].min() - sin_theta_r
+        u_hi = ranges[:, axis, 1].max() + sin_theta_r
+        k_lo = (f_max if u_lo < 0 else f_min) * u_lo / sound_speed
+        k_hi = (f_max if u_hi > 0 else f_min) * u_hi / sound_speed
+        return (k_lo, k_hi), 1.0 / (k_hi - k_lo) if k_hi > k_lo else np.inf
+
+    kx_range, dx_max = transverse_band(0)
+    ky_range, dy_max = transverse_band(1)
+
+    # Axial: k_z = f * (t_z + r_z) / c. The top of the patch is the most on-axis
+    # transmit with an on-axis receive, the bottom the most oblique transmit with
+    # the most oblique receive.
+    kz_hi = f_max * (ranges[:, 2, 1].max() + 1.0) / sound_speed
+    kz_lo = f_min * (ranges[:, 2, 0].min() + cos_r_min) / sound_speed
+
+    if demodulated and bandwidth is not None:
+        dz_max = 1.0 / (kz_hi - kz_lo)
+        axial_basis = (
+            f"IQ, height of the band in k_z for {f_min / 1e6:.2f} - {f_max / 1e6:.2f} MHz "
+            f"and sin(theta_r) = {sin_theta_r:.3f}"
+        )
+    else:
+        dz_max = 1.0 / (2.0 * kz_hi) if kz_hi > 0 else np.inf
+        axial_basis = f"RF, top of the band in k_z for f_max = {f_max / 1e6:.2f} MHz"
 
     return {
         "dx_max": dx_max,
+        "dy_max": dy_max,
         "dz_max": dz_max,
         "lambda_min": lambda_min,
-        "sin_theta_t": sin_theta_t,
+        "transmit_direction": np.stack(
+            [ranges[..., 0].min(axis=0), ranges[..., 1].max(axis=0)], -1
+        ),
         "sin_theta_r": sin_theta_r,
         "axial_basis": axial_basis,
+        "kx_range": kx_range,
+        "ky_range": ky_range,
+        "kz_range": (kz_lo, kz_hi),
     }
 
 
 def check_for_aliasing(
-    parameters: "Parameters",
+    xlims,
+    zlims,
+    grid_size_x: int,
+    grid_size_z: int,
+    sound_speed: float,
+    center_frequency: float | np.ndarray,
+    f_number: float,
+    focus_distances,
+    probe_geometry,
+    tx_apodizations,
+    polar_angles,
+    transmit_origins,
+    demodulation_frequency: float | np.ndarray | None = None,
     demodulated: bool = False,
     bandwidth: float | None = None,
+    azimuth_angles=None,
+    ylims=(0.0, 0.0),
+    grid_size_y: int = 1,
 ) -> list:
     """Warn when the beamforming grid under-samples the data it is about to carry.
 
     Compares the grid's pixel pitch against :func:`aliasing_limits`. Content
     beyond these limits cannot be represented by *any* image on this grid, so it
-    folds back as aliasing (and, in an inverse problem, sits in the residual as a
-    bias that no image can explain).
-
-    Only meaningful once it is known what lands on the grid -- in particular
-    whether the pipeline demodulates, which is why this is driven from
-    :meth:`zea.ops.Pipeline.check_parameters` rather than from the grid itself.
+    folds back as aliasing. Only valid for regular cartesian grids, 2D or 3D.
 
     Args:
-        parameters: The :class:`~zea.Parameters` describing the grid and probe.
-        demodulated: Whether the data reaching the grid is baseband IQ.
-        bandwidth: The RF band retained by the pipeline's band-pass, in Hz.
+        xlims: Lateral extent ``(xmin, xmax)`` of the grid in metres.
+        zlims: Axial extent ``(zmin, zmax)`` of the grid in metres.
+        grid_size_x: Number of pixels along x. Pixels sit on both limits, as in
+            :func:`cartesian_pixel_grid`, so the pitch is ``width / (grid_size_x - 1)``.
+            A single pixel has no pitch and is not checked.
+        grid_size_z: Number of pixels along z, likewise.
+        sound_speed, center_frequency, f_number, focus_distances, probe_geometry,
+            tx_apodizations, polar_angles, transmit_origins, demodulation_frequency,
+            demodulated, bandwidth, azimuth_angles: Forwarded to
+            :func:`aliasing_limits`.
+        ylims: Elevational extent ``(ymin, ymax)`` of the grid in metres. The
+            default, no extent, is a 2D grid.
+        grid_size_y: Number of pixels along y, likewise.
 
     Returns:
         list of str: The messages emitted; empty when the grid is adequate.
     """
-    limits = aliasing_limits(parameters, demodulated=demodulated, bandwidth=bandwidth)
+    limits = aliasing_limits(
+        sound_speed,
+        center_frequency,
+        f_number,
+        focus_distances,
+        probe_geometry,
+        tx_apodizations,
+        polar_angles,
+        transmit_origins,
+        demodulation_frequency=demodulation_frequency,
+        demodulated=demodulated,
+        bandwidth=bandwidth,
+        azimuth_angles=azimuth_angles,
+    )
 
-    width = float(parameters.xlims[1] - parameters.xlims[0])
-    depth = float(parameters.zlims[1] - parameters.zlims[0])
-    dx = width / parameters.grid_size_x
-    dz = depth / parameters.grid_size_z
+    def pitch(lims, size):
+        extent = abs(float(lims[1] - lims[0]))
+        return extent, extent / (size - 1) if size > 1 else 0.0
 
     messages = []
-    if dx > limits["dx_max"]:
+    transverse = [
+        ("Lateral", "x", 0, xlims, grid_size_x),
+        ("Elevational", "y", 1, ylims, grid_size_y),
+    ]
+    for name, axis, component, lims, size in transverse:
+        extent, d = pitch(lims, size)
+        d_max = limits[f"d{axis}_max"]
+        if d <= d_max:
+            continue
+        lo, hi = limits["transmit_direction"][component]
         messages.append(
-            f"Lateral grid pitch {dx * 1e6:.1f} um exceeds {limits['dx_max'] * 1e6:.1f} um "
+            f"{name} grid pitch {d * 1e6:.1f} um exceeds {d_max * 1e6:.1f} um "
             f"(lambda_min = {limits['lambda_min'] * 1e6:.1f} um, "
-            f"sin(theta_t) = {limits['sin_theta_t']:.3f} + "
-            f"sin(theta_r) = {limits['sin_theta_r']:.3f}). "
-            f"Consider increasing grid_size_x to {int(np.ceil(width / limits['dx_max']))} or more, "
+            f"transmit direction {axis} component in [{lo:.3f}, {hi:.3f}], "
+            f"sin(theta_r) = +-{limits['sin_theta_r']:.3f}). "
+            f"Consider increasing grid_size_{axis} to {int(np.ceil(extent / d_max)) + 1} "
+            "or more, "
             "unsetting it to size the grid automatically, or narrowing the apertures "
-            "(f_number / transmit steering) so the data stays inside the grid's lateral band."
+            f"(f_number / transmit steering) so the data stays inside the grid's {name.lower()} "
+            "band."
         )
+    depth, dz = pitch(zlims, grid_size_z)
     if dz > limits["dz_max"]:
         messages.append(
             f"Axial grid pitch {dz * 1e6:.1f} um exceeds {limits['dz_max'] * 1e6:.1f} um "
             f"({limits['axial_basis']}). "
-            f"Consider increasing grid_size_z to {int(np.ceil(depth / limits['dz_max']))} or more, "
+            f"Consider increasing grid_size_z to {int(np.ceil(depth / limits['dz_max'])) + 1} "
+            "or more, "
             "unsetting it to size the grid automatically, or band-limiting the data further."
         )
+
+    for message in messages:
+        log.warning_once(message, key=message)
+    return messages
 
     for message in messages:
         log.warning_once(message, key=message)
@@ -271,9 +425,9 @@ def cartesian_pixel_grid(
     # Build coordinate vectors
     if sizes_provided:
         assert grid_size_x is not None and grid_size_y is not None and grid_size_z is not None
-        x = np.linspace(xlims[0], xlims[1] + eps, grid_size_x)
-        y = np.linspace(ylims[0], ylims[1] + eps, grid_size_y)
-        z = np.linspace(zlims[0], zlims[1] + eps, grid_size_z)
+        x = np.linspace(xlims[0], xlims[1], grid_size_x)
+        y = np.linspace(ylims[0], ylims[1], grid_size_y)
+        z = np.linspace(zlims[0], zlims[1], grid_size_z)
     else:
         assert dx is not None and dz is not None
         sign_x = np.sign(xlims[1] - xlims[0]) if xlims[1] != xlims[0] else 1.0

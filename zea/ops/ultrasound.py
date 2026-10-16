@@ -557,6 +557,30 @@ class Demodulate(Operation):
         }
 
 
+def demodulates_before_grid(pipeline) -> bool | None:
+    """Whether a pipeline demodulates the data before it maps it onto the grid.
+
+    Answered by walking the operations rather than by inspecting tensors: the op
+    that maps channel data onto the grid (:class:`TOFCorrection`) usually runs
+    inside a JIT trace, where nothing about the data can be tested eagerly.
+
+    Args:
+        pipeline: The :class:`~zea.Pipeline` to inspect.
+
+    Returns:
+        bool or None: ``True`` when a :class:`Demodulate` runs before the first
+        :class:`TOFCorrection`, ``False`` when it does not (the pipeline may still
+        be *handed* baseband IQ), and ``None`` when the pipeline never forms a grid.
+    """
+    demodulated = False
+    for operation in pipeline.flat_operations():
+        if isinstance(operation, Demodulate):
+            demodulated = True
+        if isinstance(operation, TOFCorrection):
+            return demodulated
+    return None
+
+
 @ops_registry("fir_filter")
 class FirFilter(Operation):
     """Apply a FIR filter to the input signal using convolution.
