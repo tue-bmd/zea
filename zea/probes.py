@@ -146,6 +146,7 @@ parameters will also work:
 """  # noqa: E501
 
 import numpy as np
+from keras import ops
 
 from zea.data.spec import ProbeSpec
 from zea.internal.core import dict_to_tensor
@@ -378,6 +379,31 @@ class Probe(ProbeSpec):
         if self.element_width is not None and self.pitch is not None:
             return float(self.pitch - self.element_width)
         return None
+
+
+def _resolve_element_width(probe_geometry, element_width):
+    """Return the element width, inferring it from the probe pitch when not given."""
+    if element_width is not None:
+        return element_width
+    try:
+        geometry = ops.convert_to_numpy(probe_geometry)
+    except (RuntimeError, ValueError, TypeError) as exc:
+        raise ValueError(
+            "Element width is not provided, and automatic inference is not available for "
+            "traced/symbolic probe geometry (for example under JAX JIT or TensorFlow graph "
+            "mode). Please provide `element_width` explicitly in the scan/probe parameters."
+        ) from exc
+
+    try:
+        pitch = Probe.get_pitch(geometry)
+    except (ValueError, IndexError, AttributeError) as exc:
+        raise ValueError(
+            "Element width is not provided and automatic estimation failed from probe "
+            "geometry. Please provide `element_width` explicitly or ensure the probe "
+            "geometry is a 1-D uniformly spaced linear array. "
+            f"Details: {exc}"
+        ) from exc
+    return pitch * 0.9  # 90% of the pitch
 
 
 @probe_registry(name="verasonics_l11_4v")

@@ -34,11 +34,11 @@ def compute_pfield(
     sound_speed,
     center_frequency,
     probe_bandwidth_percent,
-    n_el,
     probe_geometry,
     tx_apodizations,
     grid,
     t0_delays,
+    element_width=None,
     frequency_step=4,
     db_thresh=-1.0,
     downsample=10,
@@ -51,17 +51,21 @@ def compute_pfield(
 ):
     """Compute the pressure field for ultrasound imaging.
 
+    Only linear (and phased) arrays are supported: all elements must lie on the x-axis
+    and face +z.
+
     Args:
         sound_speed (float): Speed of sound in the medium.
         center_frequency (float): Center frequency of the transmit pulse in Hz.
         probe_bandwidth_percent (float): Bandwidth of the probe, pulse-echo 6dB
             fractional bandwidth (%)
-        n_el (int): Number of elements in the probe.
-        probe_geometry (array): Geometry of the probe elements.
+        probe_geometry (array): Geometry of the probe elements of shape (n_el, 3).
         tx_apodizations (array): Transmit apodizations of shape (n_tx, n_el).
         grid (array): Grid points where the pressure field is computed
             of shape (grid_size_z, grid_size_x, 3).
         t0_delays (array): Transmit delays for each transmit event.
+        element_width (float, optional): Width of a single element in metres.
+            Default is None, which infers it as 90% of the pitch.
         frequency_step (int, optional): Frequency step. Default is 4.
             Higher is faster but less accurate.
         db_thresh (float, optional): dB threshold. Default is -1.0
@@ -71,10 +75,11 @@ def compute_pfield(
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
-            Only works when norm is True. Default is 1.
+            Default is 1.
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
-            Only works when norm is True. Higher is more aggressive. Default is 10.
-        norm (bool, optional): per pixel normalization (True) or unnormalized (False)
+            Higher is more aggressive. Default is 10.
+        norm (bool, optional): per pixel normalization over the transmit axis (True)
+            or unnormalized (False).
         point_batch_size (int, optional): Batch size for the pressure field computation.
             Higher is slightly faster, but requires more memory. Default is 2048.
         interpolation (str, optional): Interpolation used to resize the pressure
@@ -94,7 +99,16 @@ def compute_pfield(
     attenuation_coef = attenuation_coef / 8.686  # convert to Np/cm/MHz
     attenuation_coef = attenuation_coef / 1e6 / 1e2  # convert to Np/m/Hz
 
-    n_el = int(n_el)
+    # Element orientation (theta) is assumed zero and sub-elements are laid out along x.
+    geometry = ops.convert_to_numpy(probe_geometry)
+    if not (np.allclose(geometry[:, 1], 0) and np.allclose(geometry[:, 2], 0)):
+        raise NotImplementedError(
+            "Pfield computation currently only supports linear arrays, with all elements "
+            "at y=0 and z=0."
+        )
+    from zea.probes import _resolve_element_width
+
+    element_width = _resolve_element_width(geometry, element_width)
 
     # cast to float32
     sound_speed = ops.cast(sound_speed, "float32")
@@ -108,12 +122,7 @@ def compute_pfield(
     grid_x = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
     grid_z = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
     t0_delays = ops.convert_to_tensor(t0_delays, dtype="float32")
-    tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="float32")
-
-    # formatting
-    t0_delays = ops.where(ops.isnan(t0_delays), 0, t0_delays)
-    tx_apodizations = ops.where(ops.isnan(tx_apodizations), 0, tx_apodizations)
-    tx_apodizations = ops.cast(tx_apodizations, "complex64")
+    tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="complex64")
 
     # probe params
     fc_original = center_frequency
@@ -121,12 +130,6 @@ def compute_pfield(
 
     # pulse params
     num_waveforms = 1  # number of waveforms in the pulse
-
-    # array params
-    pitch = ops.abs(probe_geometry[1, 0] - probe_geometry[0, 0])  # element pitch
-
-    kerf = 0.1 * pitch  # for now this is hardcoded
-    element_width = pitch - kerf
 
     # %------------------------------------%
     # % POINT LOCATIONS, DISTANCES & GRIDS %
@@ -148,9 +151,9 @@ def compute_pfield(
     grid_z = ops.reshape(grid_z, (-1,))
 
     # Centers of the transducer elements (x- and z-coordinates)
-    element_x = (ops.arange(0.0, n_el) - (n_el - 1) / 2) * pitch
-    element_z = ops.zeros(n_el)
-    element_theta = ops.zeros(n_el)
+    element_x = probe_geometry[:, 0]
+    element_z = probe_geometry[:, 2]
+    element_theta = ops.zeros_like(element_x)
 
     # Centroids of the sub-elements
     seg_length = element_width / num_sub_elements
@@ -205,8 +208,9 @@ def compute_pfield(
         denom = (bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
         # Raise the normalized difference to the power of p_shape
         exponent = (freq_diff / denom) ** p_shape
-        # Apply the negative sign and exponential
-        return ops.cast(ops.exp(-exponent), "complex64")
+        # The bandwidth is a pulse-echo (two-way) bandwidth; the one-way transmit
+        # response is the square root of the two-way response, hence the factor 1/2.
+        return ops.cast(ops.exp(-exponent / 2), "complex64")
 
     # The frequency response is a pulse-echo (transmit + receive) response.
     # The spectrum of the pulse (pulse_spectrum) will be then multiplied
@@ -307,6 +311,14 @@ def compute_pfield(
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
 
+    # Mean over the retained frequency samples, not their sum: the scan accumulates
+    # |P(f_k)|^2 with no df factor, so a sum scales with the sample count, i.e. with
+    # 1/freq_step -- which is set above from max(t0_delays) and so depends on which
+    # transmits are in the stack. The mean keeps the field a true RMS over the
+    # retained band, and comparable across transmit subsets (~2e-3 apart, from the
+    # differing grids). No effect when norm=True: a global factor cancels below.
+    pressure_squared = pressure_squared / ops.cast(ops.shape(freq)[0], "float32")
+
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
     pressure = ops.reshape(pressure, (-1, *size_downsampled))
@@ -316,28 +328,23 @@ def compute_pfield(
         ops.image.resize(pressure[..., None], size_orig, interpolation=interpolation), axis=-1
     )
 
-    if norm:
-        normalized_pfield = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
-    else:
-        normalized_pfield = p_arr
+    p_arr = shape_pressure_field(p_arr, alpha=alpha, percentile=percentile)
 
-    return normalized_pfield
+    return normalize_pressure_field(p_arr) if norm else p_arr
 
 
-def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
-    """
-    Normalize the input array of intensities by zeroing out values below a given percentile.
+def shape_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
+    """Per-transmit shaping of a pressure field: floor the dim tail, sharpen the beam.
 
     Args:
-        pfield (array): The unnormalized pressure field array
-            of shape (n_tx, grid_size_z, grid_size_x).
+        pfield (array): Pressure field of shape (n_tx, grid_size_z, grid_size_x).
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting.
-            Higher values result in sharper weighting. Default is 1.0.
-        percentile (int, optional): minimum percentile threshold to keep in the weighting.
-            Higher is more aggressive. Default is 10.
+            Higher values result in sharper weighting. Default is 1.0 (no change).
+        percentile (int, optional): minimum percentile threshold to keep in the
+            weighting, per transmit. Higher is more aggressive. Default is 10.
 
     Returns:
-        ops.array: Normalized intensity array.
+        ops.array: Shaped pressure field, same shape.
     """
     # Convert percentile to quantile (0–1 range)
     q = percentile / 100.0
@@ -349,12 +356,21 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
     pfield = ops.where(pfield < threshold, 0, pfield)
 
     # Sharpen the beam
-    pfield = ops.power(pfield, alpha)
+    return ops.power(pfield, alpha)
 
-    # Normalize over transmit events (axis=0)
-    normalized_pfield = pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
-    return normalized_pfield
+def normalize_pressure_field(pfield):
+    """Normalize a pressure field per pixel, over the transmit axis.
+
+    Turns the field into compounding weights that sum to 1 at every pixel.
+
+    Args:
+        pfield (array): Pressure field of shape (n_tx, grid_size_z, grid_size_x).
+
+    Returns:
+        ops.array: Normalized intensity array.
+    """
+    return pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
 
 def _pfield_freq_step(

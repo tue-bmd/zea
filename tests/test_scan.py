@@ -5,11 +5,13 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from keras import ops
 
 from zea import Parameters
+from zea.beamform.pfield import compute_pfield
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
-from zea.probes import create_curved_probe_geometry
+from zea.probes import Probe, create_curved_probe_geometry
 
 scan_args = {
     "n_tx": 10,
@@ -715,7 +717,12 @@ def test_inplace_modification():
         parameters.zlims[1] += 0.01
         return parameters
 
-    for edit_fn in (edit1, edit2, edit3):
+    def edit4(parameters):
+        """edit a direct dependency that is a scalar parameter"""
+        parameters.element_width = parameters.element_width * 0.5
+        return parameters
+
+    for edit_fn in (edit1, edit2, edit3, edit4):
         parameters = get_parameters(pfield_kwargs={"norm": True})
         original_pfield = parameters.pfield.copy()
         assert "pfield" in parameters._cache, "pfield should be cached after first access"
@@ -740,6 +747,32 @@ def test_inplace_modification_tensor_cache():
     assert not np.array_equal(tensor_dict["pfield"], tensor_dict2["pfield"]), (
         "_tensor_cache['pfield'] seems to be unaffected by in-place modification"
     )
+
+
+def test_pfield_rejects_curved_probe():
+    """Pfield computation only supports linear arrays."""
+    parameters = get_parameters()
+    parameters.probe_geometry = create_curved_probe_geometry(parameters.n_el, 3e-4, 40e-3)
+    with pytest.raises(NotImplementedError, match="linear"):
+        _ = parameters.pfield
+
+
+def test_pfield_infers_element_width():
+    """Without an element width, the pfield uses 90% of the pitch."""
+    parameters = get_parameters()
+    kwargs = dict(
+        sound_speed=parameters.sound_speed,
+        center_frequency=parameters.center_frequency,
+        probe_bandwidth_percent=parameters.probe_bandwidth_percent,
+        probe_geometry=parameters.probe_geometry,
+        tx_apodizations=parameters.tx_apodizations,
+        grid=parameters.grid,
+        t0_delays=parameters.t0_delays,
+    )
+    pitch = Probe.get_pitch(parameters.probe_geometry)
+    inferred = ops.convert_to_numpy(compute_pfield(**kwargs))
+    explicit = ops.convert_to_numpy(compute_pfield(**kwargs, element_width=0.9 * pitch))
+    np.testing.assert_allclose(inferred, explicit)
 
 
 def test_update_behaviour_and_cache_invalidation():
