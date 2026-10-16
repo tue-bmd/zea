@@ -510,23 +510,36 @@ class BaseParameters:
                         f"{cls.__name__} class definition."
                     )
 
-    def _find_all_dependents(self, target, seen=None):
+    def _find_all_dependents(self, target):
         """
         Find all computed properties that depend (directly or indirectly) on the target parameter
         with a global search. Returns a set of property names that depend on the target.
         """
+        return self._class_dependents(target)
+
+    @classmethod
+    @functools.cache
+    def _class_dependents(cls, target):
+        """`_find_all_dependents`, memoised: the dependency graph is fixed per class.
+
+        Every `__setattr__` invalidates through here, recursively, and the uncached
+        search rescans the class for each node -- which made `copy()` of a full
+        `Parameters` cost about a second.
+        """
+        return frozenset(cls._collect_dependents(target, set()))
+
+    @classmethod
+    def _collect_dependents(cls, target, seen):
         dependents = set()
-        if seen is None:
-            seen = set()
         if target in seen:
             return dependents
         seen.add(target)
-        for name in self.__class__.__dict__:
-            if self._is_property_with_dependencies(name):
-                if target in self._get_dependencies(name):
+        for name in cls.__dict__:
+            if cls._is_property_with_dependencies(name):
+                if target in cls._get_dependencies(name):
                     dependents.add(name)
                     # Recursively add dependents of this property
-                    dependents |= self._find_all_dependents(name, seen)
+                    dependents |= cls._collect_dependents(name, seen)
         return dependents
 
     def _invalidate(self, key):
