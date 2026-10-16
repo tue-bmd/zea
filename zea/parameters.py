@@ -115,7 +115,7 @@ from zea.beamform.pixelgrid import (
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
-from zea.func.ultrasound import compute_time_to_peak_stack
+from zea.func.ultrasound import compute_time_to_peak
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 from zea.probes import Probe, fit_curved_probe_radius
@@ -1030,7 +1030,7 @@ class Parameters(BaseParameters):
 
         If not set explicitly and ``waveforms_two_way`` (the two-way,
         pulse-echo transmit waveform) is available, this is estimated from it
-        via :func:`~zea.func.ultrasound.compute_time_to_peak_stack`. Otherwise
+        via :func:`~zea.func.ultrasound.compute_time_to_peak`. Otherwise
         it defaults to ``1 / center_frequency``.
         """
         t_peak = self._params.get("t_peak")
@@ -1038,7 +1038,7 @@ class Parameters(BaseParameters):
             waveforms = self._params.get("waveforms_two_way")
             if waveforms is not None:
                 t_peak = ops.convert_to_numpy(
-                    compute_time_to_peak_stack(waveforms, self.center_frequency)
+                    compute_time_to_peak(waveforms, self.center_frequency)
                 )
             else:
                 t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)

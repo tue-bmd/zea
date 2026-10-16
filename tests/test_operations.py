@@ -21,7 +21,6 @@ from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak,
-    compute_time_to_peak_stack,
     construct_acquisition_from_synthetic_aperture,
     decode_hadamard,
     get_low_pass_iq_filter,
@@ -974,7 +973,7 @@ def test_compute_time_to_peak():
     center_frequencies = np.array([center_frequency0, center_frequency1])
     waveforms = np.array([waveform0, waveform1])
 
-    t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
+    t_peak = compute_time_to_peak(waveforms, center_frequencies, 250e6)
 
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
