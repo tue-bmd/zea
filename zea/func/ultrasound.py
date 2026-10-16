@@ -533,25 +533,30 @@ def compute_time_to_peak_stack(waveforms, center_frequencies, waveform_sampling_
     Returns:
         ndarray: The time to peak for each waveform in seconds.
     """
-    t_peak = []
+    # One batched call rather than one per waveform: eagerly, the loop costs ~1 s for
+    # ~150 transmits, and `Parameters.t_peak` reruns it on every `set_transmits`.
+    waveforms = ops.convert_to_tensor(waveforms)
     center_frequencies = center_frequencies * ops.ones((waveforms.shape[0],))
-    for waveform, center_frequency in zip(waveforms, center_frequencies):
-        t_peak.append(compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency))
-    return ops.stack(t_peak)
+    return compute_time_to_peak(
+        waveforms, center_frequencies[:, None, None], waveform_sampling_frequency
+    )
 
 
 def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency=250e6):
     """Compute the time of the peak of the waveform.
 
     Args:
-        waveform (ndarray): The waveform of shape (n_samples).
-        center_frequency (float): The center frequency of the waveform in Hz.
+        waveform (ndarray): The waveform of shape (n_samples), or a stack of them of
+            shape (n_waveforms, n_samples).
+        center_frequency (float): The center frequency of the waveform in Hz; for a
+            stack, broadcastable against (n_waveforms, n_samples, 1).
         waveform_sampling_frequency (float): The sampling frequency of the waveform in Hz.
 
     Returns:
-        float: The time to peak for the waveform in seconds.
+        float: The time to peak for the waveform in seconds, or (n_waveforms,) for a
+            stack.
     """
-    n_samples = waveform.shape[0]
+    n_samples = waveform.shape[-1]
     if n_samples == 0:
         raise ValueError("Waveform has zero samples.")
 
