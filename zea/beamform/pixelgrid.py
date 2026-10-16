@@ -45,6 +45,7 @@ def transmit_direction_range(
         probe_geometry: Element positions, shape ``(n_el, 3)``.
         tx_apodizations: Transmit apodization per transmit, shape ``(n_tx, n_el)``.
         polar_angles: Steering angle per transmit in radians, shape ``(n_tx,)``.
+            ``None`` means zeros, i.e. unsteered.
         transmit_origins: Origin of each transmit, shape ``(n_tx, 3)``.
         azimuth_angles: Azimuth of the steering per transmit in radians, shape
             ``(n_tx,)``. ``None`` means zeros, i.e. steering in the x-z plane.
@@ -52,7 +53,8 @@ def transmit_direction_range(
     Returns:
         np.ndarray or None: ``(lo, hi)`` of the ``x``, ``y`` and ``z`` components
         of the unit ray direction per transmit, shape ``(n_tx, 3, 2)``, with
-        transmits that have no active elements left out. ``None`` when the
+        transmits that have no active elements or a ``NaN`` focus distance left
+        out. ``None`` when the
         transmit geometry is empty or malformed, in which case callers should fall
         back to the symmetric assumption.
     """
@@ -63,29 +65,34 @@ def transmit_direction_range(
     if focus_distances.size == 0 or tx_apodizations.ndim != 2:
         return None
 
+    if polar_angles is None:
+        polar_angles = np.zeros_like(focus_distances)
     polar_angles = np.asarray(polar_angles, dtype=float)
     transmit_origins = np.asarray(transmit_origins, dtype=float)
     if azimuth_angles is None:
         azimuth_angles = np.zeros_like(polar_angles)
     azimuth_angles = np.asarray(azimuth_angles, dtype=float)
 
+    plane = is_plane_wave(focus_distances)
     ranges = []
     for tx, focus in enumerate(focus_distances):
         polar, azimuth = float(polar_angles[tx]), float(azimuth_angles[tx])
         steering = np.array(
             [np.sin(polar) * np.cos(azimuth), np.sin(polar) * np.sin(azimuth), np.cos(polar)]
         )
-        if is_plane_wave(focus):
+        if plane[tx]:
             ranges.append(np.stack([steering, steering], axis=-1))
             continue
         active = np.nonzero(np.abs(tx_apodizations[tx]) > eps)[0]
-        if active.size == 0:
+        if active.size == 0 or np.isnan(focus):
             continue
         focal_point = transmit_origins[tx] + float(focus) * steering
         # Rays run from each element towards a focus, or away from the virtual
         # source of a diverging wave, so flip the direction behind the probe.
         rays = focal_point - probe_geometry[active]
-        rays *= np.sign(rays[:, 2:]) / np.maximum(np.linalg.norm(rays, axis=1, keepdims=True), eps)
+        rays *= np.where(rays[:, 2:] < 0, -1.0, 1.0) / np.maximum(
+            np.linalg.norm(rays, axis=1, keepdims=True), eps
+        )
         lo, hi = rays.min(axis=0), rays.max(axis=0)
         nearest = np.where(lo * hi <= 0, 0.0, np.minimum(np.abs(lo), np.abs(hi)))
         lo[2] = rays[:, 2].min()
@@ -311,7 +318,7 @@ def check_for_aliasing(
     )
 
     def pitch(lims, size):
-        extent = float(lims[1] - lims[0])
+        extent = abs(float(lims[1] - lims[0]))
         return extent, extent / (size - 1) if size > 1 else 0.0
 
     messages = []

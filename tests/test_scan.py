@@ -244,12 +244,12 @@ def test_check_for_aliasing_pitch_counts_both_endpoints():
     assert check_for_aliasing(zlims=(0.0, 100 * dz_max), grid_size_z=100, **args) != []
 
 
-def test_extent_imshow_reaches_pixel_edges():
-    """Pixels sit on the limits, so imshow's extent lies half a pitch beyond them."""
-    args = {**scan_args, "xlims": (-1e-3, 1e-3), "zlims": (0.0, 4e-3)}
-    parameters = Parameters(**{**args, "grid_size_x": 5, "grid_size_z": 9})
-    # dx = 2 mm / 4 = 0.5 mm, dz = 4 mm / 8 = 0.5 mm
-    np.testing.assert_allclose(parameters.extent_imshow, [-1.25e-3, 1.25e-3, 4.25e-3, -0.25e-3])
+def test_check_for_aliasing_reversed_limits():
+    """Reversed limits give the same pitch, and so the same warnings, as ordered ones."""
+    parameters = Parameters(**focused_scan_args)
+    args = {**_aliasing_args(parameters), **_transmit_args(parameters), "demodulated": False}
+    flipped = {**args, "xlims": args["xlims"][::-1], "zlims": args["zlims"][::-1]}
+    assert check_for_aliasing(**flipped) == check_for_aliasing(**args) != []
 
 
 def test_check_for_aliasing_accepts_automatic_grid_size():
@@ -476,6 +476,35 @@ def test_parameters_check_for_aliasing_n_ch_marks_iq():
     parameters = Parameters(**{**focused_scan_args, "n_ch": 2})
     msgs = parameters.check_for_aliasing(ops.Pipeline([ops.TOFCorrection()]), bandwidth=1e6)
     assert not any("Axial" in m for m in msgs)
+
+    # An explicit `demodulated=False` takes priority over `n_ch`.
+    msgs = parameters.check_for_aliasing(demodulated=False, bandwidth=1e6)
+    assert any("Axial" in m for m in msgs)
+
+
+def test_parameters_check_for_aliasing_without_polar_angles():
+    """Missing ``polar_angles`` are treated as unsteered transmits."""
+    args = {k: v for k, v in focused_scan_args.items() if k != "polar_angles"}
+    without = Parameters(**args).check_for_aliasing(demodulated=False)
+    assert without == Parameters(**focused_scan_args).check_for_aliasing(demodulated=False)
+
+
+def test_transmit_direction_range_skips_nan_focus():
+    """A ``NaN`` focus distance marks no transmit type, so that transmit is left out."""
+    transmits = {**_plane_waves([0, 0]), "focus_distances": np.array([np.nan, 40e-3])}
+    ranges = transmit_direction_range(**transmits)
+    assert ranges.shape == (1, 3, 2)
+    assert np.all(np.isfinite(ranges))
+
+
+def test_transmit_direction_range_keeps_horizontal_rays():
+    """A ray level with the focus (z component 0) keeps its direction."""
+    transmits = _plane_waves(0, n_el=2, pitch=20e-3)
+    transmits["probe_geometry"][0, 2] = 10e-3  # first element at the focal depth
+    transmits["focus_distances"] = np.array([10e-3])
+    x_range, _, z_range = transmit_direction_range(**transmits)[0]
+    np.testing.assert_allclose(x_range, [-1 / np.sqrt(2), 1.0])
+    assert z_range[0] == pytest.approx(0.0)
 
 
 def test_set_transmits_focused_excludes_plane_waves():

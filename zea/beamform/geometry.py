@@ -18,13 +18,13 @@ def is_plane_wave(focus_distances):
     canonical value) or by ``0``.
 
     Args:
-        focus_distances: Focus distance per transmit, scalar or array. Must not
-            contain ``NaN``.
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
 
     Returns:
         np.ndarray: Boolean mask with the shape of ``focus_distances``.
     """
-    focus_distances = _as_focus_distances(focus_distances)
+    focus_distances = np.asarray(focus_distances, dtype=float)
     return (focus_distances == 0) | np.isinf(focus_distances)
 
 
@@ -34,13 +34,13 @@ def is_focused(focus_distances):
     A focused transmit has a finite, positive focus distance.
 
     Args:
-        focus_distances: Focus distance per transmit, scalar or array. Must not
-            contain ``NaN``.
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
 
     Returns:
         np.ndarray: Boolean mask with the shape of ``focus_distances``.
     """
-    focus_distances = _as_focus_distances(focus_distances)
+    focus_distances = np.asarray(focus_distances, dtype=float)
     return np.isfinite(focus_distances) & (focus_distances > 0)
 
 
@@ -51,20 +51,14 @@ def is_diverging(focus_distances):
     behind the array).
 
     Args:
-        focus_distances: Focus distance per transmit, scalar or array. Must not
-            contain ``NaN``.
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
 
     Returns:
         np.ndarray: Boolean mask with the shape of ``focus_distances``.
     """
-    focus_distances = _as_focus_distances(focus_distances)
-    return np.isfinite(focus_distances) & (focus_distances < 0)
-
-
-def _as_focus_distances(focus_distances):
     focus_distances = np.asarray(focus_distances, dtype=float)
-    assert not np.any(np.isnan(focus_distances)), "focus_distances must not contain NaN"
-    return focus_distances
+    return np.isfinite(focus_distances) & (focus_distances < 0)
 
 
 def compute_element_normals(probe_geometry, eps=1e-12):

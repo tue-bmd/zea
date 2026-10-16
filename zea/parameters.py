@@ -480,16 +480,16 @@ class Parameters(BaseParameters):
         if self.grid_type != "cartesian" or self.enable_scanline:
             return []
 
-        if demodulated is None and pipeline is not None:
-            # Imported here: `zea.ops` imports this module.
-            from zea.ops.ultrasound import demodulates_before_grid
+        if demodulated is None:
+            if pipeline is not None:
+                # Imported here: `zea.ops` imports this module.
+                from zea.ops.ultrasound import demodulates_before_grid
 
-            demodulated = demodulates_before_grid(pipeline)
-            if demodulated is None:
-                return []
-        if not demodulated:
+                demodulated = demodulates_before_grid(pipeline)
+                if demodulated is None:
+                    return []
             # The pipeline may be handed IQ rather than demodulate it itself.
-            demodulated = getattr(self, "n_ch", None) == 2
+            demodulated = bool(demodulated) or getattr(self, "n_ch", None) == 2
 
         if bandwidth is None:
             bandwidth = getattr(self, "bandwidth", None)
@@ -733,29 +733,18 @@ class Parameters(BaseParameters):
             ]
         )
 
-    @cache_with_dependencies("extent", "grid", "grid_type")
+    @cache_with_dependencies("extent")
     def extent_imshow(self):
-        """The extent of the image, for matplotlib's ``plt.imshow``.
-
-        For a cartesian grid these are the outer edges of its pixels: the pixels sit on
-        the limits of :attr:`extent`, so their edges lie half a pitch beyond. A polar
-        grid is displayed after scan conversion, whose pixels the grid does not know, so
-        there these are the limits of :attr:`extent` themselves.
+        """The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
 
         Returns:
-            np.ndarray: ``(xmin, xmax, zmax, zmin)``.
+            np.ndarray: The extent of the beamforming grid in the format (xmin, xmax, zmax, zmin).
+                This format can be used directly in matplotlib's ``plt.imshow``.
         """
         xlims_0, xlims_1, ylims_0, ylims_1, zlims_0, zlims_1 = self.extent
         if ylims_0 != ylims_1:
             log.warning("Are you sure you want to use 2D imshow extent for a 3D grid?")
-        half_dx = half_dz = 0.0
-        if self.grid_type == "cartesian":
-            n_z, n_x = self.grid.shape[:2]
-            half_dx = (xlims_1 - xlims_0) / (n_x - 1) / 2 if n_x > 1 else 0.0
-            half_dz = (zlims_1 - zlims_0) / (n_z - 1) / 2 if n_z > 1 else 0.0
-        return np.array(
-            [xlims_0 - half_dx, xlims_1 + half_dx, zlims_1 + half_dz, zlims_0 - half_dz]
-        )
+        return np.array([xlims_0, xlims_1, zlims_1, zlims_0])
 
     @cache_with_dependencies("grid")
     def flatgrid(self):
