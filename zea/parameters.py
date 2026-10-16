@@ -113,6 +113,7 @@ from zea.beamform.geometry import (
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
+    check_for_aliasing,
     polar_pixel_grid,
     scanline_aligned_apodization,
     scanline_pixel_grid,
