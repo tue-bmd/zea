@@ -561,7 +561,7 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
         raise ValueError("Waveform has zero samples.")
 
     waveforms_iq_complex_channels = demodulate(
-        waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-1
+        waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-2
     )
     waveforms_iq_complex = ops.view_as_complex(waveforms_iq_complex_channels)
     envelope = ops.abs(waveforms_iq_complex)

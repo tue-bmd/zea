@@ -20,6 +20,7 @@ from zea.beamform.delays import compute_t0_delays_focused
 from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
+    compute_time_to_peak,
     compute_time_to_peak_stack,
     construct_acquisition_from_synthetic_aperture,
     decode_hadamard,
@@ -975,6 +976,14 @@ def test_compute_time_to_peak():
 
     t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
 
+    assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
+
+    # With a sine carrier the largest raw sample sits a quarter period away from the
+    # envelope peak, so this catches taking argmax(|waveform|) instead of the envelope.
+    waveform_sin = np.exp(-((t - 1e-6) ** 2) / (2 * (0.2e-6) ** 2)) * np.sin(
+        2 * np.pi * center_frequency0 * (t - 1e-6)
+    )
+    t_peak = compute_time_to_peak(waveform_sin, center_frequency0, 250e6)
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
 
