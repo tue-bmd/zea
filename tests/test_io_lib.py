@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from zea.io_lib import load_image, load_video, save_video
+from zea.io_lib import load_image, load_video, save_image, save_video
 
 from . import DEFAULT_TEST_SEED
 
@@ -52,6 +52,62 @@ def test_load_image_basic(temp_image):
     assert arr.shape == (32, 32)
     arr_rgb = load_image(temp_image, mode="RGB")
     assert arr_rgb.shape == (32, 32, 3)
+
+
+def test_save_image_roundtrip(tmp_path):
+    """save_image writes an RGB image that load_image reads back unchanged."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 3), dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    assert np.array_equal(load_image(path, mode="RGB"), image)
+
+
+@pytest.mark.parametrize("shape", [(16, 24), (16, 24, 1)])
+def test_save_image_grayscale(tmp_path, shape):
+    """A grayscale image saves with or without a trailing channel axis."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, shape, dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    assert np.array_equal(load_image(path, mode="L"), image.reshape(16, 24))
+
+
+def test_save_image_rgba_png_keeps_alpha(tmp_path):
+    """PNG can hold an alpha channel, so RGBA is written through unchanged."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 4), dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    with Image.open(path) as saved:
+        assert saved.mode == "RGBA"
+        assert np.array_equal(np.array(saved), image)
+
+
+def test_save_image_rgba_jpeg_drops_alpha(tmp_path):
+    """JPEG has no alpha channel; PIL raises on RGBA, so the alpha is dropped first."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 4), dtype=np.uint8)
+    path = tmp_path / "frame.jpg"
+
+    save_image(image, path)
+
+    with Image.open(path) as saved:
+        assert saved.mode == "RGB"
+        assert saved.size == (24, 16)
+
+
+def test_save_image_unsupported_extension_raises(tmp_path):
+    """An extension that is not an image type is refused up front."""
+    image = np.zeros((4, 4), dtype=np.uint8)
+    with pytest.raises(ValueError, match="Unsupported file extension"):
+        save_image(image, tmp_path / "frame.gif")
 
 
 def test_load_video_gif(temp_gif):
@@ -215,3 +271,73 @@ def test_animate_images_parameters_without_extent(tmp_path):
         animate_images(images, path=str(path), parameters=MinimalParameters(), interval=100)
     except AttributeError as e:
         pytest.fail(f"animate_images raised AttributeError: {e}")
+
+
+def test_animate_images_invalid_interval_raises(tmp_path):
+    """animate_images must reject a non-positive interval."""
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(2)]
+    path = tmp_path / "anim.gif"
+
+    with pytest.raises(ValueError, match="interval must be a positive integer"):
+        animate_images(images, path=str(path), interval=0)
+
+    with pytest.raises(ValueError, match="interval must be a positive integer"):
+        animate_images(images, path=str(path), interval=-10)
+
+
+def test_animate_images_empty_images_raises(tmp_path):
+    """animate_images must reject an empty sequence of images."""
+    from zea.internal.notebooks import animate_images
+
+    path = tmp_path / "anim.gif"
+
+    with pytest.raises(ValueError, match="images must be a non-empty sequence"):
+        animate_images([], path=str(path))
+
+
+def test_animate_images_unsupported_suffix_raises(tmp_path):
+    """animate_images must reject output paths with an unsupported suffix."""
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(2)]
+    path = tmp_path / "anim.mp4"
+
+    with pytest.raises(ValueError, match="Unsupported output format"):
+        animate_images(images, path=str(path))
+
+
+def test_animate_images_without_parameters(tmp_path):
+    """animate_images must work when no parameters object is given at all
+    (the ``parameters is None`` branch, as opposed to a parameters object that is
+    merely missing ``extent_imshow``)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
+    path = tmp_path / "anim.gif"
+
+    animate_images(images, path=str(path), parameters=None, interval=100)
+
+    assert path.exists()
+
+
+def test_animate_images_parameters_with_extent(tmp_path):
+    """animate_images must use the extent when parameters.extent_imshow is set."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
+    path = tmp_path / "anim.gif"
+
+    class ParametersWithExtent:
+        extent_imshow = np.array([0.0, 1.0, 0.0, 1.0])
+
+    animate_images(images, path=str(path), parameters=ParametersWithExtent(), interval=100)
+
+    assert path.exists()

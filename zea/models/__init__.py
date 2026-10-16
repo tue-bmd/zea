@@ -6,6 +6,7 @@ See the following dropdown for a list of available models:
 
 .. dropdown:: **Available models**
 
+    - :class:`zea.models.able.ABLE`: An adaptive beamformer that learns per-pixel apodization weights.
     - :class:`zea.models.echonet.EchoNetDynamic`: A model for left ventricle segmentation.
     - :class:`zea.models.carotid_segmenter.CarotidSegmenter`: A model for carotid artery segmentation.
     - :class:`zea.models.echonetlvh.EchoNetLVH`: A model for left ventricle hypertrophy segmentation.
@@ -16,6 +17,7 @@ See the following dropdown for a list of available models:
     - :class:`zea.models.regional_quality.MobileNetv2RegionalQuality`: A scoring model for myocardial regions in apical views.
     - :class:`zea.models.lv_segmentation.AugmentedCamusSeg`: A nnU-Net based left ventricle and myocardium segmentation model.
     - :class:`zea.models.speckle2self.Speckle2Self`: A self-supervised speckle reduction model for ultrasound images.
+    - :class:`zea.models.inversionnet.InversionNet`: A speed-of-sound reconstruction model for ultrasound computed tomography.
 
 Presets for these models can be found in :mod:`zea.models.presets`. Presets are pre-trained weights for the models, which can be used to initialize the models for inference or further training. Each model class has a :attr:`presets` attribute that lists the available presets for that model. We store the presets on `Hugging Face Hub <https://huggingface.co/zeahub/models>`__, and they are downloaded automatically when loading a model with a preset.
 
@@ -76,6 +78,7 @@ An example of how to use the :class:`zea.models.diffusion.DiffusionModel` is sho
 """
 
 from . import (
+    able,
     carotid_segmenter,
     deeplabv3,
     dense,
@@ -87,6 +90,7 @@ from . import (
     generative,
     gmm,
     hvae,
+    inversionnet,
     layers,
     lista,
     lpips,

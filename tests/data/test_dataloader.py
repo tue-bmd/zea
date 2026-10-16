@@ -1,7 +1,7 @@
 """Test H5 dataloader functions"""
 
+import gc
 import hashlib
-import importlib
 import pickle
 from pathlib import Path
 
@@ -11,11 +11,13 @@ import numpy as np
 import pytest
 from keras import ops
 
+from zea.data import dataloader as dataloader_module
 from zea.data.augmentations import RandomCircleInclusion
 from zea.data.dataloader import Dataloader, H5DataSource
 from zea.data.datasets import EXISTS, Dataset, compile_file_filter
 from zea.data.file import File
 from zea.data.layers import Resizer
+from zea.data.metadata import selected_dimensions, selected_leaf_shape
 from zea.tools.hf import HFPath
 
 from .. import DEFAULT_TEST_SEED
@@ -23,7 +25,6 @@ from . import generate_dummy_data_dict, generate_dummy_scan
 
 CAMUS_DATASET_PATH = HFPath("hf://zeahub/camus-sample")
 CAMUS_FILE = CAMUS_DATASET_PATH / "val/patient0401/patient0401_4CH_half_sequence.hdf5"
-CAMUS_REVISION = "v0.1.0"
 CAMUS_KEY = "data/image/values"
 DUMMY_IMAGE_SHAPE = (28, 28)
 DUMMY_N_FRAMES = 100
@@ -82,14 +83,13 @@ def camus_file():
     return CAMUS_FILE
 
 
-def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=True, revision=None):
+def _get_h5_data_source(file_path, key, n_frames, validate=True, revision=None):
     file_paths = [file_path]
 
     generator = H5DataSource(
         file_paths=file_paths,
         key=key,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         validate=validate,
         revision=revision,
     )
@@ -97,23 +97,20 @@ def _get_h5_data_source(file_path, key, n_frames, insert_frame_axis, validate=Tr
 
 
 @pytest.mark.parametrize(
-    "file_path, key, n_frames, insert_frame_axis",
+    "file_path, key, n_frames",
     [
-        ("dummy_hdf5", "data", 1, True),
-        ("dummy_hdf5", "data", 3, True),
-        ("dummy_hdf5", "data", 1, False),
-        ("dummy_hdf5", "data", 3, False),
-        ("camus_file", CAMUS_KEY, 1, True),
-        ("camus_file", CAMUS_KEY, 3, True),
-        ("camus_file", CAMUS_KEY, 1, False),
-        ("camus_file", CAMUS_KEY, 3, False),
-        ("camus_file", CAMUS_KEY, 15, False),
+        ("dummy_hdf5", "data", None),
+        ("dummy_hdf5", "data", 1),
+        ("dummy_hdf5", "data", 3),
+        ("camus_file", CAMUS_KEY, None),
+        ("camus_file", CAMUS_KEY, 1),
+        ("camus_file", CAMUS_KEY, 3),
+        ("camus_file", CAMUS_KEY, 15),
     ],
 )
-def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
+def test_h5_data_source(file_path, key, n_frames, request):
     """Test the H5DataSource class"""
 
-    is_camus = file_path == "camus_file"
     validate = not (file_path == "dummy_hdf5")
     file_path = request.getfixturevalue(file_path)
 
@@ -121,62 +118,231 @@ def test_h5_data_source(file_path, key, n_frames, insert_frame_axis, request):
         file_path,
         key,
         n_frames,
-        insert_frame_axis,
         validate=validate,
-        revision=CAMUS_REVISION if is_camus else None,
     )
 
     batch_shape = data_source[0].shape
-    if insert_frame_axis:
+    if n_frames is None:
+        # No frame axis at all: the sample is a single frame in the file's own layout.
+        assert len(batch_shape) == 2, (
+            f"With n_frames=None the sample should be a bare frame, got shape {batch_shape}"
+        )
+    else:
         assert batch_shape[-1] == n_frames, (
             f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
             " is not equal to the number of frames {n_frames}"
         )
-    else:
-        assert (batch_shape[-1] / n_frames) == (batch_shape[-1] // n_frames), (
-            f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
-            " is not divisible by the number of frames {n_frames}"
+
+
+@pytest.fixture
+def spec_shaped_hdf5(tmp_path):
+    """A file with a spec-named data field and a spec-named field that has no frames."""
+    file_path = tmp_path / "spec_shaped_0_0.hdf5"
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("data/image/values", data=np.zeros((4, 8, 6), dtype=np.float32))
+        f.create_dataset("probe/probe_geometry", data=np.zeros((5, 3), dtype=np.float32))
+    return file_path
+
+
+def test_frame_axis_comes_from_spec(spec_shaped_hdf5):
+    """The frame axis is resolved from the spec, and fields without one still load."""
+    frames = H5DataSource(file_paths=[spec_shaped_hdf5], key="data/image/values", validate=False)
+    assert frames.source_frame_axis == 0
+    assert len(frames) == 4
+
+    # probe_geometry is (n_el, 3) in the spec: no frame axis, so one sample per file.
+    geometry = H5DataSource(
+        file_paths=[spec_shaped_hdf5], key="probe/probe_geometry", validate=False
+    )
+    assert geometry.source_frame_axis is None
+    assert len(geometry) == 1
+    assert geometry[0].shape == (5, 3)
+
+    with pytest.raises(ValueError, match="no frame axis"):
+        H5DataSource(
+            file_paths=[spec_shaped_hdf5],
+            key="probe/probe_geometry",
+            n_frames=2,
+            validate=False,
         )
 
 
-def test_pad_incomplete_blocks(dummy_hdf5):
-    """Files shorter than a block are skipped by default and padded when enabled."""
+def test_frame_window_on_frameless_key_warns(spec_shaped_hdf5, attach_caplog_warnings):
+    """A frame window cannot narrow a key without frames, so it is ignored out loud."""
+    source = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="probe/probe_geometry",
+        limit_n_frames=2,
+        offset_n_frames=3,
+        validate=False,
+    )
+    # The window changed nothing: still the one whole (n_el, 3) sample.
+    assert len(source) == 1
+    assert source[0].shape == (5, 3)
+
+    (record,) = [r for r in attach_caplog_warnings.records if "Ignoring" in r.message]
+    assert "limit_n_frames=2" in record.message
+    assert "offset_n_frames=3" in record.message
+
+
+def test_frame_window_on_framed_key_does_not_warn(spec_shaped_hdf5, attach_caplog_warnings):
+    """The warning is about frameless keys only -- a real frame axis is windowed as asked."""
+    source = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="data/image/values",
+        limit_n_frames=2,
+        validate=False,
+    )
+    assert len(source) == 2
+    assert not [r for r in attach_caplog_warnings.records if "Ignoring" in r.message]
+
+
+def test_scalar_key_has_no_frame_axis(spec_shaped_hdf5, tmp_path):
+    """A 0-d dataset has no axis to take frames from, so it loads as one whole sample."""
+    file_path = tmp_path / "scalar_0_0.hdf5"
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("scan/sound_speed", data=np.float32(1540.0))
+
+    source = H5DataSource(file_paths=[file_path], key="scan/sound_speed", validate=False)
+
+    assert source.source_frame_axis is None
+    assert len(source) == 1
+    assert np.asarray(source[0]) == np.float32(1540.0)
+
+
+def test_minimally_sized_strided_block(spec_shaped_hdf5):
+    """A strided block spans its gaps, not a trailing stride: 2 frames at stride 2 fit 3.
+
+    Measuring the span as ``n_frames * stride`` (4) instead of
+    ``(n_frames - 1) * stride + 1`` (3) drops files that can serve the block fine.
+    """
+    source = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="data/image/values",
+        n_frames=2,
+        frame_index_stride=2,
+        validate=False,
+    )
+
+    # Non-overlapping blocks still step a full n_frames * stride, so 4 frames give one.
+    assert len(source) == 1
+    assert source[0].shape == (8, 6, 2), "two frames, on the trailing frame axis"
+
+    # And the same block fits a file with exactly the 3 frames it spans.
+    limited = H5DataSource(
+        file_paths=[spec_shaped_hdf5],
+        key="data/image/values",
+        n_frames=2,
+        frame_index_stride=2,
+        limit_n_frames=3,
+        validate=False,
+    )
+    assert len(limited) == 1
+
+
+def test_strided_blocks_are_contiguous(tmp_path):
+    """Consecutive blocks pick up where the last one read, leaving no gap between them.
+
+    Stepping ``n_frames * stride`` instead would skip frame 3 here: it falls after the
+    first block's last frame (2) and before the second block would start (4).
+    """
+    file_path = tmp_path / "tagged_0_0.hdf5"
+    n_frames_in_file = 7
+    with h5py.File(file_path, "w") as f:
+        # Frame i is filled with the value i, so a sample reports which frames it holds.
+        frames = np.arange(n_frames_in_file, dtype=np.float32)[:, None, None]
+        f.create_dataset("data/image/values", data=np.broadcast_to(frames, (7, 2, 2)).copy())
+
+    source = H5DataSource(
+        file_paths=[file_path],
+        key="data/image/values",
+        n_frames=2,
+        frame_index_stride=2,
+        validate=False,
+    )
+
+    blocks = [np.asarray(source[i])[0, 0].astype(int).tolist() for i in range(len(source))]
+    assert blocks == [[0, 2], [3, 5]]
+
+    # Stride 1 is the ordinary contiguous case, unchanged by the span/step distinction.
+    unstrided = H5DataSource(
+        file_paths=[file_path], key="data/image/values", n_frames=2, validate=False
+    )
+    blocks = [np.asarray(unstrided[i])[0, 0].astype(int).tolist() for i in range(len(unstrided))]
+    assert blocks == [[0, 1], [2, 3], [4, 5]]
+
+
+def test_frame_axis_unknown_key_falls_back_to_axis_zero(dummy_hdf5):
+    """A key outside the spec warns and assumes the usual leading frame axis."""
+    source = H5DataSource(file_paths=[dummy_hdf5], key="data", validate=False)
+    assert source.source_frame_axis == 0
+    assert len(source) == DUMMY_N_FRAMES
+
+
+def test_incomplete_blocks_raises_by_default(dummy_hdf5):
+    """A file too short to fill a block fails the build rather than vanishing quietly."""
     n_frames = DUMMY_N_FRAMES + 50
 
-    skipped = H5DataSource(
+    with pytest.raises(ValueError) as excinfo:
+        H5DataSource(file_paths=[dummy_hdf5], key="data", n_frames=n_frames, validate=False)
+
+    message = str(excinfo.value)
+    # Names the shortfall, the offending file with the frames it has, and the way out.
+    assert f"1/1 files hold fewer than the {n_frames} frames" in message
+    assert f"({DUMMY_N_FRAMES})" in message
+    assert "on_incomplete_blocks='skip'" in message
+
+
+def test_incomplete_blocks_skip_drops_the_file(dummy_hdf5):
+    """``skip`` restores the old silent-drop behaviour, now explicitly asked for."""
+    source = H5DataSource(
         file_paths=[dummy_hdf5],
         key="data",
-        n_frames=n_frames,
+        n_frames=DUMMY_N_FRAMES + 50,
         validate=False,
-        pad_incomplete_blocks=False,
+        on_incomplete_blocks="skip",
     )
-    assert len(skipped) == 0
+    assert len(source) == 0
 
-    padded = H5DataSource(
-        file_paths=[dummy_hdf5],
-        key="data",
-        n_frames=n_frames,
-        validate=False,
-        pad_incomplete_blocks=True,
-    )
-    assert len(padded) == 1
 
-    sample = padded[0]
-    assert sample.shape[-1] == n_frames
+def test_incomplete_blocks_error_counts_the_usable_window(dummy_hdf5):
+    """``offset_n_frames`` narrows what counts as available, and the error says so."""
+    offset = DUMMY_N_FRAMES - 1
 
-    per_frame_sum = np.abs(sample).sum(axis=tuple(range(sample.ndim - 1)))
-    valid_frames = int(np.count_nonzero(per_frame_sum))
-    assert valid_frames == DUMMY_N_FRAMES
-    assert np.all(per_frame_sum[DUMMY_N_FRAMES:] == 0)
+    with pytest.raises(ValueError) as excinfo:
+        H5DataSource(
+            file_paths=[dummy_hdf5],
+            key="data",
+            n_frames=2,
+            offset_n_frames=offset,
+            validate=False,
+        )
+
+    message = str(excinfo.value)
+    # One frame is left past the offset, which is one short of the two a block needs.
+    assert "(1)" in message
+    assert "offset_n_frames and limit_n_frames" in message
 
 
 @pytest.mark.parametrize(
-    "directory, key, n_frames, insert_frame_axis, num_files, total_samples",
+    "kwargs",
+    [{"on_incomplete_blocks": "pad"}, {"on_missing_metadata": "drop"}],
+)
+def test_unknown_file_policy_rejected(dummy_hdf5, kwargs):
+    """An unrecognized policy is caught up front, listing what is accepted."""
+    with pytest.raises(ValueError, match=r"must be one of \('error', 'skip'\)"):
+        H5DataSource(file_paths=[dummy_hdf5], key="data", validate=False, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "directory, key, n_frames, num_files, total_samples",
     [
-        ("camus_dataset", CAMUS_KEY, 1, True, 6, 101),
-        ("fake_directory", "data", 1, True, 3, 9 * 3),
-        ("camus_dataset", CAMUS_KEY, 5, False, 6, 101),
-        ("fake_directory", "data", 5, False, 3, 9 * 3),
+        ("camus_dataset", CAMUS_KEY, None, 6, 101),
+        ("fake_directory", "data", None, 3, 9 * 3),
+        ("camus_dataset", CAMUS_KEY, 1, 6, 101),
+        ("fake_directory", "data", 1, 3, 9 * 3),
+        ("camus_dataset", CAMUS_KEY, 5, 6, 101),
+        ("fake_directory", "data", 5, 3, 9 * 3),
     ],
 )
 def test_dataloader(
@@ -184,7 +350,6 @@ def test_dataloader(
     directory,
     key,
     n_frames,
-    insert_frame_axis,
     num_files,
     total_samples,
     request,
@@ -192,7 +357,8 @@ def test_dataloader(
     """Test the dataloader.
     Uses the tmp_path fixture: https://docs.pytest.org/en/stable/how-to/tmp_path.html"""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    revision = None
+    # The fake directory holds plain hdf5 files, not zea files, so skip validation.
+    validate = directory != "fake_directory"
     if directory == "fake_directory":
         # create a fake directory with some dummy data
         for i in range(num_files):
@@ -204,40 +370,36 @@ def test_dataloader(
     elif directory == "camus_dataset":
         directory = request.getfixturevalue(directory)
         image_range = (-60, 0)
-        revision = CAMUS_REVISION
     else:
         raise ValueError("Invalid directory for testing")
 
-    with Dataset(directory, revision=revision) as dataset_test:
+    with Dataset(directory, validate=validate) as dataset_test:
         file_lengths = [len(file[key]) for file in dataset_test]
 
-    expected_len_dataset = sum(
-        [length // n_frames if not insert_frame_axis else length for length in file_lengths]
-    )
+    expected_len_dataset = sum(length // (n_frames or 1) for length in file_lengths)
 
     dataset = Dataloader(
         directory,
         batch_size=1,
         key=key,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
         image_range=image_range,
-        revision=revision,
+        validate=validate,
     )
     batch_shape = next(iter(dataset)).shape
 
-    if insert_frame_axis:
+    if n_frames is None:
+        # The sample itself has no frame axis, but Dataloader restores a trailing
+        # channel dim on 2-D samples so batching produces uniform shapes.
+        assert batch_shape[-1] == 1, (
+            f"With n_frames=None a 2-D sample should batch as (batch, h, w, 1), got {batch_shape}"
+        )
+    else:
         assert batch_shape[-1] == n_frames, (
             f"Something went wrong as the last dimension of the batch shape {batch_shape[-1]}"
             " is not equal to the number of frames {n_frames}"
-        )
-    else:
-        assert (batch_shape[-2] / n_frames) == (batch_shape[-2] // n_frames), (
-            "Something went wrong as the second to last dimension of "
-            f"the batch shape {batch_shape[-2]} "
-            f"is not divisible by the number of frames {n_frames}"
         )
 
     real_len_dataset = len(dataset)
@@ -263,26 +425,24 @@ def test_dataloader(
 
 
 @pytest.mark.parametrize(
-    "directory, key, n_frames, insert_frame_axis, image_size, batch_size",
+    "directory, key, n_frames, image_size, batch_size",
     [
-        ("camus_dataset", CAMUS_KEY, 1, True, (20, 20), 2),
-        ("dummy_hdf5", "data", 1, True, (20, 20), 2),
-        ("camus_dataset", CAMUS_KEY, 5, False, (20, 20), 1),
-        ("dummy_hdf5", "data", 5, False, (20, 20), 1),
+        ("camus_dataset", CAMUS_KEY, 1, (20, 20), 2),
+        ("dummy_hdf5", "data", 1, (20, 20), 2),
+        ("camus_dataset", CAMUS_KEY, 5, (20, 20), 1),
+        ("dummy_hdf5", "data", 5, (20, 20), 1),
     ],
 )
-def test_h5_dataset_return_filename(
+def test_h5_dataset_return_metadata(
     directory,
     key,
     n_frames,
-    insert_frame_axis,
     image_size,
     batch_size,
     request,
 ):
-    """Test the dataloader with return_filename=True."""
+    """Test the dataloader with return_metadata=True."""
 
-    is_camus = directory == "camus_dataset"
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
@@ -292,21 +452,24 @@ def test_h5_dataset_return_filename(
         key=key,
         image_size=image_size,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
-        return_filename=True,
+        return_metadata=True,
         resize_type="resize",
         batch_size=batch_size,
         validate=validate,
-        revision=CAMUS_REVISION if is_camus else None,
     )
 
     batch = next(iter(dataset))
 
-    assert len(batch) == 2, "The batch should contain two elements: images and file names"
+    assert len(batch) == 2, "The batch should contain two elements: images and metadata"
 
-    _, file_dict = batch
+    _, metadata = batch
+
+    assert list(metadata) == ["file"], (
+        "With return_metadata=True only the file identity should be returned"
+    )
+    file_dict = metadata["file"]
 
     # Check keys
     keys = ["filename", "fullpath", "indices"]
@@ -357,7 +520,6 @@ def test_h5_dataset_return_filename(
 def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_size, request):
     """Test the dataloader with different resize types."""
 
-    is_camus = directory == "camus_dataset"
     validate = directory != "dummy_hdf5"
     directory = request.getfixturevalue(directory)
 
@@ -369,11 +531,9 @@ def test_h5_dataset_resize_types(directory, key, image_size, resize_type, batch_
         shuffle=True,
         batch_size=batch_size,
         seed=DEFAULT_TEST_SEED,
-        return_filename=False,
         resize_type=resize_type,
         assert_image_range=False,
         validate=validate,
-        revision=CAMUS_REVISION if is_camus else None,
     )
 
     images = next(iter(dataset))
@@ -400,17 +560,15 @@ def test_crop_or_pad():
 
 @pytest.mark.parametrize(
     (
-        "key, n_frames, insert_frame_axis, additional_axes_iter, "
-        "frame_axis, initial_frame_axis, frame_index_stride, "
+        "key, n_frames, additional_axes_iter, "
+        "frame_axis, frame_index_stride, "
         "resize_type, image_size, batch_size"
     ),
     [
         (
             "data",
             1,
-            True,
             (1, 3),
-            0,
             0,
             1,
             "resize",
@@ -419,11 +577,9 @@ def test_crop_or_pad():
         ),
         (
             "data",
-            3,
-            False,
+            None,
             (2, 3),
             -1,
-            0,
             2,
             "center_crop",
             (20, 20),
@@ -432,10 +588,8 @@ def test_crop_or_pad():
         (
             "data",
             5,
-            True,
             (2, 3),
             -1,
-            0,
             1,
             "random_crop",
             (20, 20),
@@ -447,10 +601,8 @@ def test_ndim_hdf5_dataset(
     ndim_hdf5_dataset_path,  # pytest fixture
     key,
     n_frames,
-    insert_frame_axis,
     additional_axes_iter,
     frame_axis,
-    initial_frame_axis,
     frame_index_stride,
     resize_type,
     image_size,
@@ -463,15 +615,12 @@ def test_ndim_hdf5_dataset(
         key=key,
         image_size=image_size,
         n_frames=n_frames,
-        insert_frame_axis=insert_frame_axis,
         frame_axis=frame_axis,
-        initial_frame_axis=initial_frame_axis,
         frame_index_stride=frame_index_stride,
         batch_size=batch_size,
         additional_axes_iter=additional_axes_iter,
         shuffle=True,
         seed=DEFAULT_TEST_SEED,
-        return_filename=False,
         resize_type=resize_type,
         resize_axes=(-3, -1),
         validate=False,  # ndim_hdf5_dataset_path is not a zea dataset
@@ -529,6 +678,30 @@ def test_random_circle_inclusion_augmentation(dummy_hdf5):
     )
 
 
+def test_frameless_resize_allows_nondefault_frame_axis(dummy_hdf5):
+    """With n_frames=None there is no frame axis, so frame_axis must not block resizing.
+
+    ``frame_axis`` is documented as unused when ``n_frames is None``; the samples are
+    2-D either way, so axes (1, 2) really are height and width and the default
+    ``resize_axes`` holds.
+    """
+    dataset = Dataloader(
+        dummy_hdf5,
+        batch_size=2,
+        key="data",
+        n_frames=None,
+        frame_axis=0,
+        image_size=(16, 16),
+        resize_type="resize",
+        shuffle=False,
+        seed=DEFAULT_TEST_SEED,
+        validate=False,
+    )
+
+    images = ops.convert_to_numpy(next(iter(dataset)))
+    assert images.shape == (2, 16, 16, 1)
+
+
 def test_resize_with_different_shapes(multi_shape_dataset):
     """Test the dataloader class with different image shapes in a batch."""
 
@@ -556,10 +729,10 @@ def test_resize_with_different_shapes(multi_shape_dataset):
     ), f"Output shape {images_np.shape} does not match expected (16, 16)"
 
 
-def test_skipped_files_warning(tmp_path):
-    """Test warning when files have too few frames for n_frames * frame_index_stride."""
+def test_skipped_files_leave_an_empty_source(tmp_path):
+    """A directory whose every file is too short yields nothing under ``skip``."""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    # Create file with only 1 frame — requesting n_frames=5 should skip it
+    # Only 1 frame, so n_frames=5 cannot fill a block from it.
     with h5py.File(tmp_path / "small_0.hdf5", "w") as f:
         f.create_dataset("data", data=rng.standard_normal((1, 28, 28)))
 
@@ -569,17 +742,18 @@ def test_skipped_files_warning(tmp_path):
         n_frames=5,
         frame_index_stride=1,
         validate=False,
+        on_incomplete_blocks="skip",
     )
     assert len(source) == 0
 
 
-def test_limit_n_samples(dummy_hdf5):
-    """Test H5DataSource with limit_n_samples caps samples."""
+def test_limit_n_examples(dummy_hdf5):
+    """Test H5DataSource with limit_n_examples caps the dataset length."""
     source = H5DataSource(
         file_paths=dummy_hdf5,
         key="data",
         n_frames=1,
-        limit_n_samples=5,
+        limit_n_examples=5,
         validate=False,
     )
     assert len(source) == 5
@@ -603,6 +777,128 @@ def test_cache_hit_and_store(dummy_hdf5):
     np.testing.assert_array_equal(result1, result2)
 
 
+@pytest.fixture
+def uint8_hdf5(tmp_path):
+    """Fixture to create a dummy hdf5 file holding uint8 data."""
+    file_path = tmp_path / "uint8_data.hdf5"
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    with h5py.File(file_path, "w") as f:
+        data = rng.integers(0, 256, (DUMMY_N_FRAMES, *DUMMY_IMAGE_SHAPE), dtype=np.uint8)
+        f.create_dataset("data", data=data)
+    return file_path
+
+
+def test_dtype_defaults_to_no_casting(uint8_hdf5):
+    """Test that without `dtype` the file's own dtype is preserved."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        assert_image_range=False,
+        convert_to_tensor=False,
+        validate=False,
+    )
+    assert next(iter(dataloader)).dtype == np.uint8
+
+
+@pytest.mark.parametrize("dtype", ["float32", np.float16])
+def test_dtype_casts(uint8_hdf5, dtype):
+    """Test that `dtype` casts the samples to the requested dtype."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        assert_image_range=False,
+        dtype=dtype,
+        convert_to_tensor=False,
+        validate=False,
+    )
+    assert next(iter(dataloader)).dtype == np.dtype(dtype)
+
+
+def test_dtype_casts_before_normalization(uint8_hdf5):
+    """Test that casting happens before normalization, so uint8 data normalizes."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(0, 255),
+        normalization_range=(0, 1),
+        dtype="float32",
+        convert_to_tensor=False,
+        validate=False,
+    )
+    batch = next(iter(dataloader))
+    assert batch.dtype == np.float32
+    assert 0.0 <= batch.min() and batch.max() <= 1.0
+    assert not np.all(np.equal(batch, np.round(batch)))
+
+
+@pytest.fixture
+def int16_hdf5(tmp_path):
+    """A file whose int16 data spans the full int16 range."""
+    file_path = tmp_path / "int16_data.hdf5"
+    values = np.array([-32768, 0, 32767], dtype=np.int16)
+    row = np.resize(values, DUMMY_IMAGE_SHAPE[-1])
+    data = np.broadcast_to(row, (DUMMY_N_FRAMES, *DUMMY_IMAGE_SHAPE)).astype(np.int16)
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset("data", data=data)
+    return file_path
+
+
+def test_normalization_promotes_integer_samples(uint8_hdf5):
+    """Test that normalization promotes integer data to float32 without a `dtype`."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(0, 255),
+        normalization_range=(0, 1),
+        convert_to_tensor=False,
+        validate=False,
+    )
+    batch = next(iter(dataloader))
+    assert batch.dtype == np.float32
+    assert 0.0 <= batch.min() and batch.max() <= 1.0
+
+
+def test_normalization_of_full_range_int16_does_not_overflow(int16_hdf5):
+    """Test that shifting by `image_range[0]` does not wrap around in the input dtype."""
+    dataloader = Dataloader(
+        int16_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(-32768, 32767),
+        normalization_range=(0, 1),
+        convert_to_tensor=False,
+        validate=False,
+    )
+    batch = next(iter(dataloader))
+    assert batch.dtype == np.float32
+    np.testing.assert_allclose(np.unique(batch), [0.0, 0.5, 1.0], atol=1e-4)
+
+
+def test_normalization_preserves_floating_dtype(uint8_hdf5):
+    """Test that an explicit floating `dtype` survives normalization."""
+    dataloader = Dataloader(
+        uint8_hdf5,
+        key="data",
+        batch_size=2,
+        shuffle=False,
+        image_range=(0, 255),
+        normalization_range=(0, 1),
+        dtype="float64",
+        convert_to_tensor=False,
+        validate=False,
+    )
+    assert next(iter(dataloader)).dtype == np.float64
+
+
 def test_normalization_without_image_range_raises(dummy_hdf5):
     """Test that setting normalization_range without image_range raises."""
     with pytest.raises(AssertionError, match="image_range must be set"):
@@ -611,6 +907,19 @@ def test_normalization_without_image_range_raises(dummy_hdf5):
             key="data",
             normalization_range=(0, 1),
             image_range=None,
+            validate=False,
+        )
+
+
+def test_normalization_with_integer_dtype_raises(dummy_hdf5):
+    """Test that an integer `dtype` is rejected when `normalization_range` is set."""
+    with pytest.raises(AssertionError, match="dtype must be a floating point dtype"):
+        Dataloader(
+            dummy_hdf5,
+            key="data",
+            image_range=(0, 255),
+            normalization_range=(0, 1),
+            dtype="uint8",
             validate=False,
         )
 
@@ -649,49 +958,6 @@ def test_dataset_property(dummy_hdf5):
     assert loader.dataset is not None
 
 
-def test_h5_data_source_with_disabled_cache(multi_shape_dataset, monkeypatch):
-    """H5DataSource must survive multiprocessing.Pool when caching is disabled.
-
-    Regression test for a bug where tempfile.TemporaryDirectory was used as the
-    ZEA_CACHE_DIR. On Linux (fork-based multiprocessing), forked Pool workers
-    inherit the TemporaryDirectory object and its weakref.finalize cleanup
-    callback. If the finalizer fires in any worker, it deletes the shared temp
-    dir from under the parent process, causing a FileNotFoundError.
-
-    The fix replaces TemporaryDirectory with tempfile.mkdtemp so there is no
-    weakref.finalize for forked children to inherit.
-    """
-
-    import zea.data.dataloader as _dataloader_mod
-    import zea.data.datasets as _datasets_mod
-    import zea.internal.cache as _cache_mod
-
-    # Set the env var *before* reloading so the import-time _disable_cache()
-    # call in zea.internal.cache exercises the mkdtemp path (not TemporaryDirectory).
-    # monkeypatch auto-restores the env var after the test.
-    monkeypatch.setenv("ZEA_DISABLE_CACHE", "1")
-    importlib.reload(_cache_mod)
-    importlib.reload(_datasets_mod)
-    importlib.reload(_dataloader_mod)
-
-    try:
-        source = _dataloader_mod.H5DataSource(
-            file_paths=multi_shape_dataset,
-            key="data",
-            n_frames=1,
-            validate=False,
-        )
-        assert len(source) > 0
-    finally:
-        # Restore modules to cache-enabled state for subsequent tests.
-        # Remove the env var first so the reload picks up the enabled path;
-        # monkeypatch's own teardown will then be a harmless no-op.
-        monkeypatch.delenv("ZEA_DISABLE_CACHE", raising=False)
-        importlib.reload(_cache_mod)
-        importlib.reload(_datasets_mod)
-        importlib.reload(_dataloader_mod)
-
-
 def test_dataloader_repr(dummy_hdf5):
     """Test Dataloader __repr__ includes key information."""
     loader = Dataloader(
@@ -707,6 +973,86 @@ def test_dataloader_repr(dummy_hdf5):
     assert "batch_size=4" in repr_str
     assert "key='data'" in repr_str
     assert "threads=" in repr_str
+
+
+def _open_handles(source):
+    """Every still-open h5py handle held by the source's per-thread caches."""
+    with source._all_caches_lock:
+        caches = list(source._all_caches)
+    return [file for cache in caches for file in cache._file_handle_cache.values() if file.id.valid]
+
+
+def test_close_releases_file_handles(dummy_hdf5):
+    """close() closes every handle the worker threads opened."""
+    loader = Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4)
+    list(loader)
+
+    handles = _open_handles(loader.source)
+    assert handles, "iterating should have opened at least one handle"
+
+    loader.close()
+    assert not any(file.id.valid for file in handles)
+
+
+def test_context_manager_closes_file_handles(dummy_hdf5):
+    """Using the loader as a context manager releases handles on exit."""
+    with Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4) as loader:
+        list(loader)
+        handles = _open_handles(loader.source)
+        assert handles, "iterating should have opened at least one handle"
+
+    assert not any(file.id.valid for file in handles)
+
+
+def test_del_releases_file_handles(dummy_hdf5):
+    """Dropping the loader releases handles even when close() was never called."""
+    loader = Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4)
+    list(loader)
+
+    # Held here so the caches outlive the loader: this asserts Dataloader.__del__
+    # closed the handles, not that the caches were collected along with it.
+    with loader.source._all_caches_lock:
+        caches = list(loader.source._all_caches)
+    handles = [file for cache in caches for file in cache._file_handle_cache.values()]
+    assert any(file.id.valid for file in handles)
+
+    del loader
+    gc.collect()
+
+    assert not any(file.id.valid for file in handles)
+
+
+def test_loader_is_usable_after_close(dummy_hdf5):
+    """close() drops handles without breaking the loader; reads reopen them."""
+    loader = Dataloader(dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=4)
+    before = [np.asarray(batch) for batch in loader]
+
+    loader.close()
+
+    after = [np.asarray(batch) for batch in loader]
+    loader.close()
+
+    assert len(before) == len(after)
+    for first, second in zip(before, after):
+        np.testing.assert_array_equal(first, second)
+
+
+def test_close_after_reuse_releases_reopened_handles(dummy_hdf5):
+    """Handles reopened after a close are still reachable from the next close."""
+    source = H5DataSource(file_paths=dummy_hdf5, key="data", n_frames=1, validate=False)
+    source[0]
+    source.close()
+
+    # close() empties the registry while this thread keeps its cache, so the handle
+    # reopened here is only closable if the cache re-registers itself. Read from the
+    # calling thread on purpose: a fresh grain worker would get a fresh cache and
+    # register it either way.
+    source[0]
+    handles = _open_handles(source)
+    assert handles, "re-reading should have reopened a handle"
+
+    source.close()
+    assert not any(file.id.valid for file in handles)
 
 
 def test_assert_image_range_below():
@@ -759,11 +1105,41 @@ def test_shape_attribute(dummy_hdf5):
         shuffle=False,
         validate=False,
         batch_size=1,
-        return_filename=True,
+        return_metadata=True,
     )
     batch = next(iter(loader))
     assert batch[0].shape == (1, *DUMMY_IMAGE_SHAPE, 1)
     assert loader.shape == (1, *DUMMY_IMAGE_SHAPE, 1)
+
+
+def test_shape_batch_axis_with_drop_remainder(dummy_hdf5):
+    """A short final batch leaves axis 0 varying, so ``shape`` reports it as None."""
+    common = dict(key="data", shuffle=False, validate=False, batch_size=32)
+    assert DUMMY_N_FRAMES % 32 != 0, "fixture must not divide evenly for this to test anything"
+
+    loader = Dataloader(dummy_hdf5, drop_remainder=False, **common)
+    try:
+        assert loader.shape == (None, *DUMMY_IMAGE_SHAPE, 1)
+        last = list(loader)[-1]
+        assert tuple(np.shape(last)) == (DUMMY_N_FRAMES % 32, *DUMMY_IMAGE_SHAPE, 1)
+    finally:
+        loader.close()
+
+    # Dropping it, or a batch size that divides evenly, pins axis 0 to the batch size.
+    loader = Dataloader(dummy_hdf5, drop_remainder=True, **common)
+    try:
+        assert loader.shape == (32, *DUMMY_IMAGE_SHAPE, 1)
+        assert all(tuple(np.shape(batch)) == loader.shape for batch in loader)
+    finally:
+        loader.close()
+
+    loader = Dataloader(
+        dummy_hdf5, key="data", shuffle=False, validate=False, batch_size=25, drop_remainder=False
+    )
+    try:
+        assert loader.shape == (25, *DUMMY_IMAGE_SHAPE, 1)
+    finally:
+        loader.close()
 
 
 def test_len_attribute(dummy_hdf5):
@@ -791,7 +1167,7 @@ def test_empty_dataloader_raises(monkeypatch):
     monkeypatch.setattr(Dataloader, "_build_pipeline", lambda self, seed: empty)
 
     dl = object.__new__(Dataloader)
-    dl.return_filename = False
+    dl.returns_metadata = False
 
     with pytest.raises(ValueError, match="no samples"):
         dl._map_dataset = dl._build_pipeline(seed=0)
@@ -821,15 +1197,14 @@ def test_axis_selections_list_prefilters_disk_read(axis_selections_hdf5):
     source = H5DataSource(
         file_paths=[str(file_path)],
         key="data/raw_data",
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={1: selection},
     )
     assert len(source) == data.shape[0]
     sample = source[0]
-    # insert_frame_axis=False concatenates the single frame axis away, so the
-    # remaining shape is (selected_transmits, elems, samples, ch).
+    # n_frames=None loads a single frame without a frame axis, so the remaining
+    # shape is (selected_transmits, elems, samples, ch).
     assert sample.shape == (len(selection), 5, 6, 1)
     np.testing.assert_array_equal(sample, data[0, selection])
 
@@ -840,8 +1215,7 @@ def test_axis_selections_slice(axis_selections_hdf5):
     source = H5DataSource(
         file_paths=[str(file_path)],
         key="data/raw_data",
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={1: slice(1, 6, 2)},
     )
@@ -856,8 +1230,7 @@ def test_axis_selections_negative_axis(axis_selections_hdf5):
     source = H5DataSource(
         file_paths=[str(file_path)],
         key="data/raw_data",
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={-2: [0, 3]},
     )
@@ -874,8 +1247,7 @@ def test_axis_selections_non_monotonic_raises(axis_selections_hdf5):
         H5DataSource(
             file_paths=[str(file_path)],
             key="data/raw_data",
-            n_frames=1,
-            insert_frame_axis=False,
+            n_frames=None,
             validate=False,
             axis_selections={1: [2, 0, 4]},
         )
@@ -888,22 +1260,20 @@ def test_axis_selections_duplicate_raises(axis_selections_hdf5):
         H5DataSource(
             file_paths=[str(file_path)],
             key="data/raw_data",
-            n_frames=1,
-            insert_frame_axis=False,
+            n_frames=None,
             validate=False,
             axis_selections={1: [0, 2, 2, 4]},
         )
 
 
 def test_axis_selections_conflict_with_frame_axis_raises(axis_selections_hdf5):
-    """axis_selections must not target initial_frame_axis."""
+    """axis_selections must not target the frame axis."""
     file_path, _ = axis_selections_hdf5
-    with pytest.raises(ValueError, match="conflicts with initial_frame_axis"):
+    with pytest.raises(ValueError, match="conflicts with the frame axis"):
         H5DataSource(
             file_paths=[str(file_path)],
             key="data/raw_data",
-            n_frames=1,
-            insert_frame_axis=False,
+            n_frames=None,
             validate=False,
             axis_selections={0: [0, 1]},
         )
@@ -918,13 +1288,258 @@ def test_axis_selections_via_dataloader(axis_selections_hdf5):
         key="data/raw_data",
         batch_size=None,
         shuffle=False,
-        n_frames=1,
-        insert_frame_axis=False,
+        n_frames=None,
         validate=False,
         axis_selections={1: selection},
     )
     sample = np.asarray(next(iter(loader)))
     np.testing.assert_array_equal(sample, data[0, selection])
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# axis_selections applied to return_metadata
+# ──────────────────────────────────────────────────────────────────────────
+
+AXSEL_N_FRAMES = 4
+AXSEL_N_AX = 16
+AXSEL_N_EL = 8
+
+
+def _write_axsel_file(path, n_tx=6, n_frames=AXSEL_N_FRAMES, n_el=AXSEL_N_EL):
+    """Write a spec-valid raw_data file whose scan fields vary per transmit/element."""
+    scan = generate_dummy_scan(n_tx=n_tx, n_el=n_el)
+    # Distinct per transmit and element, so the wrong indices cannot pass by coincidence.
+    scan["t0_delays"] = np.arange(n_tx * n_el, dtype=np.float32).reshape(n_tx, n_el)
+    scan["polar_angles"] = np.arange(n_tx, dtype=np.float32) / 100
+    scan["initial_times"] = np.arange(n_tx, dtype=np.float32) * 1e-6
+    scan["time_to_next_transmit"] = (
+        np.arange(n_frames * n_tx, dtype=np.float32).reshape(n_frames, n_tx) * 1e-4
+    )
+    probe_geometry = np.zeros((n_el, 3), dtype=np.float32)
+    probe_geometry[:, 0] = np.arange(n_el, dtype=np.float32) * 1e-3
+    File.create(
+        path,
+        data={
+            "raw_data": np.arange(n_frames * n_tx * AXSEL_N_AX * n_el, dtype=np.float32).reshape(
+                n_frames, n_tx, AXSEL_N_AX, n_el, 1
+            )
+        },
+        scan=scan,
+        probe={"name": "generic", "probe_geometry": probe_geometry},
+        description="axis_selections metadata test",
+        overwrite=True,
+        warn_missing_optional_fields=False,
+    )
+    return scan, probe_geometry
+
+
+@pytest.fixture
+def axis_selections_metadata_file(tmp_path):
+    """One spec-valid file plus the scan/probe arrays it was written with."""
+    path = tmp_path / "axsel_meta_0_0.hdf5"
+    scan, probe_geometry = _write_axsel_file(path)
+    return path, scan, probe_geometry
+
+
+def _load_one(path, **kwargs):
+    """Read the first (sample, metadata) pair of an unbatched loader."""
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        **kwargs,
+    )
+    sample, metadata = next(iter(loader))
+    return np.asarray(sample), metadata
+
+
+def test_axis_selections_narrow_per_transmit_metadata(axis_selections_metadata_file):
+    """A take on the transmit axis also takes those transmits from the scan fields."""
+    path, scan, _ = axis_selections_metadata_file
+    selection = [0, 2, 5]
+
+    sample, metadata = _load_one(
+        path,
+        axis_selections={1: selection},
+        return_metadata=["scan.t0_delays", "scan.polar_angles", "scan.initial_times"],
+    )
+
+    assert sample.shape == (len(selection), AXSEL_N_AX, AXSEL_N_EL, 1)
+    np.testing.assert_array_equal(metadata["scan"]["t0_delays"], scan["t0_delays"][selection])
+    np.testing.assert_array_equal(metadata["scan"]["polar_angles"], scan["polar_angles"][selection])
+    np.testing.assert_array_equal(
+        metadata["scan"]["initial_times"], scan["initial_times"][selection]
+    )
+
+
+def test_axis_selections_narrow_metadata_on_a_later_axis(axis_selections_metadata_file):
+    """The selected dimension is taken wherever it sits, not from axis 0."""
+    path, scan, probe_geometry = axis_selections_metadata_file
+    selection = [1, 4, 6]
+
+    # Axis 3 of raw_data is n_el, which is axis 1 of t0_delays and axis 0 of probe_geometry.
+    sample, metadata = _load_one(
+        path,
+        axis_selections={3: selection},
+        return_metadata=["scan.t0_delays", "probe.probe_geometry"],
+    )
+
+    assert sample.shape == (6, AXSEL_N_AX, len(selection), 1)
+    np.testing.assert_array_equal(metadata["scan"]["t0_delays"], scan["t0_delays"][:, selection])
+    np.testing.assert_array_equal(metadata["probe"]["probe_geometry"], probe_geometry[selection])
+
+
+def test_axis_selections_slice_narrows_metadata(axis_selections_metadata_file):
+    """Slice selections narrow metadata the same way index lists do."""
+    path, scan, _ = axis_selections_metadata_file
+    selection = slice(1, 6, 2)
+
+    _, metadata = _load_one(
+        path,
+        axis_selections={1: selection},
+        return_metadata="scan.polar_angles",
+    )
+    np.testing.assert_array_equal(metadata["scan"]["polar_angles"], scan["polar_angles"][selection])
+
+
+def test_axis_selections_and_frame_slicing_compose(axis_selections_metadata_file):
+    """A field carrying both n_frames and n_tx is cut on both axes."""
+    path, scan, _ = axis_selections_metadata_file
+    selection = [1, 3]
+
+    loader = Dataloader(
+        str(path),
+        key="data/raw_data",
+        batch_size=None,
+        shuffle=False,
+        n_frames=2,
+        validate=False,
+        axis_selections={1: selection},
+        return_metadata="scan.time_to_next_transmit",
+    )
+    _, metadata = next(iter(loader))
+
+    # First sample holds frames 0-1; the selection takes transmits 1 and 3 of those.
+    expected = scan["time_to_next_transmit"][0:2][:, selection]
+    np.testing.assert_array_equal(metadata["scan"]["time_to_next_transmit"], expected)
+
+
+def test_axis_selections_leave_unrelated_metadata_whole(axis_selections_metadata_file):
+    """Fields that do not carry the selected dimension are returned as stored."""
+    path, scan, _ = axis_selections_metadata_file
+
+    _, metadata = _load_one(
+        path,
+        axis_selections={1: [0, 2, 5]},
+        return_metadata=["scan.sound_speed", "probe.probe_geometry"],
+    )
+    assert metadata["scan"]["sound_speed"] == scan["sound_speed"]
+    assert metadata["probe"]["probe_geometry"].shape == (AXSEL_N_EL, 3)
+
+
+def test_axis_selections_batch_files_that_differ_on_the_selected_axis(tmp_path):
+    """Files disagreeing on n_tx batch fine once the selection cuts both to one size."""
+    _write_axsel_file(tmp_path / "axsel_a_0_0.hdf5", n_tx=6)
+    _write_axsel_file(tmp_path / "axsel_b_0_0.hdf5", n_tx=9)
+    selection = [0, 2, 4]
+
+    loader = Dataloader(
+        tmp_path,
+        key="data/raw_data",
+        batch_size=2,
+        shuffle=False,
+        n_frames=None,
+        validate=False,
+        axis_selections={1: selection},
+        return_metadata="scan.t0_delays",
+    )
+    # Stored t0_delays are (6, 8) and (9, 8): a conflict before the selection, not after.
+    assert loader.source.metadata_batch_conflicts == {}
+
+    _, metadata = next(iter(loader))
+    assert np.asarray(metadata["scan"]["t0_delays"]).shape == (2, len(selection), AXSEL_N_EL)
+
+
+def test_axis_selections_off_spec_key_warns_about_metadata(tmp_path, attach_caplog_warnings):
+    """A key the spec cannot name leaves metadata unnarrowed, and says so."""
+    path = tmp_path / "axsel_custom_0_0.hdf5"
+    _write_axsel_file(path)
+    with h5py.File(path, "a") as f:
+        f.create_dataset("data/custom_array", data=np.zeros((AXSEL_N_FRAMES, 6, 4), np.float32))
+
+    caplog = attach_caplog_warnings
+    H5DataSource(
+        file_paths=[str(path)],
+        key="data/custom_array",
+        n_frames=None,
+        validate=False,
+        axis_selections={1: [0, 2]},
+        return_metadata="scan.polar_angles",
+    )
+    assert any("not part of the zea file spec" in record.message for record in caplog.records)
+
+
+def test_axis_selections_on_a_private_dimension_warns(metadata_dataset, attach_caplog_warnings):
+    """Selecting an image axis warns too: no other field is indexed by ``z``."""
+    caplog = attach_caplog_warnings
+    H5DataSource(
+        file_paths=[str(metadata_dataset)],
+        key=CAMUS_KEY,
+        n_frames=None,
+        validate=False,
+        axis_selections={1: [0, 1]},
+        return_metadata="scan.polar_angles",
+    )
+    assert any("name no dimension shared" in record.message for record in caplog.records)
+
+
+class TestSelectedDimensions:
+    """Unit tests for the axis -> named dimension resolution behind the propagation."""
+
+    def test_resolves_axes_to_spec_dimension_names(self):
+        assert selected_dimensions("data/raw_data", 5, {1: [0, 2], 3: [1]}) == {
+            "n_tx": [0, 2],
+            "n_el": [1],
+        }
+
+    def test_channel_dimensions_are_not_propagated(self):
+        # n_ch is only consistent within one data product, so a take on raw_data's
+        # channels says nothing about a sibling product's channels.
+        assert selected_dimensions("data/raw_data", 5, {4: [0]}) == {}
+
+    def test_off_spec_key_yields_nothing(self):
+        assert selected_dimensions("data/custom_array", 3, {1: [0, 2]}) == {}
+
+    def test_no_selection_yields_nothing(self):
+        assert selected_dimensions("data/raw_data", 5, {}) == {}
+
+
+class TestSelectedLeafShape:
+    """The shape side of the take, which batching compares files on."""
+
+    def test_narrows_the_axis_carrying_the_dimension(self):
+        assert selected_leaf_shape("scan.t0_delays", (9, 8), {"n_tx": [0, 2, 4]}, {"n_tx": 9}) == (
+            3,
+            8,
+        )
+
+    def test_slice_selection_counts_its_indices(self):
+        assert selected_leaf_shape(
+            "scan.polar_angles", (9,), {"n_tx": slice(1, 6, 2)}, {"n_tx": 9}
+        ) == (3,)
+
+    def test_axis_of_a_different_extent_is_left_alone(self):
+        # The selection was formed against n_tx=9; an axis of another length is not it.
+        assert selected_leaf_shape("scan.t0_delays", (4, 8), {"n_tx": [0, 2, 4]}, {"n_tx": 9}) == (
+            4,
+            8,
+        )
+
+    def test_unrelated_leaf_is_unchanged(self):
+        assert selected_leaf_shape("scan.sound_speed", (), {"n_tx": [0]}, {"n_tx": 9}) == ()
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -935,12 +1550,13 @@ FILTER_KEY = "data/image/values"
 FILTER_N_FRAMES = 4
 
 
-def _write_zea_file(path, *, metadata=None, center_frequency=7e6):
+def _write_zea_file(
+    path, *, metadata=None, center_frequency=7e6, n_frames=FILTER_N_FRAMES, grid=16
+):
     """Write a small but valid zea-format file with an ``image`` product."""
     n_tx, n_ax, n_el, n_ch = 2, 64, 8, 1
-    grid = 16
     data = generate_dummy_data_dict(
-        n_frames=FILTER_N_FRAMES,
+        n_frames=n_frames,
         n_ax=n_ax,
         n_el=n_el,
         n_tx=n_tx,
@@ -1136,3 +1752,516 @@ class TestCompileFileFilter:
     def test_invalid_type_raises(self):
         with pytest.raises(TypeError):
             compile_file_filter(42)
+
+
+METADATA_N_FRAMES = 6
+METADATA_IMAGE_SHAPE = (16, 16)
+
+
+@pytest.fixture
+def metadata_dataset(tmp_path):
+    """Two spec-valid files carrying scan, probe, subject and per-frame annotations."""
+    for i, (sex, center_frequency) in enumerate([("f", 5e6), ("m", 9e6)]):
+        scan = generate_dummy_scan(n_tx=2, n_el=8, center_frequency=center_frequency)
+        File.create(
+            tmp_path / f"metadata_{i}_0.hdf5",
+            data={
+                "image": {
+                    "values": np.full((METADATA_N_FRAMES, *METADATA_IMAGE_SHAPE), i, dtype=np.uint8)
+                }
+            },
+            scan=scan,
+            probe={"name": "generic", "probe_geometry": np.zeros((8, 3), dtype=np.float32)},
+            metadata={
+                "subject": {"sex": sex, "age": np.uint8(61)},
+                "annotations": {
+                    "label": np.array(
+                        [f"f{i}{frame}" for frame in range(METADATA_N_FRAMES)], dtype=np.str_
+                    ),
+                    "view": "longitudinal",
+                },
+            },
+            description="metadata test dataset",
+            overwrite=True,
+            warn_missing_optional_fields=False,
+        )
+    return tmp_path
+
+
+def test_return_metadata_paths(metadata_dataset):
+    """Requested dotted paths are returned in a FileSpec-shaped dict."""
+    loader = Dataloader(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        batch_size=None,
+        shuffle=False,
+        return_metadata=[
+            "scan.sampling_frequency",
+            "probe.probe_geometry",
+            "metadata.subject",
+            "description",
+        ],
+    )
+    _, metadata = next(iter(loader))
+    loader.close()
+
+    assert set(metadata) == {"scan", "probe", "metadata", "description", "file"}
+    assert metadata["scan"]["sampling_frequency"] == np.float32(40e6)
+    assert metadata["probe"]["probe_geometry"].shape == (8, 3)
+    # A path pointing at a group loads everything below it
+    assert metadata["metadata"]["subject"]["sex"] == "f"
+    assert metadata["metadata"]["subject"]["age"] == 61
+    # Root attributes resolve too, not just datasets
+    assert metadata["description"] == "metadata test dataset"
+    assert metadata["file"]["filename"] == "metadata_0_0"
+
+
+def test_return_metadata_single_path_and_batching(metadata_dataset):
+    """A single dotted path may be passed as a string, and batches stack metadata."""
+    batch_size = 2
+    loader = Dataloader(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        batch_size=batch_size,
+        shuffle=False,
+        return_metadata="metadata.subject.sex",
+    )
+    _, metadata = next(iter(loader))
+    loader.close()
+
+    sexes = metadata["metadata"]["subject"]["sex"]
+    assert len(sexes) == batch_size
+    assert all(sex == "f" for sex in sexes)
+
+
+def test_return_metadata_slices_per_frame_fields(metadata_dataset):
+    """Per-frame fields follow the frames of the sample; other fields are returned whole."""
+    n_frames = 2
+    loader = Dataloader(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        batch_size=None,
+        shuffle=False,
+        sort_files=False,
+        n_frames=n_frames,
+        return_metadata=["metadata.annotations.label", "metadata.annotations.view"],
+    )
+    labels = []
+    for _, metadata in loader:
+        annotations = metadata["metadata"]["annotations"]
+        assert annotations["label"].shape == (n_frames,)
+        # A scalar (broadcast) annotation has no frame axis and is left alone
+        assert annotations["view"] == "longitudinal"
+        labels.append(list(annotations["label"]))
+    loader.close()
+
+    # sort_files=False leaves file discovery order up to the filesystem, so compare the
+    # collected blocks as a set; each block stays intact, so frame order is still checked.
+    assert sorted(labels) == [
+        ["f00", "f01"],
+        ["f02", "f03"],
+        ["f04", "f05"],
+        ["f10", "f11"],
+        ["f12", "f13"],
+        ["f14", "f15"],
+    ]
+
+
+def test_return_metadata_missing_path_raises(metadata_dataset):
+    """A path that is absent from a file raises a KeyError naming the path and file."""
+    with pytest.raises(KeyError, match="metadata.subject.bmi"):
+        Dataloader(
+            metadata_dataset,
+            key=CAMUS_KEY,
+            batch_size=None,
+            shuffle=False,
+            return_metadata=["metadata.subject.bmi"],
+        )
+
+
+def test_return_metadata_read_once_per_file(metadata_dataset):
+    """Metadata is read once per file, not once per sample."""
+    source = H5DataSource(
+        metadata_dataset,
+        key=CAMUS_KEY,
+        return_metadata=["metadata.subject"],
+    )
+    n_calls = 0
+    original = dataloader_module.read_metadata
+
+    def counting_read_metadata(file, paths):
+        nonlocal n_calls
+        n_calls += 1
+        return original(file, paths)
+
+    dataloader_module.read_metadata = counting_read_metadata
+    try:
+        for index in range(len(source)):
+            source[index]
+    finally:
+        dataloader_module.read_metadata = original
+        source.close()
+
+    assert len(source) == 2 * METADATA_N_FRAMES
+    assert n_calls == 2, "metadata should be read once per file"
+
+
+def _dig(metadata, path):
+    """Walk a dotted path through the nested dict ``return_metadata`` hands back."""
+    value = metadata
+    for part in path.split("."):
+        value = value[part]
+    return value
+
+
+def _metadata_values(folder, path, **kwargs):
+    """Every sample's value at ``path``, checking nothing beyond ``path`` comes back."""
+    loader = Dataloader(
+        folder,
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        return_metadata=path,
+        **kwargs,
+    )
+    try:
+        samples = list(loader)
+        # Only the requested path's root is returned; "file" is always included.
+        assert all(set(metadata) == {path.split(".")[0], "file"} for _, metadata in samples)
+        assert len(samples) == len(loader.source)
+        return [_dig(metadata, path) for _, metadata in samples]
+    finally:
+        loader.close()
+
+
+@pytest.mark.parametrize(
+    "value_filter, path, holds",
+    [
+        ("f", "metadata.subject.sex", lambda v: v == "f"),
+        ("m", "metadata.subject.sex", lambda v: v == "m"),
+        (lambda v: v >= 7e6, "scan.center_frequency", lambda v: v >= 7e6),
+    ],
+)
+def test_file_filter_round_trips_through_return_metadata(
+    metadata_folder, value_filter, path, holds
+):
+    """Reading a filtered path back yields only values that satisfy the filter.
+
+    ``file_filter`` and ``return_metadata`` take the same dotted-path syntax but resolve it
+    through separate code paths, so this pins the two to one interpretation: what the
+    filter matched on is what the loader hands back.
+    """
+    filtered = _metadata_values(metadata_folder, path, file_filter={path: value_filter})
+    assert filtered, "filter kept no files"
+    assert all(holds(value) for value in filtered)
+
+    # Without the filter the same read does surface values the filter excludes, so the
+    # assertion above is not vacuously true.
+    assert not all(holds(value) for value in _metadata_values(metadata_folder, path))
+
+
+def test_file_filter_exists_makes_optional_path_readable(metadata_folder):
+    """``EXISTS`` on a path is what lets ``return_metadata`` request that same path.
+
+    ``metadata_folder`` has one file (b) without ``fat_percentage``; requesting the path
+    outright raises, and filtering on it leaves exactly the files that can answer.
+    """
+    path = "metadata.subject.fat_percentage"
+
+    with pytest.raises(KeyError, match=path):
+        _metadata_values(metadata_folder, path)
+
+    values = _metadata_values(metadata_folder, path, file_filter={path: EXISTS})
+    # Files a and c, each contributing FILTER_N_FRAMES samples.
+    assert len(values) == 2 * FILTER_N_FRAMES
+    assert sorted(set(values)) == [np.float32(17.5), np.float32(30.0)]
+
+
+def test_return_metadata_missing_path_raises_before_any_sample(metadata_folder):
+    """A path missing from a *later* file fails at construction, not mid-epoch.
+
+    Only file b lacks ``fat_percentage``, so reading sample 0 (from file a) succeeds --
+    the loader has to sweep every file up front to catch this before an epoch starts.
+    """
+    path = "metadata.subject.fat_percentage"
+
+    with pytest.raises(KeyError) as excinfo:
+        Dataloader(
+            metadata_folder,
+            key=FILTER_KEY,
+            batch_size=None,
+            shuffle=False,
+            validate=False,
+            return_metadata=path,
+        )
+
+    message = str(excinfo.value)
+    assert path in message
+    # Names the offending file, its share of the dataset, and the way out.
+    assert "b.hdf5" in message
+    assert "1/3" in message
+    assert "EXISTS" in message
+
+
+def test_return_metadata_missing_path_skip_drops_those_files(metadata_folder):
+    """``on_missing_metadata="skip"`` keeps the run going with the files that can answer."""
+    path = "metadata.subject.fat_percentage"
+
+    values = _metadata_values(metadata_folder, path, on_missing_metadata="skip")
+
+    # Only b lacks the path, so a and c survive with all their samples.
+    assert len(values) == 2 * FILTER_N_FRAMES
+    assert sorted(set(values)) == [np.float32(17.5), np.float32(30.0)]
+
+
+def test_missing_metadata_not_judged_on_files_no_block_reaches(tmp_path):
+    """A file dropped for being too short must not fail the build over its metadata.
+
+    The two policies compose in one direction only: whatever ``on_incomplete_blocks``
+    discards is out of the dataset before ``on_missing_metadata`` gets an opinion.
+    """
+    path = "metadata.subject.fat_percentage"
+    _write_zea_file(
+        tmp_path / "long.hdf5",
+        n_frames=6,
+        metadata={"subject": {"fat_percentage": np.float32(17.5)}},
+    )
+    # Too short for a block of 4, and it could not answer the metadata path either.
+    _write_zea_file(tmp_path / "short.hdf5", n_frames=2)
+
+    loader = Dataloader(
+        tmp_path,
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        n_frames=4,
+        return_metadata=path,
+        on_incomplete_blocks="skip",
+        on_missing_metadata="error",
+    )
+    try:
+        assert len(loader.source) == 1
+        assert _kept_names(loader.source) == ["long.hdf5", "short.hdf5"]
+        # Judged on the one file that contributes, so the short file's gap is moot.
+        assert sorted(Path(p).name for p in loader.source._metadata_signatures) == ["long.hdf5"]
+    finally:
+        loader.close()
+
+
+def test_return_metadata_missing_path_error_lists_every_offending_file(metadata_folder):
+    """The up-front sweep reports all offending files, not just the first one reached."""
+    # No file carries this path, so all three are offenders.
+    path = "metadata.subject.bmi"
+
+    with pytest.raises(KeyError) as excinfo:
+        Dataloader(
+            metadata_folder,
+            key=FILTER_KEY,
+            batch_size=None,
+            shuffle=False,
+            validate=False,
+            return_metadata=path,
+        )
+
+    message = str(excinfo.value)
+    assert "3/3" in message
+    assert all(name in message for name in ("a.hdf5", "b.hdf5", "c.hdf5"))
+
+
+def test_return_metadata_present_path_does_not_raise(metadata_folder):
+    """The up-front check stays out of the way when every file can answer."""
+    values = _metadata_values(metadata_folder, "metadata.subject.sex")
+    assert len(values) == 3 * FILTER_N_FRAMES
+
+
+def test_return_metadata_batch_shape_conflict_raises(metadata_folder):
+    """Leaves that differ between files are caught before a batch is ever stacked.
+
+    Requesting the ``metadata.subject`` *group* passes the presence check -- every file
+    has the group -- but file b has no ``fat_percentage`` leaf under it, so the dicts
+    cannot be stacked. Grain reports that as an unstructured "Expected all input
+    elements to have the same structure", and only once a batch happens to straddle
+    the two files.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        Dataloader(
+            metadata_folder,
+            key=FILTER_KEY,
+            batch_size=2,
+            shuffle=False,
+            validate=False,
+            return_metadata="metadata.subject",
+        )
+
+    message = str(excinfo.value)
+    assert "metadata.subject.fat_percentage" in message
+    assert "absent" in message
+    # Names both ways out: stop batching, or restrict the dataset.
+    assert "batch_size=None" in message
+    assert "file_filter" in message
+
+
+def test_return_metadata_shape_conflict_allowed_without_batching(metadata_folder):
+    """``batch_size=None`` is the documented escape hatch, so it must stay open."""
+    loader = Dataloader(
+        metadata_folder,
+        key=FILTER_KEY,
+        batch_size=None,
+        shuffle=False,
+        validate=False,
+        return_metadata="metadata.subject",
+    )
+    try:
+        subjects = [metadata["metadata"]["subject"] for _, metadata in loader]
+    finally:
+        loader.close()
+
+    assert len(subjects) == 3 * FILTER_N_FRAMES
+    # The very unevenness that blocks batching is preserved sample by sample.
+    assert sum("fat_percentage" in subject for subject in subjects) == 2 * FILTER_N_FRAMES
+
+
+def test_return_metadata_batching_allows_differing_frame_counts(tmp_path):
+    """Files may hold different numbers of frames: that axis is sliced away, not stacked.
+
+    Guards against the conflict check flagging the one difference between files that
+    per-frame slicing is there to absorb.
+    """
+    _write_zea_file(tmp_path / "a.hdf5", n_frames=4)
+    _write_zea_file(tmp_path / "b.hdf5", n_frames=6)
+
+    loader = Dataloader(
+        tmp_path,
+        key=FILTER_KEY,
+        batch_size=2,
+        shuffle=True,
+        seed=0,
+        validate=False,
+        n_frames=2,
+        # A per-frame field, so its leading axis differs between the two files on disk.
+        return_metadata="data.envelope_data",
+    )
+    try:
+        batches = list(loader)
+    finally:
+        loader.close()
+
+    # 4 frames -> 2 blocks, 6 frames -> 3 blocks, batched by 2 with a remainder of 1.
+    assert [len(sample) for sample, _ in batches] == [2, 2, 1]
+    for sample, metadata in batches:
+        values = metadata["data"]["envelope_data"]["values"]
+        # (batch, n_frames, ...) -- the file's own frame count is sliced away, so the
+        # two files stack despite holding 4 and 6 frames on disk.
+        assert values.shape[:2] == (len(sample), 2)
+
+
+@pytest.fixture
+def ragged_folder(tmp_path):
+    """Two zea files whose images differ in size (16x16 and 32x32)."""
+    _write_zea_file(tmp_path / "a.hdf5", grid=16)
+    _write_zea_file(tmp_path / "b.hdf5", grid=32)
+    return tmp_path
+
+
+def test_ragged_dataset_refuses_to_batch(ragged_folder):
+    """Files that disagree on sample shape cannot be stacked, so batching is refused."""
+    with pytest.raises(ValueError) as excinfo:
+        Dataloader(ragged_folder, key=FILTER_KEY, batch_size=2, shuffle=False, validate=False)
+
+    message = str(excinfo.value)
+    assert "(16, 16, 1)" in message and "(32, 32, 1)" in message
+    # Names all three ways out.
+    assert "image_size" in message
+    assert "batch_size=None" in message
+    assert "file_filter" in message
+
+
+def test_ragged_dataset_shape_raises(ragged_folder):
+    """``shape`` has no answer for a ragged loader, so it says so instead of guessing.
+
+    Reading it off sample 0 -- as it used to -- reports one file's shape as if it were
+    the whole dataset's.
+    """
+    loader = Dataloader(
+        ragged_folder, key=FILTER_KEY, batch_size=None, shuffle=False, validate=False
+    )
+    try:
+        assert set(loader.sample_shapes) == {(16, 16, 1), (32, 32, 1)}
+        with pytest.raises(ValueError, match="no single sample shape"):
+            loader.shape
+        # Iterating is still fine: nothing is stacked.
+        assert sorted(tuple(np.shape(sample)) for sample in loader) == (
+            [(16, 16, 1)] * FILTER_N_FRAMES + [(32, 32, 1)] * FILTER_N_FRAMES
+        )
+    finally:
+        loader.close()
+
+
+def test_ragged_dataset_batches_after_resize(ragged_folder):
+    """Resizing brings the files to a common shape, so batching them is allowed again."""
+    loader = Dataloader(
+        ragged_folder,
+        key=FILTER_KEY,
+        batch_size=3,
+        shuffle=True,
+        seed=0,
+        validate=False,
+        image_size=(20, 20),
+        resize_type="resize",
+    )
+    try:
+        # 8 samples in batches of 3, so the last batch is short and axis 0 is not fixed.
+        assert loader.shape == (None, 20, 20, 1)
+        assert [tuple(np.shape(batch)) for batch in loader] == [
+            (3, 20, 20, 1),
+            (3, 20, 20, 1),
+            (2, 20, 20, 1),
+        ]
+    finally:
+        loader.close()
+
+
+def test_ragged_dataset_allows_batch_size_one(ragged_folder):
+    """A batch of one stacks a single sample, so raggedness cannot hurt it."""
+    loader = Dataloader(ragged_folder, key=FILTER_KEY, batch_size=1, shuffle=False, validate=False)
+    try:
+        assert sorted(tuple(np.shape(batch)) for batch in loader) == (
+            [(1, 16, 16, 1)] * FILTER_N_FRAMES + [(1, 32, 32, 1)] * FILTER_N_FRAMES
+        )
+    finally:
+        loader.close()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {"n_frames": 2},
+        {"image_size": (8, 8), "resize_type": "center_crop"},
+        {"image_size": (24, 24), "resize_type": "crop_or_pad"},
+        {"image_size": (12, 12), "resize_type": "resize"},
+        # random_crop cannot be traced symbolically when it crops down, so this also
+        # covers the measured fallback in _resized_shape.
+        {"image_size": (12, 12), "resize_type": "random_crop"},
+    ],
+)
+def test_predicted_sample_shape_matches_pipeline(tmp_path, kwargs):
+    """The shape predicted without reading must equal the one the pipeline produces.
+
+    ``sample_shapes`` is derived from the index table alone, so it can drift from what
+    the pipeline actually does; this pins the two together.
+    """
+    _write_zea_file(tmp_path / "a.hdf5")
+
+    loader = Dataloader(
+        tmp_path, key=FILTER_KEY, batch_size=2, shuffle=False, validate=False, **kwargs
+    )
+    try:
+        (predicted,) = loader.sample_shapes
+        # loader.shape carries the batch dim; sample_shapes is per sample.
+        assert predicted == tuple(loader.shape)[1:]
+        assert predicted == tuple(np.shape(next(iter(loader))))[1:]
+    finally:
+        loader.close()

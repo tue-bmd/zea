@@ -1,3 +1,4 @@
+# Static checks on every PR and on main: ruff lint + format, and a ty type check.
 name: Linter
 
 on:

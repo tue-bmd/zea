@@ -104,6 +104,7 @@ import numpy as np
 from keras import ops
 
 from zea import log
+from zea.beamform.geometry import compute_element_normals
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -302,6 +303,7 @@ class Parameters(BaseParameters):
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
+        "flat_aligned_apodization": {"dtype": (type(None), np.ndarray)},
         "flat_receive_apodization": {"dtype": (type(None), np.ndarray), "default": None},
         "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
@@ -444,18 +446,42 @@ class Parameters(BaseParameters):
                 "'cartesian' and 'polar'."
             )
 
-    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z")
+    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
     def flat_aligned_apodization(self):
         """Per-pixel, per-transmit compounding apodization weight of shape (n_pix, n_tx).
 
-        Only defined when ``enable_scanline`` is ``True``, where it is the one-hot
-        mask (see :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`)
-        that isolates each pixel's owning transmit. ``None`` otherwise, which
-        makes :class:`~zea.ops.AlignedApodization` a no-op.
+        Can be set explicitly to any weighting, in which case it is stored over
+        the full transmit axis and read back sliced by ``selected_transmits``.
+        This requires ``enable_scanline`` to be ``False``: a scanline grid has
+        one column per *selected* transmit, so its pixel axis is defined by the
+        transmit selection and a mask stored over the full transmit axis cannot
+        stay aligned with it.
+        When left unset, it is the one-hot mask (see
+        :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`) that
+        isolates each pixel's owning transmit if ``enable_scanline`` is ``True``,
+        and ``None`` otherwise, which makes :class:`~zea.ops.AlignedApodization`
+        a no-op.
 
         This weights the *transmit* axis (compounding), not the receive channels;
         for custom receive-aperture apodization see ``flat_receive_apodization``.
         """
+        value = self._params.get("flat_aligned_apodization")
+        if value is not None:
+            if self.enable_scanline:
+                raise ValueError(
+                    "``flat_aligned_apodization`` cannot be set explicitly when "
+                    "``enable_scanline`` is True: the scanline grid holds one column per "
+                    "selected transmit, so its pixel axis follows the transmit selection and "
+                    "a mask stored over the full transmit axis cannot stay aligned with it. "
+                    "Set ``enable_scanline=False`` to supply a custom mask."
+                )
+            _ = self.n_tx  # raises a clear error if no transmit selection is resolved yet
+            if value.shape[1] != self.n_tx_total:
+                raise ValueError(
+                    "``flat_aligned_apodization`` is stored over the full transmit axis, so "
+                    f"it must have {self.n_tx_total} columns, got shape {value.shape}."
+                )
+            return value[:, self.selected_transmits]
         if not self.enable_scanline:
             return None
         return scanline_aligned_apodization(self.n_tx, self.grid_size_z)
@@ -520,29 +546,63 @@ class Parameters(BaseParameters):
         """Calculate the wavelength based on sound speed and transmit center frequency."""
         return self.sound_speed / self.center_frequency
 
-    @cache_with_dependencies("zlims", "polar_limits", "probe_geometry", "distance_to_apex")
+    @cache_with_dependencies(
+        "zlims",
+        "probe_geometry",
+        "distance_to_apex",
+        "focus_distances",
+        "polar_angles",
+        "f_number",
+        "sound_speed",
+        "sampling_frequency",
+        "n_ax",
+    )
     def xlims(self):
-        """The x-limits of the beamforming grid [m]. If not explicitly set, it is computed based
-        on the polar limits and probe geometry.
+        """The lateral (x) limits of the beamforming grid in meters.
+
+        If not explicitly provided, the limits are derived from the probe geometry, the transmits
+        and the receive :attr:`f_number`:. If f_number is 0, a 45 degree cone is used instead.
+        The limits never come out narrower than the probe width.
+
+        Unsteered focused or plane wave transmits on a flat array (e.g. walking aperture scans)
+        image the strip in front of the array, so the limits hug the probe width. Otherwise the
+        field of view follows the receive cone for the edge elements.
         """
         xlims = self._params.get("xlims")
-        if xlims is None:
-            # The sector fans out from the apex, so its half-width at the deepest pixel is
-            # set by the radius to that pixel, not by its depth below the transducer.
-            radius = max(self.zlims) + self.distance_to_apex
-            xlims_polar = (
-                radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
-                radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
-            )
-            xlims_plane = (
-                min(self.probe_geometry[:, 0]),
-                max(self.probe_geometry[:, 0]),
-            )
-            xlims = (
-                min(xlims_polar[0], xlims_plane[0]),
-                max(xlims_polar[1], xlims_plane[1]),
-            )
-        return xlims
+        if xlims is not None:
+            return xlims
+
+        aperture_x = self.probe_geometry[:, 0]
+        left, right = int(np.argmin(aperture_x)), int(np.argmax(aperture_x))
+        xmin, xmax = float(aperture_x[left]), float(aperture_x[right])
+
+        focus_distances = self.focus_distances
+        polar_angles = self.polar_angles
+        if polar_angles is None:
+            polar_angles = np.zeros_like(focus_distances)
+
+        # Tolerance: converted data stores a nominally unsteered scan as float noise.
+        unsteered = np.allclose(polar_angles, 0.0, atol=1e-6) and np.all(
+            (focus_distances >= 0) | np.isinf(focus_distances)
+        )
+        if unsteered and self.distance_to_apex == 0:
+            return (xmin, xmax)
+
+        f_number = float(self.f_number)
+        half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
+        normals = np.asarray(compute_element_normals(ops.convert_to_tensor(self.probe_geometry)))
+        tilt = np.arctan2(normals[:, 0], normals[:, 2])
+
+        # Outermost accepted ray of each edge element.
+        angle = tilt[[left, right]] + [-half_angle, half_angle]
+        depth = max(self.zlims) - self.probe_geometry[[left, right], 2]
+
+        # Stop at the deepest pixel or at the end of the record, whichever is first.
+        reach = depth * np.tan(np.abs(angle))
+        max_range = self.sound_speed * float(self.n_ax) / self.sampling_frequency / 2
+        reach = np.minimum(reach, max_range * np.sin(np.abs(angle)))
+        reach = np.sign(angle) * reach
+        return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
 
     @cache_with_dependencies(
         "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
@@ -869,6 +929,41 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def rx_aperture_indices(self):
+        """Probe element index of each receive channel of shape (n_tx, n_rx).
+
+        ``None`` for the usual case where every element receives on every transmit,
+        in which case the mapping is the identity and :attr:`n_rx` equals
+        :attr:`n_el`. Only acquisitions with a receive sub-aperture (a sliding
+        receive window, or a multiplexed front-end with fewer channels than
+        elements) carry it, since the mapping is then not recoverable from the
+        channel data alone. Sliced by :attr:`selected_transmits`, so it stays
+        aligned with :attr:`t0_delays` and :attr:`tx_apodizations`.
+
+        The transmit counterpart needs no such field: the transmit aperture is
+        recorded per element in :attr:`tx_apodizations`, whose zeros mark the
+        elements that did not fire.
+        """
+        value = self._params.get("rx_aperture_indices")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
+    @cache_with_dependencies("rx_aperture_indices", "n_el")
+    def n_rx(self):
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture,
+        which :attr:`rx_aperture_indices` then maps onto the probe's elements.
+        """
+        indices = self.rx_aperture_indices
+        if indices is None:
+            return self.n_el
+
+        return int(indices.shape[1])
+
     @cache_with_dependencies("selected_transmits", "n_tx")
     def focus_distances(self):
         """Focus distances in meters for each event of shape (n_tx,).
@@ -942,7 +1037,9 @@ class Parameters(BaseParameters):
         if t_peak is None:
             waveforms = self._params.get("waveforms_two_way")
             if waveforms is not None:
-                t_peak = np.asarray(compute_time_to_peak_stack(waveforms, self.center_frequency))
+                t_peak = ops.convert_to_numpy(
+                    compute_time_to_peak_stack(waveforms, self.center_frequency)
+                )
             else:
                 t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
@@ -1007,7 +1104,7 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("zlims", "distance_to_apex")
     def rho_range(self):
-        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
+        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in meters.
         Used for scan conversion. Rho is measured from the apex of the polar grid, so
         :attr:`zlims` (depths below the transducer) are shifted by
         :attr:`distance_to_apex`, matching the ``rlims`` of

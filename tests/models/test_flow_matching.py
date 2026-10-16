@@ -7,7 +7,7 @@ import pytest
 from zea.models.diffusion import DPS
 from zea.models.flow_matching import FlowMatchingModel
 
-from . import DEFAULT_TEST_SEED
+from .. import DEFAULT_TEST_SEED
 
 
 def _make_minimal_flow_model(input_shape, guidance=None, operator=None):
@@ -185,12 +185,11 @@ def test_flow_matching_sample_finite():
 
 
 def test_flow_matching_posterior_sample_shape():
-    """posterior_sample returns (n_measurements, n_samples, n_features)."""
+    """posterior_sample returns (n_samples, n_features)."""
     keras.utils.set_random_seed(DEFAULT_TEST_SEED)
     seed_gen = keras.random.SeedGenerator(DEFAULT_TEST_SEED)
 
     n_features = 2
-    n_measurements = 2
     n_samples = 2
 
     # Use default guidance ("dps") so posterior_sample works
@@ -200,8 +199,8 @@ def test_flow_matching_posterior_sample_shape():
         network_kwargs={"widths": [8], "output_dim": n_features},
     )
 
-    measurements = keras.random.uniform((n_measurements, n_features), minval=-1, maxval=1)
-    mask = keras.ops.ones((n_measurements, n_features))
+    measurements = keras.random.uniform((n_features,), minval=-1, maxval=1)
+    mask = keras.ops.ones((n_features,))
 
     out = model.posterior_sample(
         measurements=measurements,
@@ -212,7 +211,19 @@ def test_flow_matching_posterior_sample_shape():
         seed=seed_gen,
         verbose=False,
     )
-    assert out.shape == (n_measurements, n_samples, n_features)
+    assert out.shape == (n_samples, n_features)
+
+    # A batch of measurements is neither shared nor per-sample: point to vmap.
+    with pytest.raises(ValueError, match="vmap"):
+        model.posterior_sample(
+            measurements=keras.ops.broadcast_to(measurements, (n_samples + 1, n_features)),
+            n_samples=n_samples,
+            mask=mask,
+            n_steps=2,
+            omega=1.0,
+            seed=seed_gen,
+            verbose=False,
+        )
 
 
 def test_flow_matching_test_step_returns_losses():

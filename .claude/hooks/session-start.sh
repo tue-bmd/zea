@@ -11,11 +11,9 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
-# Mirrors contributing.rst; --frozen keeps this from touching uv.lock. jax[cpu] is
-# installed separately (not in `dev`) as the cheapest backend to exercise zea.
-export UV_TORCH_BACKEND=cpu
-uv sync --frozen
-uv pip install --python .venv/bin/python "jax[cpu]"
+# Mirrors contributing.rst; --frozen keeps this from touching uv.lock. `dev` comes along
+# by default; jax-cpu is the cheapest backend group to exercise zea on a GPU-less runner.
+uv sync --frozen --group jax-cpu
 
 uv run --no-sync pre-commit install >/dev/null
 

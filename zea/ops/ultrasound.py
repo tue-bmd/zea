@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 import keras
 import numpy as np
 from keras import ops
@@ -29,16 +31,43 @@ from zea.internal.core import (
 from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated
 from zea.ops.base import Filter, Operation
-from zea.simulator import simulate_rf
+from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
+from zea.simulator_time_domain import simulate_rf_td
 from zea.utils import canonicalize_axis
+
+simulator_settings = {
+    "exact": simulate_rf,
+    "frequency_approximation": simulate_rf,
+    "time_approximation": simulate_rf_td,
+}
 
 
 @ops_registry("simulate_rf")
 class Simulate(Operation):
-    """Simulate RF data."""
+    """Simulate RF data.
+
+    ``method`` switches between different approximation models. ``"exact"`` is the highest fidelity
+    version. ``"frequency_approximation"`` is an alias for ``exact``; future versions that sacrifice
+    speed for accuracy or accuracy for speed will use these two paths respectively.
+    ``"time_approximation"`` solves in the time domain. Its geometry-dependent factors are
+    evaluated at the center frequency, making it less accurate than the others but much faster in
+    some settings.
+    """
 
     # Define operation-specific static parameters
-    STATIC_PARAMS = ["n_ax", "apply_lens_correction"]
+    STATIC_PARAMS = [
+        "n_ax",
+        "apply_lens_correction",
+        "method",
+        "elevation_lens",
+        "max_chunk_gb",
+        "center_frequency",
+        "sampling_frequency",
+        "scatter_exponent",
+        "noise_level_db",
+        "tgc_max_db",
+        "noise_seed",
+    ]
     ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, **kwargs):
@@ -46,6 +75,13 @@ class Simulate(Operation):
             output_data_type=DataTypes.RAW_DATA,
             **kwargs,
         )
+
+    def __call__(self, **kwargs):
+        # Drop out-of-slab scatterers here, because `call` is traced.
+        merged = {**self._input_cache, **kwargs}
+        pruned = {} if self._inside_outer_jit else elevation_slab_bucket(**merged)
+        outputs = super().__call__(**{**merged, **pruned})
+        return {**outputs, **{key: merged[key] for key in pruned}}
 
     def call(
         self,
@@ -65,8 +101,20 @@ class Simulate(Operation):
         attenuation_coef,
         tx_apodizations,
         t_peak,
+        method="exact",
+        elevation_lens=False,
+        element_height=None,
+        max_chunk_gb=10.0,
+        noise_level_db=None,
+        tgc_max_db=0.0,
+        noise_seed=0,
+        noise_reference=None,
+        scatter_exponent=2.0,
         **kwargs,
     ):
+        if method not in simulator_settings:
+            raise ValueError(f"method ({method}) must be one of {tuple(simulator_settings)}")
+        simulate = simulator_settings[method]
         simulate_kwargs = {
             "probe_geometry": probe_geometry,
             "apply_lens_correction": apply_lens_correction,
@@ -82,29 +130,40 @@ class Simulate(Operation):
             "attenuation_coef": attenuation_coef,
             "tx_apodizations": tx_apodizations,
             "t_peak": t_peak,
+            "elevation_lens": elevation_lens,
+            "element_height": element_height,
+            "scatter_exponent": scatter_exponent,
+            "max_chunk_gb": max_chunk_gb,
+            "noise_level_db": noise_level_db,
+            "tgc_max_db": tgc_max_db,
+            "noise_seed": noise_seed,
+            "noise_reference": noise_reference,
         }
         if not self.with_batch_dim:
-            simulated_rf = simulate_rf(
+            simulated_rf = simulate(
                 scatterer_positions=scatterer_positions,
                 scatterer_magnitudes=scatterer_magnitudes,
                 **simulate_kwargs,
             )
         else:
+            # A stateless seed inside `map` repeats the same noise for every item, so instead, first
+            # simulate everything and then apply TGC and nosie.
+            mapped_kwargs = {**simulate_kwargs, "noise_level_db": None, "tgc_max_db": 0.0}
             simulated_rf = ops.map(
-                lambda inputs: simulate_rf(
+                lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
-                    **simulate_kwargs,
+                    **mapped_kwargs,
                 ),
-                {
-                    "positions": scatterer_positions,
-                    "magnitudes": scatterer_magnitudes,
-                },
+                {"positions": scatterer_positions, "magnitudes": scatterer_magnitudes},
+            )
+            simulated_rf = apply_receive_chain(
+                simulated_rf, noise_level_db, tgc_max_db, noise_seed, noise_reference
             )
 
         return {
             self.output_key: simulated_rf,
-            "n_ch": 1,  # Simulate always returns RF data (so single channel)
+            "n_ch": 1,
         }
 
 
@@ -121,6 +180,11 @@ class TOFCorrection(Operation):
 
     # Define operation-specific static parameters
     STATIC_PARAMS = ["f_number", "apply_lens_correction", "focal_region_length"]
+
+    # Compiled together with the beamformer that sums its output, XLA's GPU fusion
+    # autotuner can take minutes on large inputs without making the result any faster
+    # (see #599). Only functions that contain this operation are affected.
+    COMPILER_OPTIONS = {"xla_gpu_experimental_enable_fusion_autotuner": False}
 
     def __init__(self, **kwargs):
         super().__init__(
@@ -456,7 +520,13 @@ class Demodulate(Operation):
 
     ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
 
-    def __init__(self, axis=-3, **kwargs):
+    def __init__(self, axis=-3, pad_fast_time=True, **kwargs):
+        """
+        Args:
+            axis (int): Fast-time (axial) axis to demodulate along. Defaults to -3.
+            pad_fast_time (bool): Avoid circular wraparound in the analytic-signal
+                transform. See :func:`~zea.func.ultrasound.demodulate`. Defaults to True.
+        """
         super().__init__(
             input_data_type=DataTypes.RAW_DATA,
             output_data_type=DataTypes.RAW_DATA,
@@ -464,17 +534,10 @@ class Demodulate(Operation):
             **kwargs,
         )
         self.axis = axis
+        self.pad_fast_time = pad_fast_time
 
     def call(self, demodulation_frequency=None, sampling_frequency=None, **kwargs):
         data = kwargs[self.key]
-
-        dtype = str(ops.dtype(data))
-        if dtype == "int16":
-            raise ValueError(
-                "Demodulate received int16 raw_data. Add a Cast operation before Demodulate, "
-                "for example: Pipeline([Cast(dtype='float32'), Demodulate(), ...]). "
-                "Tip: Pipeline.from_default() already includes this cast."
-            )
 
         data = ops.cast(data, "float32")
 
@@ -484,6 +547,7 @@ class Demodulate(Operation):
             demodulation_frequency=demodulation_frequency,
             sampling_frequency=sampling_frequency,
             axis=self.axis,
+            pad_fast_time=self.pad_fast_time,
         )
 
         return {
@@ -717,16 +781,14 @@ class BandPassFilter(FirFilter):
         """Validate passband and return (f1, f2)."""
         passband_error_message = "passband must be an iterable of two numeric values"
 
-        try:
-            passband_values = tuple(selected_passband)
-            f1 = passband_values[0]
-            f2 = passband_values[1]
-        except (TypeError, IndexError) as exc:
-            raise ValueError(passband_error_message) from exc
+        if not isinstance(selected_passband, Iterable):
+            raise ValueError(passband_error_message)
 
+        passband_values = tuple(selected_passband)
         if len(passband_values) != 2:
             raise ValueError(passband_error_message)
 
+        f1, f2 = passband_values
         if not all(
             isinstance(f, (int, float, np.number)) and not isinstance(f, bool) for f in (f1, f2)
         ):
@@ -966,9 +1028,11 @@ class Downsample(Operation):
 class AnisotropicDiffusion(Operation):
     """Speckle Reducing Anisotropic Diffusion (SRAD) filter.
 
-    Reference:
-    - https://doi.org/10.1109/TIP.2002.804276
-    - https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox
+    .. citation:: yu2002speckle
+
+        See also the `Image Despeckle Filtering Toolbox
+        <https://nl.mathworks.com/matlabcentral/fileexchange/54044-image-despeckle-filtering-toolbox>`_
+        on MATLAB Central.
     """
 
     def call(self, niter=100, lmbda=0.1, rect=None, eps=1e-6, **kwargs):

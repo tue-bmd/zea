@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
-# Resolve a mutually-compatible jax / tensorflow / torch stack with uv and print the
-# version pins for zea's Dockerfile (the `ENV JAX_VERSION=... TF_VERSION=...` block).
+# Check which CUDA generation jax / tensorflow / torch agree on, and print the PyTorch
+# index block for zea's pyproject.toml (`[[tool.uv.index]]` + `[tool.uv.sources]`).
 #
-# The CUDA version is derived automatically: jax[cuda12] and tensorflow[and-cuda] only
-# ship CUDA-12 wheels, so we first resolve those, read the CUDA minor they pull (via
-# nvidia-cuda-runtime-cu12, e.g. 12.9 -> cu129), and point torch at the matching PyTorch
-# index with --torch-backend. That way all three share one CUDA runtime instead of torch
-# grabbing a newer CUDA generation and doubling the install. Nothing is installed here.
+# The backend *versions* themselves are no longer produced here: they live in the
+# `jax-*` / `torch-*` / `tf-*` dependency-groups in pyproject.toml and are pinned by
+# uv.lock, so `uv lock --upgrade-package jax --upgrade-package tensorflow ...` is what
+# moves them. The one thing uv cannot pick on its own is the CUDA generation of the
+# PyTorch index, which is what this script resolves.
+#
+# jax[cuda12] and tensorflow[and-cuda] only ship CUDA-12 wheels, so we resolve those
+# first, read the CUDA minor they pull (via nvidia-cuda-runtime-cu12, e.g. 12.9 -> cu129)
+# and check that torch has wheels on the matching index. That way all three share one
+# CUDA runtime instead of torch grabbing a newer CUDA generation and doubling the
+# install. Nothing is installed here.
 #
 # Usage:
 #   ./scripts/resolve_backend_versions.sh            # derive the CUDA backend from jax/tf
-#   ./scripts/resolve_backend_versions.sh cu126      # or force a specific torch CUDA backend
-#
-# After running, copy the printed ENV block into the Dockerfile, and set the CU_BACKEND
-# build-arg default there to the same tag.
+#   ./scripts/resolve_backend_versions.sh cu126      # or check a specific CUDA backend
 set -euo pipefail
 
 PYTHON_VERSION="3.12"
@@ -56,18 +59,38 @@ EOF
 echo "Resolving full stack with --torch-backend=${CU_BACKEND} (python ${PYTHON_VERSION})..." >&2
 compile "$reqs" --torch-backend="$CU_BACKEND"
 
-# Pull the version out of each pin, dropping any local CUDA tag (e.g. 2.12.1+cu129 -> 2.12.1),
-# since the Dockerfile re-applies the CUDA build via --torch-backend at install time.
+# Informational: the newest stack this CUDA generation supports, ignoring the rest of
+# zea's dependencies. `uv lock` resolves against those too, so it may land lower.
 ver() { grep -iE "^$1==" "$lock" | head -1 | sed -E 's/^[^=]+==([^ ;+]+).*/\1/'; }
+
+current="$(grep -oE 'pytorch-cu[0-9]+' "$(dirname "$0")/../pyproject.toml" | head -1 || true)"
 
 cat <<EOF
 
-# Resolved on ${CU_BACKEND} -- paste into zea/Dockerfile:
-ENV JAX_VERSION=$(ver jax) \\
-    TORCH_VERSION=$(ver torch) \\
-    TORCHVISION_VERSION=$(ver torchvision) \\
-    TORCHAUDIO_VERSION=$(ver torchaudio) \\
-    TF_VERSION=$(ver tensorflow)
-
-ARG CU_BACKEND=${CU_BACKEND}
+# Newest stack available on ${CU_BACKEND} (informational -- uv.lock is the source of truth):
+#   jax==$(ver jax)  tensorflow==$(ver tensorflow)
+#   torch==$(ver torch)  torchvision==$(ver torchvision)  torchaudio==$(ver torchaudio)
 EOF
+
+if [ "$current" = "pytorch-${CU_BACKEND}" ]; then
+  cat <<EOF
+#
+# pyproject.toml already points at pytorch-${CU_BACKEND}: no index change needed. To pick
+# up the versions above (as far as zea's other dependencies allow), re-lock with
+#   uv lock --upgrade-package jax --upgrade-package tensorflow --upgrade-package torch \\
+#           --upgrade-package torchvision --upgrade-package torchaudio
+EOF
+else
+  cat <<EOF
+#
+# pyproject.toml points at ${current:-<none>}; replace that index with:
+
+[[tool.uv.index]]
+name = "pytorch-${CU_BACKEND}"
+url = "https://download.pytorch.org/whl/${CU_BACKEND}"
+explicit = true
+
+# ...renaming it in [tool.uv.sources] as well, then re-lock:
+#   uv lock --upgrade-package torch --upgrade-package torchvision --upgrade-package torchaudio
+EOF
+fi

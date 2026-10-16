@@ -8,7 +8,6 @@ import pytest
 
 from tests.data import generate_example_dataset
 
-
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -54,6 +53,22 @@ def test_key_requires_pipeline_false():
     assert _key_requires_pipeline(None) is False
 
 
+def test_resolve_save_as_honours_explicit_format():
+    """An explicit --save-as wins, whatever the frame count."""
+    from zea.data.process import _resolve_save_as
+
+    assert _resolve_save_as("mp4", 1) == "mp4"
+    assert _resolve_save_as("hdf5", 7) == "hdf5"
+
+
+def test_resolve_save_as_defaults_to_frame_count():
+    """Omitted, a still becomes a PNG and a sequence stays a GIF."""
+    from zea.data.process import _resolve_save_as
+
+    assert _resolve_save_as(None, 1) == "png"
+    assert _resolve_save_as(None, 2) == "gif"
+
+
 def test_cli_defaults():
     import tyro
 
@@ -61,8 +76,9 @@ def test_cli_defaults():
 
     args = tyro.cli(ProcessArgs, args=["--dataset", "data/", "--config", "cfg.yaml"])
     assert args.key == "data/raw_data"
+    assert args.track is None
     assert args.n_frames is None
-    assert args.save_as == "gif"
+    assert args.save_as is None  # resolved from the frame count at save time
     assert args.overwrite is False
     assert args.keep_dynamic_range is False
     assert args.revision is None
@@ -87,6 +103,68 @@ def test_run_passthrough_gif(tmp_path):
 
     assert (out_dir / "scan_a.gif").exists()
     assert (out_dir / "scan_b.gif").exists()
+
+
+def test_run_passthrough_png_single_frame(tmp_path):
+    """A single frame lands in <filestem>.png, not a numbered one."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "scan.hdf5", n_frames=1)
+    out_dir = tmp_path / "out"
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, "png", False)
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_passthrough_png_multiple_frames(tmp_path):
+    """Several frames are numbered so they do not overwrite each other."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "scan.hdf5", n_frames=3)
+    out_dir = tmp_path / "out"
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, "png", False)
+
+    assert sorted(p.name for p in out_dir.glob("*.png")) == [
+        "scan_0000.png",
+        "scan_0001.png",
+        "scan_0002.png",
+    ]
+
+
+def test_run_passthrough_png_overwrite_false(tmp_path):
+    """Existing PNGs are left alone unless overwrite is requested."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "scan.hdf5", n_frames=1)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    sentinel = out_dir / "scan.png"
+    sentinel.write_bytes(b"sentinel")
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, "png", False)
+
+    assert sentinel.read_bytes() == b"sentinel"
+
+
+def test_run_passthrough_default_format_follows_frame_count(tmp_path):
+    """With no --save-as, a one-frame file becomes a PNG and a longer one a GIF."""
+    from zea.data.process import _run_passthrough
+
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "still.hdf5", n_frames=1)
+    _make_image_file(ds_dir / "clip.hdf5", n_frames=3)
+    out_dir = tmp_path / "out"
+
+    _run_passthrough(str(ds_dir), "data/image/values", None, out_dir, None, False)
+
+    assert (out_dir / "still.png").exists()
+    assert (out_dir / "clip.gif").exists()
+    assert not (out_dir / "still.gif").exists()
 
 
 def test_run_passthrough_hdf5(tmp_path):
@@ -197,6 +275,54 @@ def test_run_processing_raw_without_pipeline_raises(tmp_path):
         )
 
 
+def test_run_processing_png_single_frame(tmp_path):
+    """The pipeline path writes a single PNG for a one-frame run."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n  sound_speed: 1540\npipeline:\n  operations:\n    - envelope_detect\n"
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+        save_as="png",
+    )
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_processing_default_format_for_single_frame(tmp_path):
+    """The pipeline path writes a PNG for a one-frame run when no format is given."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n  sound_speed: 1540\npipeline:\n  operations:\n    - envelope_detect\n"
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+    )
+
+    assert (out_dir / "scan.png").exists()
+    assert not (out_dir / "scan.gif").exists()
+
+
 def test_run_processing_invalid_save_as(tmp_path):
     """run_processing raises ValueError for unknown save_as format."""
     from zea.data.process import run_processing
@@ -255,9 +381,9 @@ def test_main_dispatches_to_run_processing(tmp_path, monkeypatch):
 
     called = {}
 
-    def _fake_run(dataset, config, key, *args, **kwargs):
-        called["dataset"] = dataset
-        called["config"] = config
+    def _fake_run(dataset_path, config_path, key, *args, **kwargs):
+        called["dataset"] = dataset_path
+        called["config"] = config_path
         called["key"] = key
 
     with patch("zea.data.process.run_processing", _fake_run):
@@ -269,3 +395,397 @@ def test_main_dispatches_to_run_processing(tmp_path, monkeypatch):
     assert called["key"] == "data/image/values"
     assert called["dataset"] == str(ds_dir)
     assert called["config"] == str(cfg)
+
+
+# ── track selection ───────────────────────────────────────────────────────────
+
+
+def _make_multitrack_file(path: Path, labels=("bmode", "doppler"), n_frames: int = 2) -> Path:
+    """Create a multi-track file whose tracks differ in both image data and scan."""
+    from tests.data import generate_dummy_scan
+    from zea.data.file import File
+    from zea.data.spec import ProbeSpec
+
+    n_el, n_tx, n_ax, n_ch = 4, 2, 8, 1
+    probe_geometry = np.zeros((n_el, 3), dtype=ProbeSpec.get_dtype("probe_geometry"))
+    probe_geometry[:, 0] = np.linspace(-0.02, 0.02, n_el)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    File.create(
+        path,
+        tracks=[
+            {
+                "data": {
+                    "raw_data": np.full((n_frames, n_tx, n_ax, n_el, n_ch), i, dtype=np.float32),
+                    "image": {"values": np.full((n_frames, 8, 8), i, dtype=np.uint8)},
+                },
+                "scan": generate_dummy_scan(n_tx=n_tx, n_el=n_el, sampling_frequency=(i + 1) * 1e7),
+                "label": label,
+            }
+            for i, label in enumerate(labels)
+        ],
+        probe={"name": "generic", "probe_geometry": probe_geometry},
+        overwrite=True,
+        ignore_warnings=True,
+    )
+    return path
+
+
+@pytest.mark.parametrize("track", ["doppler", "1"])
+def test_resolve_track_by_label_or_index(tmp_path, track):
+    """A track selects by label or by index, and rewrites the key to address it."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        index, data_key = _resolve_track(f, "data/image/values", track)
+
+    assert index == 1
+    assert data_key == "tracks/track_1/data/image/values"
+
+
+def test_resolve_track_multitrack_requires_selection(tmp_path):
+    """A multi-track file with no track selected raises, listing the tracks it has."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        with pytest.raises(ValueError, match="2 tracks") as exc:
+            _resolve_track(f, "data/image/values", None)
+
+    assert "'bmode'" in str(exc.value) and "'doppler'" in str(exc.value)
+
+
+def test_resolve_track_unknown_label_raises(tmp_path):
+    """An unknown track label reports the labels the file actually has."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        with pytest.raises(ValueError, match="No track 'flow'"):
+            _resolve_track(f, "data/image/values", "flow")
+
+
+def test_resolve_track_single_track_is_noop(tmp_path):
+    """Single-track files keep the key untouched and need no track addressing."""
+    from zea.data.file import File
+    from zea.data.process import _resolve_track
+
+    path = _make_image_file(tmp_path / "single.hdf5")
+    with File(path) as f:
+        assert _resolve_track(f, "data/image/values", None) == (None, "data/image/values")
+
+
+def test_load_track_parameters_uses_selected_track(tmp_path):
+    """Parameters come from the selected track's scan, not from the file as a whole."""
+    from zea.data.file import File
+    from zea.data.process import _load_track_parameters
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        assert _load_track_parameters(f, 0).sampling_frequency == pytest.approx(1e7)
+        assert _load_track_parameters(f, 1).sampling_frequency == pytest.approx(2e7)
+
+
+def test_check_track_consistency_accepts_matching_label(tmp_path):
+    """The track the key addresses by index carries the expected label."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        _check_track_consistency(f, 1, "doppler")  # does not raise
+
+
+def test_check_track_consistency_rejects_reordered_label(tmp_path):
+    """A file with the same tracks in a different order is refused."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "reversed.hdf5", labels=("doppler", "bmode"))
+    with File(path) as f:
+        with pytest.raises(ValueError, match="ordered consistently"):
+            _check_track_consistency(f, 1, "doppler")
+
+
+def test_check_track_consistency_rejects_missing_index(tmp_path):
+    """An index past the end of a file's tracks is reported, not an IndexError."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_multitrack_file(tmp_path / "duplex.hdf5")
+    with File(path) as f:
+        with pytest.raises(ValueError, match="ordered consistently"):
+            _check_track_consistency(f, 5, "doppler")
+
+
+def test_check_track_consistency_single_track_is_noop(tmp_path):
+    """Without a resolved track there is no index to keep consistent."""
+    from zea.data.file import File
+    from zea.data.process import _check_track_consistency
+
+    path = _make_image_file(tmp_path / "single.hdf5")
+    with File(path) as f:
+        _check_track_consistency(f, None, None)  # does not raise
+
+
+def test_run_processing_does_not_forward_unused_config_params(tmp_path):
+    """Config parameters the pipeline does not need never reach the pipeline.
+
+    ``run_processing`` already merges the config into ``zea.Parameters``, so passing
+    it as overrides too would bypass ``prepare_parameters``' ``needs_keys`` filter and
+    push unused keys (here ``pixels_per_wavelength``) all the way into the pipeline,
+    where they surface as spurious "unused input key" reports.
+    """
+    from zea.data.process import run_processing
+    from zea.ops.pipeline import Pipeline
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n"
+        "  pixels_per_wavelength: 2\n"  # a real parameter this pipeline has no use for
+        "pipeline:\n"
+        "  operations:\n"
+        "    - envelope_detect\n"
+    )
+
+    seen = {}
+    original = Pipeline.prepare_parameters
+
+    def spy(self, parameters=None, device=None, **overrides):
+        prepared = original(self, parameters, device=device, **overrides)
+        seen["overrides"] = set(overrides)
+        seen["prepared"] = set(prepared)
+        return prepared
+
+    with patch.object(Pipeline, "prepare_parameters", spy):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/raw_data",
+            n_frames=1,
+            save_dir=tmp_path / "out",
+            save_as="gif",
+        )
+
+    assert seen["overrides"] == set(), "config must not be forwarded as overrides"
+    assert "pixels_per_wavelength" not in seen["prepared"]
+
+
+def test_run_processing_track_selects_data(tmp_path):
+    """run_processing reads the requested track end to end."""
+    from zea.data.file import File
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "duplex.hdf5")
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/image/values",
+        n_frames=None,
+        save_dir=out_dir,
+        save_as="hdf5",
+        track="doppler",
+    )
+
+    with File(out_dir / "duplex.hdf5") as f:
+        values = f[f.format_key("data/image/values")][:]
+    assert np.all(values == 1), "expected track 1 ('doppler'), which is filled with 1s"
+
+
+@pytest.mark.parametrize("track", ["doppler", "1"])
+def test_run_processing_rejects_reordered_tracks(tmp_path, track):
+    """A file whose tracks are ordered differently is refused, not silently misread.
+
+    ``--track 1`` resolves to index 1 in every file, so only the label at that index
+    reveals the reordering; both ways of naming the track must be caught.
+    """
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "a_first.hdf5", labels=("bmode", "doppler"))
+    _make_multitrack_file(ds_dir / "b_second.hdf5", labels=("doppler", "bmode"))
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+
+    with pytest.raises(ValueError, match="ordered consistently"):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/image/values",
+            n_frames=None,
+            save_dir=tmp_path / "out",
+            save_as="hdf5",
+            track=track,
+        )
+
+
+def test_run_processing_accepts_consistently_ordered_tracks(tmp_path):
+    """The consistency check passes for a dataset whose files agree on track order."""
+    from zea.data.file import File
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    _make_multitrack_file(ds_dir / "a_first.hdf5")
+    _make_multitrack_file(ds_dir / "b_second.hdf5")
+    cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/image/values",
+        n_frames=None,
+        save_dir=out_dir,
+        save_as="hdf5",
+        track="doppler",
+    )
+
+    for name in ("a_first.hdf5", "b_second.hdf5"):
+        with File(out_dir / name) as f:
+            assert np.all(f[f.format_key("data/image/values")][:] == 1)
+
+
+# ── run_processing — custom operations ────────────────────────────────────────
+
+
+_CUSTOM_OP_MODULE = """
+from zea.internal.registry import ops_registry
+from zea.ops.base import Operation
+
+
+@ops_registry("{name}")
+class ProcessTmpOp(Operation):
+    def call(self, data, **kwargs):
+        return {{"data": data}}
+"""
+
+
+def _write_custom_op_module(path: Path, name: str) -> Path:
+    """Write a module registering one operation under ``name``."""
+    path.write_text(_CUSTOM_OP_MODULE.format(name=name), encoding="utf-8")
+    return path
+
+
+def test_run_processing_imports_custom_op_from_config(tmp_path):
+    """A config declaring `imports` runs an operation that is not part of zea."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    _write_custom_op_module(tmp_path / "my_ops.py", "process_cfg_custom_op")
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n"
+        "  sound_speed: 1540\n"
+        "pipeline:\n"
+        "  imports:\n"
+        "    - my_ops.py\n"
+        "  operations:\n"
+        "    - envelope_detect\n"
+        "    - process_cfg_custom_op\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+        save_as="png",
+    )
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_processing_imports_custom_op_from_cli(tmp_path):
+    """--imports covers a module the config does not mention itself."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    module = _write_custom_op_module(tmp_path / "cli_ops.py", "process_cli_custom_op")
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n"
+        "  sound_speed: 1540\n"
+        "pipeline:\n"
+        "  operations:\n"
+        "    - envelope_detect\n"
+        "    - process_cli_custom_op\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+        save_as="png",
+        imports=[str(module)],
+    )
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_processing_unknown_custom_op_explains_imports(tmp_path):
+    """Without the module, the failure tells the user how to declare it."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n  sound_speed: 1540\npipeline:\n  operations:\n    - never_registered_op\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KeyError, match="imports:"):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/raw_data",
+            n_frames=1,
+            save_dir=tmp_path / "out",
+        )
+
+
+def test_run_processing_remote_import_needs_trust(tmp_path, monkeypatch):
+    """A config pulling code off the Hub stops and asks, rather than executing it.
+
+    The gate has to survive the `except (ValueError, KeyError)` around the pipeline
+    build, which otherwise degrades a failed build into a silent passthrough.
+    """
+    from zea.data.process import run_processing
+    from zea.ops.imports import RemoteCodeError
+
+    monkeypatch.delenv("ZEA_TRUST_REMOTE_CODE", raising=False)
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "img.hdf5", n_frames=1)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "pipeline:\n  imports:\n    - hf://org/repo/remote_ops.py\n  operations:\n    - identity\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RemoteCodeError, match="--trust-remote-code"):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/image/values",
+            n_frames=1,
+            save_dir=tmp_path / "out",
+        )

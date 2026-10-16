@@ -80,8 +80,10 @@ class TinyAutoencoder(BaseModel):
                 "Please load model using `TinyAutoencoder.from_preset()` before calling."
             )
 
-        if ops.shape(inputs)[-1] == 1:
-            self._grayscale = True
+        # Reset per call: a grayscale image followed by an RGB one must not make
+        # `decode` fold the RGB output back down to a single channel.
+        self._grayscale = ops.shape(inputs)[-1] == 1
+        if self._grayscale:
             inputs = ops.concatenate([inputs, inputs, inputs], axis=-1)  # grayscale to RGB
         return self.encoder(inputs)
 

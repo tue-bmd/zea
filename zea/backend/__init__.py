@@ -9,8 +9,8 @@ Public API
 ----------
 
 :func:`jit`
-    Unified JIT compilation for JAX (``jax.jit``) and TensorFlow
-    (``tf.function``).  A no-op for the ``torch`` backend.
+    Unified JIT compilation for JAX (``jax.jit``), TensorFlow
+    (``tf.function``) and PyTorch (``torch.compile``).
 
 :class:`device`
     Context manager that pins all Keras ops to a specific device.
@@ -84,14 +84,15 @@ def _get_backend():
 backend = _get_backend()
 tf_mod = _import_tf()
 jax_mod = _import_jax()
+torch_mod = _import_torch()
 
 
 def tf_function(func=None, jit_compile=False, **kwargs):
     """Applies default tf.function to the given function. Only in TensorFlow backend."""
-    return jit(func, jax=False, jit_compile=jit_compile, **kwargs)
+    return jit(func, jax=False, torch=False, jit_compile=jit_compile, **kwargs)
 
 
-def jit(func=None, jax=True, tensorflow=True, **kwargs):
+def jit(func=None, jax=True, tensorflow=True, torch=True, **kwargs):
     """
     Applies JIT compilation to the given function based on the current Keras backend.
     Can be used as a decorator or as a function.
@@ -100,7 +101,12 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
         func (callable): The function to be JIT compiled.
         jax (bool): Whether to enable JIT compilation in the JAX backend.
         tensorflow (bool): Whether to enable JIT compilation in the TensorFlow backend.
-        **kwargs: Keyword arguments to be passed to the JIT compiler.
+        torch (bool): Whether to enable JIT compilation in the PyTorch backend.
+        **kwargs: Keyword arguments to be passed to the JIT compiler. One keyword is
+            handled by zea itself: ``default_compiler_options`` (dict), XLA options
+            that JAX applies to this function only, and only those the installed
+            jaxlib supports; an explicit ``compiler_options`` entry overrides them.
+            Other backends ignore it.
 
     Returns:
         callable: The JIT-compiled function.
@@ -108,11 +114,11 @@ def jit(func=None, jax=True, tensorflow=True, **kwargs):
     if func is None:
 
         def decorator(func):
-            return _jit_compile(func, jax=jax, tensorflow=tensorflow, **kwargs)
+            return _jit_compile(func, jax=jax, tensorflow=tensorflow, torch=torch, **kwargs)
 
         return decorator
     else:
-        return _jit_compile(func, jax=jax, tensorflow=tensorflow, **kwargs)
+        return _jit_compile(func, jax=jax, tensorflow=tensorflow, torch=torch, **kwargs)
 
 
 _jit_not_supported_warned = False
@@ -128,27 +134,34 @@ def _warn_jit_not_supported(backend_name: str) -> None:
         _jit_not_supported_warned = True
         log.warning(
             f"JIT compilation not currently supported for backend {backend_name}. "
-            "Supported backends are 'tensorflow' and 'jax'. "
+            "Supported backends are 'tensorflow', 'jax' and 'torch'. "
             "Initialize zea.Pipeline with jit_options=None to suppress this warning. "
             "Falling back to non-compiled mode."
         )
 
 
-def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
+def _jit_compile(func, jax=True, tensorflow=True, torch=True, **kwargs):
     backend = keras.backend.backend()
 
     if backend == "tensorflow" and tensorflow:
         if tf_mod is None:
             raise ImportError("TensorFlow is not installed. Please install it to use this backend.")
+        kwargs.pop("default_compiler_options", None)
         jit_compile = kwargs.pop("jit_compile", True)
         return tf_mod.function(func, jit_compile=jit_compile, **kwargs)
     elif backend == "jax" and jax:
         if jax_mod is None:
             raise ImportError("JAX is not installed. Please install it to use this backend.")
+        default_compiler_options = kwargs.pop("default_compiler_options", None)
+        if default_compiler_options or kwargs.get("compiler_options"):
+            return _jax_jit_with_compiler_options(func, default_compiler_options, kwargs)
         return jax_mod.jit(func, **kwargs)
-    elif backend == "tensorflow" and not tensorflow:
-        return func
-    elif backend == "jax" and not jax:
+    elif backend == "torch" and torch:
+        if torch_mod is None:
+            raise ImportError("PyTorch is not installed. Please install it to use this backend.")
+        kwargs.pop("default_compiler_options", None)
+        return torch_mod.compile(func, **kwargs)
+    elif backend in ("tensorflow", "jax", "torch"):
         return func
     else:
         # Return a lazy wrapper that warns only on first invocation.
@@ -163,6 +176,89 @@ def _jit_compile(func, jax=True, tensorflow=True, **kwargs):
             return func(*args, **kw)
 
         return _warn_on_first_call
+
+
+@functools.lru_cache(maxsize=None)
+def _jax_compiler_option_supported(name, value) -> bool:
+    """Whether the installed jaxlib accepts XLA option ``name`` as a per-function option.
+
+    XLA rejects an unknown option at compile time, and experimental flags come and go
+    between jaxlib releases, so this compiles a trivial function to find out.
+    """
+    try:
+        jax_mod.jit(lambda: 0, compiler_options={name: value}).lower().compile()
+    except Exception:  # TypeError on a jax.jit without compiler_options, else XLA's error
+        log.debug(f"XLA compiler option {name!r} is not supported by this jaxlib; skipping it.")
+        return False
+    return True
+
+
+def _jax_jit_with_compiler_options(func, default_compiler_options, jit_kwargs):
+    """``jax.jit`` with XLA ``compiler_options``, falling back to none where JAX refuses.
+
+    ``default_compiler_options`` are only used if jaxlib supports them, and explicit
+    ``compiler_options`` in ``jit_kwargs`` override them.
+
+    JAX only accepts ``compiler_options`` on a top-level ``jax.jit``. Called inside
+    another trace, for example a pipeline inside the user's own ``jax.jit``, the function
+    is compiled as part of the outer function, whose options then apply; a warning
+    explains how to pass them there instead.
+
+    The support check compiles a function, which would start the JAX backend. That has
+    to wait until the first call: a pipeline built before :func:`zea.init_device` would
+    otherwise fix the visible devices before they are selected.
+    """
+    jitted = None  # (top_level, nested, compiler_options), built on the first call
+    warned = False
+
+    def build():
+        compiler_options = {
+            name: value
+            for name, value in (default_compiler_options or {}).items()
+            if _jax_compiler_option_supported(name, value)
+        }
+        compiler_options.update(jit_kwargs.get("compiler_options") or {})
+        # Leave the keyword out when empty: jax.jit only has it from JAX 0.4.36.
+        options = {k: v for k, v in jit_kwargs.items() if k != "compiler_options"}
+        nested = jax_mod.jit(func, **options)
+        if not compiler_options:
+            return nested, nested, compiler_options
+        top_level = jax_mod.jit(func, **options, compiler_options=compiler_options)
+        return top_level, nested, compiler_options
+
+    @functools.wraps(func)
+    def call(*args, **kwargs):
+        nonlocal jitted, warned
+        if jitted is None:
+            jitted = build()
+        top_level, nested, compiler_options = jitted
+        if top_level is nested:
+            return nested(*args, **kwargs)
+        try:
+            return top_level(*args, **kwargs)
+        except ValueError as exc:
+            if "compiler_options" not in str(exc):
+                raise
+            if not warned:
+                warned = True
+                _warn_compiler_options_dropped(func, compiler_options)
+            return nested(*args, **kwargs)
+
+    return call
+
+
+def _warn_compiler_options_dropped(func, options):
+    """Warn that ``options`` are lost because ``func`` is jit as an inner function."""
+    name = getattr(func, "__qualname__", repr(func))
+    xla_flags = " ".join(
+        f"--{k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in options.items()
+    )
+    log.warning(
+        f"{name} is traced inside another jax.jit, which does not allow its XLA compiler_options"
+        f"{options}; without them compilation can be much slower. Pass them to the outer"
+        f"function `jax.jit(f, compiler_options={options})`, or set XLA_FLAGS='{xla_flags}' "
+        f"before importing JAX."
+    )
 
 
 class device:

@@ -11,10 +11,9 @@ To try this model, simply load one of the available presets:
 
 .. important::
     This is a ``zea`` implementation of the model.
-    For the original paper and code, see `here <https://echonet.github.io/dynamic/>`_.
+    For the original code, see `here <https://echonet.github.io/dynamic/>`_.
 
-    Ouyang, David, et al. "Video-based AI for beat-to-beat assessment of cardiac function."
-    *Nature 580.7802 (2020): 252-256*
+.. citation:: ouyang2020video
 
 .. seealso::
     A tutorial notebook where this model is used:
@@ -182,8 +181,11 @@ class EchoNetDynamic(BaseModel):
 register_presets(echonet_dynamic_presets, EchoNetDynamic)
 
 
-def download_original_weights(weights_folder=None):
+def download_original_weights(weights_folder=None):  # pragma: no cover
     """Download the original weights from the EchoNet Github repository.
+
+    Only used by :func:`convert_original_weights` to reproduce the published
+    preset; using the model needs neither.
 
     Args:
         weights_folder (str | Path, optional): Folder to download the weights into.

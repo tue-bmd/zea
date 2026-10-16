@@ -9,11 +9,10 @@ import abc
 import numpy as np
 from keras import ops
 
-from zea.internal.core import Object
 from zea.internal.registry import operator_registry
 
 
-class Operator(abc.ABC, Object):
+class Operator(abc.ABC):
     """Operator base class.
 
     Used to define a generatic operator for a specific task / forward model.
