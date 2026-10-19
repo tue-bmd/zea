@@ -9272,7 +9272,7 @@ requires-dist = [
     { name = "grain", specifier = ">=0.2.8" },
     { name = "h5py", specifier = ">=3.11" },
     { name = "hdf5plugin", specifier = ">=4.4" },
-    { name = "huggingface-hub", specifier = ">=1.2" },
+    { name = "huggingface-hub", specifier = ">=2.0" },
     { name = "imageio", extras = ["ffmpeg"], specifier = ">=2.0" },
     { name = "jax", marker = "sys_platform != 'linux' and extra == 'jax'", specifier = ">=0.4.35" },
     { name = "jax", marker = "extra == 'backends'", specifier = ">=0.4.35" },
