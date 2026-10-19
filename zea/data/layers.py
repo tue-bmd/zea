@@ -140,6 +140,15 @@ class Resizer(DataLayer):
 
         return x
 
+    def build(self, input_shape):
+        """Mark the layer built.
+
+        The wrapped Keras layer holds no weights and builds itself on its first call, and
+        it may see a permuted shape (see :meth:`call`), so there is nothing to build here.
+        Defining this stops Keras from warning that the layer has unbuilt state.
+        """
+        self.built = True
+
     def call(self, inputs):
         """
         Resize the input tensor.
