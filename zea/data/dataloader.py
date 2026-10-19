@@ -408,6 +408,52 @@ def _missing_metadata_error(metadata_gaps: dict, n_files: int) -> KeyError:
     )
 
 
+def _hashable(value):
+    """``value`` as a dict key; ``slice`` is only hashable from Python 3.12."""
+    return ("slice", value.start, value.stop, value.step) if isinstance(value, slice) else value
+
+
+def _encode_indices(indices: list) -> tuple | list:
+    """Encode the ``(file, key, selection)`` index table for pickling.
+
+    A table of hundreds of thousands of tuples of slices takes seconds to pickle, and
+    grain pickles it once per worker process. Each column (file, key and every axis of
+    the selection) holds few distinct values, so the table becomes one lookup list per
+    column plus an int32 array of codes, which pickles in milliseconds. Tables whose
+    selections differ in length are returned unchanged.
+
+    Args:
+        indices (list): Entries ``(file_name, key, selection)``.
+
+    Returns:
+        tuple | list: ``(columns, codes)``, or ``indices`` itself if not encodable.
+    """
+    if not indices or len({len(selection) for _, _, selection in indices}) != 1:
+        return indices
+    n_columns = 2 + len(indices[0][2])
+    lookups = [{} for _ in range(n_columns)]
+    columns = [[] for _ in range(n_columns)]
+    codes = np.empty((len(indices), n_columns), np.int32)
+    for i, (file_name, key, selection) in enumerate(indices):
+        for j, value in enumerate((file_name, key, *selection)):
+            code = lookups[j].setdefault(_hashable(value), len(columns[j]))
+            if code == len(columns[j]):
+                columns[j].append(value)
+            codes[i, j] = code
+    return columns, codes
+
+
+def _decode_indices(encoded: tuple | list) -> list:
+    """Rebuild the index table encoded by :func:`_encode_indices`."""
+    if isinstance(encoded, list):
+        return encoded
+    (files, keys, *axes), codes = encoded
+    return [
+        (files[row[0]], keys[row[1]], tuple(axis[c] for axis, c in zip(axes, row[2:])))
+        for row in codes.tolist()
+    ]
+
+
 def _resized_shape(resizer: "Resizer", shape: tuple) -> tuple:
     """The shape ``resizer`` produces for ``shape``, asked of the resizer itself.
 
@@ -833,15 +879,23 @@ class H5DataSource:
         """Drop locks and open file handles so the source can be sent to worker processes.
 
         Grain's ``mp_prefetch`` pickles the dataset into each worker. Handles would not
-        survive the trip anyway, so every process reopens its own lazily.
+        survive the trip anyway, so every process reopens its own lazily. The index
+        table is sent encoded (see :func:`_encode_indices`), and the encoding is cached
+        because grain pickles the source once per worker, serially.
         """
         state = self.__dict__.copy()
         for name in ("_metadata_lock", "_local", "_all_caches", "_all_caches_lock"):
             state.pop(name, None)
+        cached = state.pop("_encoded_indices_cache", None)
+        if cached is None or cached[0] is not self.indices:
+            cached = (self.indices, _encode_indices(self.indices))
+            self._encoded_indices_cache = cached
+        state["indices"] = cached[1]
         return state
 
     def __setstate__(self, state: dict):
         self.__dict__.update(state)
+        self.indices = _decode_indices(self.indices)
         self._metadata_lock = threading.Lock()
         self._local = threading.local()
         self._all_caches = set()

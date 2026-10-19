@@ -29,14 +29,11 @@ from __future__ import annotations
 import keras
 from keras import ops
 
-from zea.backend import _import_tf
 from zea.internal.registry import model_registry
 from zea.models.diffusion import DiffusionModel
 from zea.models.preset_utils import register_presets
 from zea.models.presets import flow_matching_presets
 from zea.models.utils import LossTrackerWrapper
-
-tf = _import_tf()
 
 
 @model_registry(name="flow_matching")
@@ -418,7 +415,12 @@ class FlowMatchingModel(DiffusionModel):
         """Metrics for training."""
         return [*self.velocity_loss_tracker, *self.image_loss_tracker]
 
-    def _sample_diffusion_times(self, batch_size, n_dims):
+    @property
+    def _loss_trackers(self):
+        """Trackers for the losses of :meth:`_training_losses`, in the same order."""
+        return (self.velocity_loss_tracker, self.image_loss_tracker)
+
+    def _sample_diffusion_times(self, batch_size, n_dims, seed=None):
         """Sample flow times for training using logit-normal sampling.
 
         Returns a tensor of shape ``(batch_size, 1, ..., 1)`` (``n_dims``
@@ -430,34 +432,38 @@ class FlowMatchingModel(DiffusionModel):
         ``[min_t, max_t]``.  This concentrates training mass on the hard
         intermediate timesteps near :math:`t = 0.5`.
         """
-        shape = ops.stack([batch_size, *([1] * n_dims)])
-        z = keras.random.normal(shape=shape)
+        # A tuple, not a stacked tensor: JAX needs a static shape
+        shape = (batch_size, *([1] * n_dims))
+        z = keras.random.normal(shape=shape, seed=seed)
         t01 = ops.sigmoid(z)  # maps ℝ → (0, 1)
         return self.min_t + t01 * (self.max_t - self.min_t)
 
-    def train_step(self, data):
-        """Custom train step for Rectified Flow (independent coupling).
+    def _training_losses(self, data, training: bool, seed=None):
+        """Velocity and image loss of one batch, for Rectified Flow (independent coupling).
 
         Trains the network to predict the velocity field
         :math:`v = \\varepsilon - x_0` from noisy observations
         :math:`x_t = (1 - t)\\,x_0 + t\\,\\varepsilon`, where
         :math:`\\varepsilon \\sim \\mathcal{N}(0, I)` is sampled independently
-        of :math:`x_0`.
+        of :math:`x_0`. The velocity loss is the one trained on.
 
-        Note:
-            Only implemented for the TensorFlow backend.
+        Args:
+            data (Tensor | tuple): Clean batch of shape ``(batch, *input_shape)``,
+                bare or as Keras' ``(x,)`` tuple.
+            training (bool): Whether to call the network in training mode.
+            seed (SeedGenerator, optional): Seeds the noise and times. Required
+                under JAX; ``None`` keeps the backend's global random state.
+
+        Returns:
+            tuple: ``(velocity_loss, image_loss)``.
         """
-        if tf is None:
-            raise NotImplementedError(
-                "FlowMatchingModel.train_step is only implemented for the TensorFlow backend."
-            )
-
+        data, _, _ = keras.utils.unpack_x_y_sample_weight(data)
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
 
-        noises = keras.random.normal(shape=ops.shape(data))
+        noises = keras.random.normal(shape=ops.shape(data), seed=seed)
 
-        diffusion_times = self._sample_diffusion_times(batch_size, n_dims)
+        diffusion_times = self._sample_diffusion_times(batch_size, n_dims, seed=seed)
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
         # x_t = (1 − t) · x₀ + t · ε
@@ -466,46 +472,8 @@ class FlowMatchingModel(DiffusionModel):
         # Target velocity: v = ε − x₀
         target_velocities = noises - data
 
-        with tf.GradientTape() as tape:
-            pred_velocities = self([noisy_data, noise_rates], training=True)
-            pred_images = noisy_data - noise_rates * pred_velocities
-            velocity_loss = self.loss(target_velocities, pred_velocities)
-            image_loss = self.loss(data, pred_images)
-
-        gradients = tape.gradient(velocity_loss, self.network.trainable_weights)
-        self.optimizer.apply_gradients(zip(gradients, self.network.trainable_weights))
-
-        self.velocity_loss_tracker.update_state(velocity_loss)
-        self.image_loss_tracker.update_state(image_loss)
-
-        # Update EMA weights
-        for weight, ema_weight in zip(self.network.weights, self.ema_network.weights):
-            ema_weight.assign(self.ema_val * ema_weight + (1 - self.ema_val) * weight)
-
-        return {m.name: m.result() for m in self.metrics}
-
-    def test_step(self, data):
-        """Custom test step for Rectified Flow (independent coupling)."""
-        batch_size, *input_shape = ops.shape(data)
-        n_dims = len(input_shape)
-
-        noises = keras.random.normal(shape=ops.shape(data))
-
-        diffusion_times = self._sample_diffusion_times(batch_size, n_dims)
-        noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
-
-        noisy_data = signal_rates * data + noise_rates * noises
-        target_velocities = noises - data
-
-        pred_velocities = self([noisy_data, noise_rates], training=False)
+        pred_velocities = self([noisy_data, noise_rates], training=training)
         pred_images = noisy_data - noise_rates * pred_velocities
-        velocity_loss = self.loss(target_velocities, pred_velocities)
-        image_loss = self.loss(data, pred_images)
-
-        self.velocity_loss_tracker.update_state(velocity_loss)
-        self.image_loss_tracker.update_state(image_loss)
-
-        return {m.name: m.result() for m in self.metrics}
-
+        return self.loss(target_velocities, pred_velocities), self.loss(data, pred_images)
 
 register_presets(flow_matching_presets, FlowMatchingModel)

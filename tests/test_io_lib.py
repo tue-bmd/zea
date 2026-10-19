@@ -11,6 +11,7 @@ from zea.io_lib import (
     save_image,
     save_to_gif,
     save_video,
+    search_file_tree,
 )
 
 from . import DEFAULT_TEST_SEED
@@ -381,3 +382,24 @@ def test_animate_images_parameters_with_extent(tmp_path):
     animate_images(images, path=str(path), parameters=ParametersWithExtent(), interval=100)
 
     assert path.exists()
+
+
+def test_search_file_tree_skips_hidden(tmp_path):
+    """Hidden files and directories below the root are not yielded."""
+    root = tmp_path / ".root"  # a hidden root itself is still searched
+    for rel in [
+        "a.hdf5",
+        "sub/b.hdf5",
+        "sub/c.txt",
+        ".a.tmp-xyz.hdf5",
+        "sub/.b.hdf5.tmpabc.hdf5",
+        ".hidden/d.hdf5",
+    ]:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).touch()
+
+    found = sorted(search_file_tree(root, filetypes=[".hdf5"], verbose=False, relative=True))
+    assert [str(p) for p in found] == ["a.hdf5", "sub/b.hdf5"]
+
+    found_all = sorted(search_file_tree(root, verbose=False, relative=True))
+    assert [str(p) for p in found_all] == ["a.hdf5", "sub/b.hdf5", "sub/c.txt"]

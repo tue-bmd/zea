@@ -13,7 +13,7 @@ from keras import ops
 
 from zea.data import dataloader as dataloader_module
 from zea.data.augmentations import RandomCircleInclusion
-from zea.data.dataloader import Dataloader, H5DataSource
+from zea.data.dataloader import Dataloader, H5DataSource, _decode_indices, _encode_indices
 from zea.data.datasets import EXISTS, Dataset, compile_file_filter
 from zea.data.file import File
 from zea.data.layers import Resizer
@@ -2265,3 +2265,22 @@ def test_predicted_sample_shape_matches_pipeline(tmp_path, kwargs):
         assert predicted == tuple(np.shape(next(iter(loader))))[1:]
     finally:
         loader.close()
+
+
+@pytest.mark.parametrize(
+    "indices",
+    [
+        [
+            ("a.hdf5", "data/image", (slice(0, 3, 1), slice(None, 10), 2)),
+            ("b.hdf5", "data/image", (slice(3, 6, 1), slice(None, 12), 0)),
+            ("a.hdf5", "data/image", (slice(3, 6, 1), slice(None, 10), 2)),
+        ],
+        [],
+        # Selections of different lengths are kept as they are.
+        [("a.hdf5", "k", (slice(0, 3),)), ("b.hdf5", "k", (slice(0, 3), 1))],
+    ],
+)
+def test_encode_indices_roundtrip(indices):
+    """The pickled index table decodes to exactly the original entries."""
+    encoded = pickle.loads(pickle.dumps(_encode_indices(indices)))
+    assert _decode_indices(encoded) == indices

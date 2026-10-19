@@ -41,6 +41,12 @@ from zea.utils import ProgressBar
 tf = _import_tf()
 
 
+def _current_value(scope, variable, fallback):
+    """The value ``variable`` holds in a ``StatelessScope``, or ``fallback`` if unassigned."""
+    value = scope.get_current_value(variable)
+    return fallback if value is None else value
+
+
 @model_registry(name="diffusion")
 class DiffusionModel(DeepGenerativeModel):
     """Implementation of a diffusion generative model.
@@ -124,6 +130,11 @@ class DiffusionModel(DeepGenerativeModel):
 
         self.image_loss_tracker = LossTrackerWrapper("i_loss")
         self.noise_loss_tracker = LossTrackerWrapper("n_loss")
+
+        # Seeds the training noise under JAX, where the jitted step cannot use
+        # unseeded random ops. Its state is a non-trainable variable, so it advances
+        # with the training state; layers do not save it, so checkpoints are unchanged.
+        self.train_seed_generator = keras.random.SeedGenerator()
 
         # for storing intermediate results (i.e. diffusion trajectory)
         self.track_progress_interval = 1
@@ -332,46 +343,100 @@ class DiffusionModel(DeepGenerativeModel):
         """Metrics for training."""
         return [*self.noise_loss_tracker, *self.image_loss_tracker]
 
-    def train_step(self, data):
-        """Custom train step so we can call model.fit() on the diffusion model.
-        Note:
-            - Only implemented for the TensorFlow backend.
-        """
-        if tf is None:
-            raise NotImplementedError(
-                "DiffusionModel.train_step is only implemented for the TensorFlow backend."
-            )
+    @property
+    def _loss_trackers(self):
+        """Trackers for the losses of :meth:`_training_losses`, in the same order."""
+        return (self.noise_loss_tracker, self.image_loss_tracker)
 
-        # Get batch size and image shape
+    def compile(self, *args, **kwargs):
+        """Compile the model, and prepare its state for the JAX training step.
+
+        The train and test steps call ``self.loss`` directly, never the
+        ``CompileLoss`` Keras wraps it in. Keras-JAX builds that wrapper before
+        ``fit`` by calling the model on a raw data batch, which this model cannot
+        take, so it is marked built. The loss trackers create their metrics on first
+        update, which a jitted step cannot do, so under JAX they are created here.
+        """
+        super().compile(*args, **kwargs)
+        if self._compile_loss is not None:
+            self._compile_loss.built = True
+        if keras.backend.backend() == "jax":
+            for tracker in self._loss_trackers:
+                tracker.build()
+
+    def _training_losses(self, data, training: bool, seed=None):
+        """Noise and image loss of one batch at random diffusion times.
+
+        The first loss is the one trained on.
+
+        Args:
+            data (Tensor | tuple): Clean batch of shape ``(batch, *input_shape)``,
+                bare or as Keras' ``(x,)`` tuple.
+            training (bool): Whether to call the network in training mode.
+            seed (SeedGenerator, optional): Seeds the noise and times. Required
+                under JAX; ``None`` keeps the backend's global random state.
+
+        Returns:
+            tuple: ``(noise_loss, image_loss)``.
+        """
+        data, _, _ = keras.utils.unpack_x_y_sample_weight(data)
         batch_size, *input_shape = ops.shape(data)
         n_dims = len(input_shape)
 
-        # Generate random noise
-        noises = keras.random.normal(shape=ops.shape(data))
+        noises = keras.random.normal(shape=ops.shape(data), seed=seed)
 
         # Sample uniform random diffusion times in [min_t, max_t]
         diffusion_times = keras.random.uniform(
-            shape=ops.stack([batch_size, *([1] * n_dims)]),
+            # A tuple, not a stacked tensor: JAX needs a static shape
+            shape=(batch_size, *([1] * n_dims)),
             minval=self.min_t,
             maxval=self.max_t,
+            seed=seed,
         )
         noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
 
         # Mix data and noises
         noisy_data = signal_rates * data + noise_rates * noises
 
-        with tf.GradientTape() as tape:
-            pred_noises, pred_images = self.denoise(
-                noisy_data, noise_rates, signal_rates, training=True
-            )
-            noise_loss = self.loss(noises, pred_noises)
-            image_loss = self.loss(data, pred_images)
+        pred_noises, pred_images = self.denoise(
+            noisy_data, noise_rates, signal_rates, training=training
+        )
+        return self.loss(noises, pred_noises), self.loss(data, pred_images)
 
-        gradients = tape.gradient(noise_loss, self.network.trainable_weights)
+    def train_step(self, *args):
+        """Custom train step so we can call model.fit() on the diffusion model.
+
+        Keras calls it as ``train_step(data)`` on TensorFlow and as
+        ``train_step(state, data)`` on JAX, which expects ``(logs, state)`` back.
+        Other backends are not implemented.
+        """
+        if keras.backend.backend() == "jax":
+            return self._train_step_jax(*args)
+        if tf is None:
+            raise NotImplementedError(
+                "DiffusionModel.train_step is only implemented for the TensorFlow and JAX "
+                "backends."
+            )
+        return self._train_step_tf(*args)
+
+    def test_step(self, *args):
+        """Custom test step so we can call model.fit() on the diffusion model.
+
+        Called as :meth:`train_step` is, per backend.
+        """
+        if keras.backend.backend() == "jax":
+            return self._test_step_jax(*args)
+        return self._test_step_tf(*args)
+
+    def _train_step_tf(self, data):
+        with tf.GradientTape() as tape:
+            losses = self._training_losses(data, training=True)
+
+        gradients = tape.gradient(losses[0], self.network.trainable_weights)
         self.optimizer.apply_gradients(zip(gradients, self.network.trainable_weights))
 
-        self.noise_loss_tracker.update_state(noise_loss)
-        self.image_loss_tracker.update_state(image_loss)
+        for tracker, loss in zip(self._loss_trackers, losses):
+            tracker.update_state(loss)
 
         # track the exponential moving averages of weights.
         # ema_network is used for inference / sampling
@@ -380,37 +445,80 @@ class DiffusionModel(DeepGenerativeModel):
 
         return {m.name: m.result() for m in self.metrics}
 
-    def test_step(self, data):
-        """
-        Custom test step so we can call model.fit() on the diffusion model.
-        """
-        batch_size, *input_shape = ops.shape(data)
-        n_dims = len(input_shape)
-
-        noises = keras.random.normal(shape=ops.shape(data))
-
-        # sample uniform random diffusion times
-        diffusion_times = keras.random.uniform(
-            shape=ops.stack([batch_size, *([1] * n_dims)]),
-            minval=self.min_t,
-            maxval=self.max_t,
-        )
-        noise_rates, signal_rates = self.diffusion_schedule(diffusion_times)
-        # mix the images with noises accordingly
-        noisy_images = signal_rates * data + noise_rates * noises
-
-        # use the network to separate noisy images to their components
-        pred_noises, pred_images = self.denoise(
-            noisy_images, noise_rates, signal_rates, training=False
-        )
-
-        noise_loss = self.loss(noises, pred_noises)
-        image_loss = self.loss(data, pred_images)
-
-        self.noise_loss_tracker.update_state(noise_loss)
-        self.image_loss_tracker.update_state(image_loss)
-
+    def _test_step_tf(self, data):
+        losses = self._training_losses(data, training=False)
+        for tracker, loss in zip(self._loss_trackers, losses):
+            tracker.update_state(loss)
         return {m.name: m.result() for m in self.metrics}
+
+    def _stateless_losses(self, trainable_values, non_trainable_values, data, training):
+        """Run :meth:`_training_losses` on explicit variable values (JAX).
+
+        Returns the first loss, and as auxiliary output all losses with the
+        non-trainable values after the call (the seed generator advances).
+        """
+        state_mapping = [
+            *zip(self.trainable_variables, trainable_values),
+            *zip(self.non_trainable_variables, non_trainable_values),
+        ]
+        with keras.StatelessScope(state_mapping=state_mapping) as scope:
+            losses = self._training_losses(data, training, seed=self.train_seed_generator)
+        non_trainable_values = [
+            _current_value(scope, v, value)
+            for v, value in zip(self.non_trainable_variables, non_trainable_values)
+        ]
+        return losses[0], (losses, non_trainable_values)
+
+    def _update_loss_trackers(self, metrics_values, losses):
+        """Update the loss trackers on explicit metric values (JAX)."""
+        state_mapping = list(zip(self.metrics_variables, metrics_values))
+        with keras.StatelessScope(state_mapping=state_mapping) as scope:
+            for tracker, loss in zip(self._loss_trackers, losses):
+                tracker.update_state(loss)
+            logs = {m.name: m.result() for m in self.metrics}
+        metrics_values = [
+            _current_value(scope, v, value)
+            for v, value in zip(self.metrics_variables, metrics_values)
+        ]
+        return logs, metrics_values
+
+    def _train_step_jax(self, state, data):
+        import jax
+
+        trainable_values, non_trainable_values, optimizer_values, metrics_values = state
+        grad_fn = jax.value_and_grad(self._stateless_losses, has_aux=True)
+        (_, (losses, non_trainable_values)), grads = grad_fn(
+            trainable_values, non_trainable_values, data, True
+        )
+        trainable_values, optimizer_values = self.optimizer.stateless_apply(
+            optimizer_values, grads, trainable_values
+        )
+
+        # EMA of the updated network weights, as in the TF step. The EMA network is
+        # not trainable, so its weights live among the non-trainable values.
+        values = {
+            id(v): value
+            for v, value in [
+                *zip(self.trainable_variables, trainable_values),
+                *zip(self.non_trainable_variables, non_trainable_values),
+            ]
+        }
+        for weight, ema_weight in zip(self.network.weights, self.ema_network.weights):
+            values[id(ema_weight)] = (
+                self.ema_val * values[id(ema_weight)] + (1 - self.ema_val) * values[id(weight)]
+            )
+        non_trainable_values = [values[id(v)] for v in self.non_trainable_variables]
+
+        logs, metrics_values = self._update_loss_trackers(metrics_values, losses)
+        return logs, (trainable_values, non_trainable_values, optimizer_values, metrics_values)
+
+    def _test_step_jax(self, state, data):
+        trainable_values, non_trainable_values, metrics_values = state
+        _, (losses, non_trainable_values) = self._stateless_losses(
+            trainable_values, non_trainable_values, data, False
+        )
+        logs, metrics_values = self._update_loss_trackers(metrics_values, losses)
+        return logs, (trainable_values, non_trainable_values, metrics_values)
 
     def diffusion_schedule(self, diffusion_times):
         """Cosine diffusion schedule.
