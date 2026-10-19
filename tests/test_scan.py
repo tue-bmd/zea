@@ -757,6 +757,24 @@ def test_pfield_rejects_curved_probe():
         _ = parameters.pfield
 
 
+@pytest.mark.parametrize("field", ["t0_delays", "tx_apodizations"])
+def test_pfield_rejects_non_finite_transmit_parameters(field):
+    """NaN transmit delays or apodizations are rejected rather than silently zeroed."""
+    parameters = get_parameters()
+    kwargs = dict(
+        sound_speed=parameters.sound_speed,
+        center_frequency=parameters.center_frequency,
+        probe_bandwidth_percent=parameters.probe_bandwidth_percent,
+        probe_geometry=parameters.probe_geometry,
+        tx_apodizations=np.array(parameters.tx_apodizations),
+        grid=parameters.grid,
+        t0_delays=np.array(parameters.t0_delays),
+    )
+    kwargs[field][0, 0] = np.nan
+    with pytest.raises(ValueError, match=f"`{field}` must be finite"):
+        compute_pfield(**kwargs)
+
+
 def test_pfield_infers_element_width():
     """Without an element width, the pfield uses 90% of the pitch."""
     parameters = get_parameters()
