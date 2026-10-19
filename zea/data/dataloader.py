@@ -829,6 +829,24 @@ class H5DataSource:
         dummy = np.broadcast_to(np.zeros((), np.uint8), file_shape)[selection]
         return tuple(np.shape(self._place_frames(dummy)))
 
+    def __getstate__(self) -> dict:
+        """Drop locks and open file handles so the source can be sent to worker processes.
+
+        Grain's ``mp_prefetch`` pickles the dataset into each worker. Handles would not
+        survive the trip anyway, so every process reopens its own lazily.
+        """
+        state = self.__dict__.copy()
+        for name in ("_metadata_lock", "_local", "_all_caches", "_all_caches_lock"):
+            state.pop(name, None)
+        return state
+
+    def __setstate__(self, state: dict):
+        self.__dict__.update(state)
+        self._metadata_lock = threading.Lock()
+        self._local = threading.local()
+        self._all_caches = set()
+        self._all_caches_lock = threading.Lock()
+
     def __len__(self) -> int:
         return len(self.indices)
 

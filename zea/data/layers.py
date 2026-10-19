@@ -20,6 +20,7 @@ class Pad(PadOp):
         return super().call(data=inputs)["data"]
 
 
+@keras.saving.register_keras_serializable(package="zea")
 class Resizer(DataLayer):
     """
     Resize layer for resizing images. Can deal with N-dimensional images.
