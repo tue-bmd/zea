@@ -121,6 +121,9 @@ def compute_pfield(
     probe_geometry = ops.convert_to_tensor(probe_geometry, dtype="float32")
     grid_x = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
     grid_z = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
+    for name, value in (("t0_delays", t0_delays), ("tx_apodizations", tx_apodizations)):
+        if not np.all(np.isfinite(ops.convert_to_numpy(value))):
+            raise ValueError(f"`{name}` must be finite to compute the pressure field.")
     t0_delays = ops.convert_to_tensor(t0_delays, dtype="float32")
     tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="complex64")
 

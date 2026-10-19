@@ -329,9 +329,12 @@ class Probe(ProbeSpec):
         """Compute the pitch (centre-to-centre element spacing) in metres from
         the probe geometry.
 
+        The pitch is always positive, also when the elements are ordered by
+        descending x.
+
         Raises :class:`ValueError` when the probe has fewer than 2 elements,
-        the geometry is not a 1-D (linear) array, or the element positions are
-        not uniformly spaced.
+        the geometry is not a 1-D (linear) array, the element positions are
+        not uniformly spaced, or the elements coincide.
         """
 
         n_el = probe_geometry.shape[0]
@@ -353,7 +356,10 @@ class Probe(ProbeSpec):
                 f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
             )
 
-        return float(spacings[0])
+        pitch = abs(float(spacings[0]))
+        if pitch == 0:
+            raise ValueError("Cannot compute pitch: element positions coincide.")
+        return pitch
 
     @property
     def pitch(self) -> float | None:
