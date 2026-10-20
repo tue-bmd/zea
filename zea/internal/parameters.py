@@ -500,7 +500,9 @@ class BaseParameters:
         if target in seen:
             return dependents
         seen.add(target)
-        for name in cls.__dict__:
+        # Walk the MRO so subclasses (e.g. the deprecated Scan) see inherited properties
+        names = dict.fromkeys(name for klass in cls.__mro__ for name in vars(klass))
+        for name in names:
             if cls._is_property_with_dependencies(name):
                 if target in cls._get_dependencies(name):
                     dependents.add(name)

@@ -828,3 +828,21 @@ def test_mapping_protocol(dummy_params):
 
     del dummy_params["custom"]
     assert "custom" not in dummy_params
+
+
+class DummySubParameters(DummyParameters):
+    """Subclass without its own computed properties, like the deprecated Scan."""
+
+
+def test_subclass_invalidates_inherited_properties():
+    """Dependents must be found through the MRO, not only in the subclass itself."""
+    assert DummySubParameters._find_all_dependents(
+        DummySubParameters, "param1"
+    ) == DummyParameters._find_all_dependents(DummyParameters, "param1")
+
+    params = DummySubParameters(param1=5, param2=10, param3=1500.0, param4=5e6)
+    assert params.computed2[0] == 1
+    params.param1 = 3
+    assert params.computed1[0].shape == (3, 10)
+    params.computed2
+    assert params._computed2_count == 2
