@@ -1709,7 +1709,7 @@ class _FakeHfApi:
     def create_branch(self, repo_id, branch, repo_type):
         self.created_branches.append(branch)
 
-    def upload_large_folder(self, **kwargs):
+    def upload_folder(self, **kwargs):
         self.uploads.append(kwargs)
 
 
