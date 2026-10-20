@@ -51,7 +51,8 @@ each one to its own zea HDF5 file. Each file holds:
 Download and extract EchoXFlow as described on its
 `dataset page <https://huggingface.co/datasets/Ahus-AIM/EchoXFlow>`_. Then point
 the converter at the data root, which is the folder containing ``croissant.json``.
-The output is laid out as ``<dst>/<exam_id>/<recording_id>.hdf5``.
+The output is laid out as ``<dst>/data/<exam_id>/<recording_id>.hdf5``, next to
+a dataset card (``README.md``) and the EchoXFlow ``LICENSE``.
 
 .. code-block:: console
 
@@ -169,58 +170,160 @@ def build_metadata(record, bmode_stream, store) -> dict:
     return metadata
 
 
-def make_dataset_card(repo_id: str) -> str:
+def make_dataset_card(
+    repo_id: str,
+    min_frames: int,
+    min_fps: float,
+    num_recordings: int,
+    num_exams: int,
+    size_gb: float,
+) -> str:
     """Build a HuggingFace dataset card (``README.md``) for the converted dataset.
+
+    The card credits the original EchoXFlow dataset, carries its CC BY-NC-SA 4.0
+    license and lists what this subset leaves out. The counts, size and filter
+    settings come from the conversion run, so the card matches the uploaded files.
 
     The ``zea_repo_id`` front-matter field is what the output-directory ownership
     checks key on, so it must match *repo_id*.
     """
     return f"""\
 ---
-license: other
+license: cc-by-nc-sa-4.0
 zea_repo_id: {repo_id}
-task_categories:
-  - image-classification
+pretty_name: "EchoXFlow 2-D B-mode subset (zea format)"
 tags:
   - ultrasound
   - echocardiography
-  - 2d
   - cardiac
-  - medical
-pretty_name: "EchoXFlow 2-D B-mode (zea format)"
+  - medical-imaging
+  - beamspace
+  - ecg
+  - zea
+size_categories:
+  - 10K<n<100K
+source_datasets:
+  - Ahus-AIM/EchoXFlow
 ---
 
-# EchoXFlow - 2-D B-mode Ultrasound Dataset
+# EchoXFlow - 2-D B-mode subset (zea format)
 
-This dataset is a **zea-format** (HDF5) conversion of the EchoXFlow
-``{MODALITY}`` recordings, hosted at
-[{repo_id}](https://huggingface.co/datasets/{repo_id}).
+> **This is a derived, partial copy of [EchoXFlow](https://huggingface.co/datasets/Ahus-AIM/EchoXFlow)
+> by Stenhede et al. (Akershus University Hospital).** All credit for the data goes to the original
+> authors. Please cite their [paper](https://arxiv.org/abs/2605.05447) (see [Citation](#citation)) and
+> use the [original dataset](https://huggingface.co/datasets/Ahus-AIM/EchoXFlow) if you need the full data.
 
-## Conversion
+- **Paper:** [EchoXFlow: A Beamspace Echocardiography Dataset for Cardiac Motion, Flow, and Function](https://arxiv.org/abs/2605.05447) (NeurIPS 2026 Datasets and Benchmarks)
+- **Original dataset:** [Ahus-AIM/EchoXFlow](https://huggingface.co/datasets/Ahus-AIM/EchoXFlow)
+- **Code:** [github.com/Ahus-AIM/EchoXFlow](https://github.com/Ahus-AIM/EchoXFlow)
+- **License:** [CC BY-NC-SA 4.0](LICENSE), inherited from the original dataset
 
-This dataset was converted to zea format and uploaded using the
-[zea](https://github.com/tue-bmd/zea) data converter:
+EchoXFlow contains 666 routine-care echocardiographic examinations (35,377 recordings) stored in the
+scanner's native beamspace (polar) grid, with co-registered ECG, B-mode, Doppler and dense/sparse
+annotations. This repository re-packages **only the single-plane 2-D B-mode recordings** into the
+[zea](https://github.com/tue-bmd/zea) HDF5 format, so they can be loaded directly with zea.
+
+## What is included
+
+| | |
+|---|---|
+| **Recordings** | {num_recordings:,} single-plane 2-D B-mode recordings (of 26,356 in EchoXFlow) |
+| **Examinations** | {num_exams:,} |
+| **Selection** | frame rate > {min_fps:g} Hz and >= {min_frames} frames |
+| **Per file** | B-mode frames (`uint8`, beamspace / polar grid, not scan-converted), per-pixel Cartesian coordinates, frame timestamps, ECG (when available), exam id |
+| **Size** | ~{size_gb:.0f} GB |
+
+```
+data/
+  <exam_id>/
+    <recording_id>.hdf5
+```
+
+The exam id is stored as `metadata/subject/id`, but it identifies an **examination, not a patient**: one
+patient can have several exams. Do not use it for patient-disjoint splits; use `splits.csv` from the
+original dataset instead.
+
+## Limitations and differences from the original
+
+This is **not** the full EchoXFlow dataset. Compared to the original it is missing:
+
+- All other modalities: M-mode, dual-plane, triplane and 3-D B-mode, colour/tissue Doppler, pulsed- and continuous-wave Doppler.
+- Single-plane B-mode recordings with frame rate <= {min_fps:g} Hz or fewer than {min_frames} frames (e.g. probe-positioning or single-frame captures).
+- All annotations (speckle-tracking contours, 3-D LV meshes, sample volumes, measurements, spectral traces, QRS triggers).
+- Most recording metadata from the Zarr stores and `croissant.json` (e.g. `derived/` quantities, acquisition parameters beyond sector geometry, SHA-256 checksums).
+- `splits.csv` (patient-level five-fold split) and `view_classifier_probabilities.csv` (view labels). Use the files from the
+  [original repository](https://huggingface.co/datasets/Ahus-AIM/EchoXFlow) with the `exam_id` / `recording_id` from the file paths.
+
+The limitations of the original dataset also apply: single-centre, single-vendor data from a selected population. It is not
+representative of all institutions, vendors, protocols or patient subgroups, and it is not validated for clinical diagnosis,
+triage, treatment or prognosis.
+
+## Usage
+
+```python
+import zea
+
+path = "hf://{repo_id}/data/<exam_id>/<recording_id>.hdf5"
+with zea.File(path) as f:
+    image = f.tracks[0].data.image
+    frames = image.values[:]       # (n_frames, n_depth, n_angles), uint8, beamspace
+    coords = image.coordinates[:]  # (n_depth, n_angles, 3), Cartesian (x, y, z) in metres
+    ecg = f.metadata.ecg.samples[:]
+```
+
+The files were created with the zea converter (requires the [`echoxflow`](https://github.com/Ahus-AIM/EchoXFlow) package):
 
 ```bash
-zea convert echoxflow <src> <dst>
+zea convert echoxflow <echoxflow_data_root> <dst> --min-frames {min_frames} --min-fps {min_fps:g}
 ```
 
-## Dataset structure
+## License
 
-```
-<exam_id>/
-  <recording_id>.hdf5
-  ...
-```
+[CC BY-NC-SA 4.0](LICENSE), the same license as the original EchoXFlow dataset. You may share and adapt the data for
+**non-commercial** purposes, provided you give appropriate credit to the EchoXFlow authors, indicate changes, and
+distribute derivatives under the same license. Changes made here: the subset selection and format conversion described above.
 
-Each HDF5 file follows the [zea data format](https://github.com/tue-bmd/zea).
-"""
+## Citation
+
+If you use this data, cite the original EchoXFlow paper:
+
+```bibtex
+@inproceedings{{stenhede_2026_echoxflow,
+  title = {{EchoXFlow: A Beamspace Echocardiography Dataset for Cardiac Motion, Flow, and Function}},
+  author = {{Stenhede, Elias and Sulkowska, Joanna and Orstad, Eivind Bj{{\\o}}rkan and Schirmer, Henrik and Ranjbar, Arian}},
+  booktitle = {{Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track}},
+  year = {{2026}},
+  eprint = {{2605.05447}},
+  doi = {{10.48550/arXiv.2605.05447}},
+  url = {{https://arxiv.org/abs/2605.05447}}
+}}
+```
+"""  # noqa: E501
+
+
+def _copy_license(src: str | Path, dest_root: Path) -> None:
+    """Copy the EchoXFlow ``LICENSE`` next to the converted data.
+
+    The upstream download keeps ``LICENSE`` one level above the data root, so both
+    *src* and its parent are checked.
+    """
+    import shutil
+
+    for candidate in (Path(src) / "LICENSE", Path(src).parent / "LICENSE"):
+        if candidate.exists():
+            shutil.copy2(candidate, dest_root / "LICENSE")
+            return
+    log.warning(
+        "EchoXFlow LICENSE not found in the data root or its parent; add it to "
+        f"{dest_root} before uploading (CC BY-NC-SA 4.0 requires it)."
+    )
 
 
 def convert_echoxflow(args):
     """Convert EchoXFlow ``2d_brightness_mode`` recordings into zea HDF5 files.
 
-    Each qualifying recording is written to ``<dst>/<exam_id>/<recording_id>.hdf5``.
+    Each qualifying recording is written to ``<dst>/data/<exam_id>/<recording_id>.hdf5``.
+    A dataset card (``README.md``) and the EchoXFlow ``LICENSE`` are written to ``<dst>``.
 
     Usage::
 
@@ -273,7 +376,7 @@ def convert_echoxflow(args):
 
     converted = skipped = failed = 0
     for record in tqdm(records, desc="Converting", unit="rec"):
-        out_path = dest_root / record.exam_id / f"{record.recording_id}.hdf5"
+        out_path = dest_root / "data" / record.exam_id / f"{record.recording_id}.hdf5"
         if out_path.exists() and not args.overwrite:
             skipped += 1
             continue
@@ -319,7 +422,17 @@ def convert_echoxflow(args):
             log.error("No converted files exist; skipping upload.")
         return
 
-    write_dataset_card(dest_root, make_dataset_card(hf_repo_id))
+    hdf5_files = sorted((dest_root / "data").rglob("*.hdf5"))
+    card = make_dataset_card(
+        hf_repo_id,
+        min_frames=args.min_frames,
+        min_fps=args.min_fps,
+        num_recordings=len(hdf5_files),
+        num_exams=len({f.parent.name for f in hdf5_files}),
+        size_gb=sum(f.stat().st_size for f in hdf5_files) / 1e9,
+    )
+    write_dataset_card(dest_root, card)
+    _copy_license(data_root, dest_root)
 
     if getattr(args, "upload", False):
         assert args.revision, "revision must be provided when --upload is set."
