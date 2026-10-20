@@ -863,3 +863,22 @@ def test_setattr_looks_up_dependents_once(dummy_params, monkeypatch):
     assert calls == ["param1"]
     assert "computed1" not in dummy_params._cache
     assert "computed2" not in dummy_params._cache
+
+
+def test_dependents_cache_is_per_class():
+    """The memoised dependency graph lives on each class, so it is freed with the class."""
+    import gc
+    import weakref
+
+    class Temporary(DummyParameters):
+        pass
+
+    params = Temporary(param1=5, param2=10, param3=1500.0, param4=5e6)
+    params.param1 = 3  # populate the cache
+    assert "param1" in Temporary.__dict__["_dependents_cache"]
+    assert Temporary._dependents_cache is not DummyParameters._dependents_cache
+
+    ref = weakref.ref(Temporary)
+    del Temporary, params
+    gc.collect()
+    assert ref() is None

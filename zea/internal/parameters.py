@@ -181,6 +181,16 @@ class BaseParameters:
     # Subclasses must populate this; an empty mapping means "not defined".
     VALID_PARAMS: ClassVar[dict[str, dict[str, Any]]] = {}
 
+    # Memoised `_find_all_dependents` results: the dependency graph is fixed per class.
+    # Properties patched onto a class later are still recomputed correctly, because the
+    # cached-property wrapper also checks a hash of its leaf parameters on every access.
+    _dependents_cache: ClassVar[dict[str, frozenset[str]]] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Own dict per class, so it is freed together with the class
+        cls._dependents_cache = {}
+
     def __init__(self, **kwargs):
         super().__init__()
 
@@ -484,15 +494,17 @@ class BaseParameters:
         return self._class_dependents(target)
 
     @classmethod
-    @functools.cache
     def _class_dependents(cls, target):
-        """`_find_all_dependents`, memoised: the dependency graph is fixed per class.
+        """`_find_all_dependents`, memoised per class in `_dependents_cache`.
 
-        Every `__setattr__` invalidates through here, recursively, and the uncached
-        search rescans the class for each node -- which made `copy()` of a full
-        `Parameters` cost about a second.
+        Every `__setattr__` invalidates through here, and the uncached search rescans
+        the class for each node -- which made `copy()` of a full `Parameters` cost
+        about a second.
         """
-        return frozenset(cls._collect_dependents(target, set()))
+        cache = cls._dependents_cache
+        if target not in cache:
+            cache[target] = frozenset(cls._collect_dependents(target, set()))
+        return cache[target]
 
     @classmethod
     def _collect_dependents(cls, target, seen):
