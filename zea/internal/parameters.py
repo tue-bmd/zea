@@ -512,9 +512,7 @@ class BaseParameters:
 
     def _invalidate(self, key):
         """Invalidate a specific cached computed property and its dependencies."""
-        self._cache.pop(key, None)
-        self._dependency_versions.pop(key, None)
-        self._tensor_cache.pop(key, None)
+        self._drop_cached(key)
         self._invalidate_dependents(key)
 
     def _invalidate_dependents(self, changed_key):
@@ -522,8 +520,15 @@ class BaseParameters:
         Invalidate all cached computed properties that (directly or indirectly)
         depend on the changed_key.
         """
+        # The dependents are already transitive, so no need to recurse per dependent
         for key in self._find_all_dependents(changed_key):
-            self._invalidate(key)
+            self._drop_cached(key)
+
+    def _drop_cached(self, key):
+        """Drop the cached value of a single key, without touching its dependents."""
+        self._cache.pop(key, None)
+        self._dependency_versions.pop(key, None)
+        self._tensor_cache.pop(key, None)
 
     def _current_dependency_hash(self, key) -> str:
         """Compute a hash representing the current state of the dependencies of key.

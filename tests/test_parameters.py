@@ -846,3 +846,20 @@ def test_subclass_invalidates_inherited_properties():
     assert params.computed1[0].shape == (3, 10)
     params.computed2
     assert params._computed2_count == 2
+
+
+def test_setattr_looks_up_dependents_once(dummy_params, monkeypatch):
+    """The transitive dependent set is popped in one pass, not re-walked per dependent."""
+    calls = []
+    original = DummyParameters._find_all_dependents
+
+    def counting(self, target):
+        calls.append(target)
+        return original(self, target)
+
+    monkeypatch.setattr(DummyParameters, "_find_all_dependents", counting)
+    dummy_params.computed2  # populate computed1 and computed2
+    dummy_params.param1 = 3
+    assert calls == ["param1"]
+    assert "computed1" not in dummy_params._cache
+    assert "computed2" not in dummy_params._cache
