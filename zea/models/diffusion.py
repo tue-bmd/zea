@@ -364,6 +364,21 @@ class DiffusionModel(DeepGenerativeModel):
             for tracker in self._loss_trackers:
                 tracker.build()
 
+    def compile_from_config(self, config):
+        """Compile the model from a saved compile config.
+
+        Keras skips this, with a warning, for any model that overrides ``compile``.
+        The optimizer is built so the weights file's optimizer state loads into it;
+        an unbuilt one makes ``load_weights`` skip that state, with a warning.
+
+        Args:
+            config (dict): The serialized ``compile`` arguments, as returned by
+                ``get_compile_config``.
+        """
+        self.compile(**keras.saving.deserialize_keras_object(config))
+        if self.built:
+            self.optimizer.build(self.trainable_variables)
+
     def _training_losses(self, data, training: bool, seed=None):
         """Noise and image loss of one batch at random diffusion times.
 
