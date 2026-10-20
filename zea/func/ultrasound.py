@@ -554,6 +554,25 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
     return t_peak
 
 
+@deprecated(replacement="zea.func.ultrasound.compute_time_to_peak")
+def compute_time_to_peak_stack(waveforms, center_frequencies, waveform_sampling_frequency=250e6):
+    """Compute the time of the peak of each waveform in a stack of waveforms.
+
+    .. deprecated::
+        Use :func:`compute_time_to_peak`, which also accepts a stack of waveforms.
+
+    Args:
+        waveforms (ndarray): The waveforms of shape (n_waveforms, n_samples).
+        center_frequencies (ndarray): The center frequencies of the waveforms in Hz of shape
+            (n_waveforms,) or a scalar if all waveforms have the same center frequency.
+        waveform_sampling_frequency (float): The sampling frequency of the waveforms in Hz.
+
+    Returns:
+        ndarray: The time to peak for each waveform in seconds.
+    """
+    return compute_time_to_peak(waveforms, center_frequencies, waveform_sampling_frequency)
+
+
 def channels_to_analytic(data, axis):
     """Return the analytic signal (complex) from RF (``n_ch == 1``) or from
     two-channel I/Q (``n_ch == 2``) data.
