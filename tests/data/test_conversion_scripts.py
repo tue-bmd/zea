@@ -1166,6 +1166,40 @@ def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
     verify_converted_echoxflow_test_data(dst, expected)
 
 
+def test_echoxflow_upload_requires_license(tmp_path, monkeypatch):
+    """Uploading must fail before any upload when the EchoXFlow LICENSE is missing."""
+    import zea.data.convert.echoxflow as echoxflow
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echoxflow_test_data(src, monkeypatch)  # no LICENSE next to src
+    uploaded = []
+    monkeypatch.setattr(echoxflow, "upload_echoxflow", lambda *a, **k: uploaded.append(a))
+
+    args = tyro.cli(  # ty: ignore[no-matching-overload]
+        Dataset, args=["echoxflow", str(src), str(dst), "--upload", "--revision", "test"]
+    )
+    with pytest.raises(FileNotFoundError, match="LICENSE"):
+        echoxflow.convert_echoxflow(args)
+    assert not uploaded
+
+
+def test_echoxflow_rejects_legacy_layout(tmp_path, monkeypatch):
+    """HDF5 files outside <dst>/data (old layout) must be rejected, not mixed in."""
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echoxflow_test_data(src, monkeypatch)
+    (dst / "exam_A").mkdir(parents=True)
+    (dst / "exam_A" / "rec_0.hdf5").touch()
+    (dst / "README.md").write_text("---\nzea_repo_id: zeahub/echoxflow\n---\n")
+
+    args = tyro.cli(Dataset, args=["echoxflow", str(src), str(dst)])  # ty: ignore[no-matching-overload]
+    with pytest.raises(RuntimeError, match="older converter layout"):
+        convert_echoxflow(args)
+
+
 def test_echoxflow_missing_package_raises(monkeypatch):
     """convert_echoxflow must raise a clear ImportError when echoxflow is absent."""
     from zea.data.convert.echoxflow import convert_echoxflow

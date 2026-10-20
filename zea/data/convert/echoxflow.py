@@ -301,22 +301,26 @@ If you use this data, cite the original EchoXFlow paper:
 """  # noqa: E501
 
 
-def _copy_license(src: str | Path, dest_root: Path) -> None:
+def _copy_license(src: str | Path, dest_root: Path) -> bool:
     """Copy the EchoXFlow ``LICENSE`` next to the converted data.
 
     The upstream download keeps ``LICENSE`` one level above the data root, so both
     *src* and its parent are checked.
+
+    Returns:
+        ``True`` if the license was copied, ``False`` if it was not found.
     """
     import shutil
 
     for candidate in (Path(src) / "LICENSE", Path(src).parent / "LICENSE"):
         if candidate.exists():
             shutil.copy2(candidate, dest_root / "LICENSE")
-            return
+            return True
     log.warning(
         "EchoXFlow LICENSE not found in the data root or its parent; add it to "
         f"{dest_root} before uploading (CC BY-NC-SA 4.0 requires it)."
     )
+    return False
 
 
 def convert_echoxflow(args):
@@ -355,6 +359,16 @@ def convert_echoxflow(args):
     hf_repo_id = getattr(args, "hf_repo_id", "") or _ECHOXFLOW_HF_REPO_ID
 
     check_output_dir_ownership(dest_root, hf_repo_id)
+
+    # Older versions wrote <dst>/<exam_id>/*.hdf5. Uploading the whole folder would
+    # then publish both layouts, so refuse to mix them instead of migrating.
+    data_dir = dest_root / "data"
+    stray = [p for p in dest_root.rglob("*.hdf5") if data_dir not in p.parents]
+    if stray:
+        raise RuntimeError(
+            f"Found {len(stray)} HDF5 files outside {data_dir} (e.g. {stray[0]}), from an "
+            "older converter layout. Move them under data/ or use a fresh output folder."
+        )
 
     catalog = load_croissant(croissant_path)
     log.info(f"Catalog loaded: {len(catalog.recordings)} recordings")
@@ -422,7 +436,7 @@ def convert_echoxflow(args):
             log.error("No converted files exist; skipping upload.")
         return
 
-    hdf5_files = sorted((dest_root / "data").rglob("*.hdf5"))
+    hdf5_files = sorted(data_dir.rglob("*.hdf5"))
     card = make_dataset_card(
         hf_repo_id,
         min_frames=args.min_frames,
@@ -432,10 +446,15 @@ def convert_echoxflow(args):
         size_gb=sum(f.stat().st_size for f in hdf5_files) / 1e9,
     )
     write_dataset_card(dest_root, card)
-    _copy_license(data_root, dest_root)
+    has_license = _copy_license(data_root, dest_root) or (dest_root / "LICENSE").exists()
 
     if getattr(args, "upload", False):
         assert args.revision, "revision must be provided when --upload is set."
+        if not has_license:
+            raise FileNotFoundError(
+                f"Refusing to upload without the EchoXFlow LICENSE in {dest_root}; "
+                "CC BY-NC-SA 4.0 requires it to accompany the data."
+            )
         upload_echoxflow(dest_root, revision=args.revision, repo_id=hf_repo_id)
 
 
