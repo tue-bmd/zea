@@ -1103,33 +1103,40 @@ def verify_converted_echoxflow_test_data(dst, expected):
 
     for exam_id, recs in expected.items():
         for rec in recs:
-            h5_file = dst / exam_id / f"{rec}.hdf5"
+            h5_file = dst / "data" / exam_id / f"{rec}.hdf5"
             assert h5_file.exists(), f"Missing converted file: {h5_file}"
             with File(h5_file, "r") as f:
                 assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
                 image = f.data.image.values[:]
                 assert image.ndim == 3, f"Expected (F, H, W) image, got {image.shape}"
                 assert image.dtype == np.uint8, f"Expected uint8 image in {h5_file}"
-                # subject.id is mapped from exam_id and enables subject-wise splits.
+                # subject.id is mapped from exam_id (an exam, not a patient id).
                 assert "metadata/subject" in f, f"Missing 'metadata/subject' in {h5_file}"
                 f.validate()
 
     # exam_A/rec_0 has geometry + ecg -> coordinates and an ecg signal must be present.
-    with File(dst / "exam_A" / "rec_0.hdf5", "r") as f:
+    with File(dst / "data" / "exam_A" / "rec_0.hdf5", "r") as f:
         assert "coordinates" in f["data/image"], "Expected per-pixel coordinates for rec_0"
         assert "metadata/ecg" in f, "Expected ecg metadata for rec_0"
 
     # exam_B/rec_1 has neither -> no coordinates, no ecg.
-    with File(dst / "exam_B" / "rec_1.hdf5", "r") as f:
+    with File(dst / "data" / "exam_B" / "rec_1.hdf5", "r") as f:
         assert "coordinates" not in f["data/image"], "rec_1 should have no coordinates"
         assert "metadata/ecg" not in f, "rec_1 should have no ecg metadata"
 
     # The conversion writes a dataset card stamped with the default zeahub repo id.
     readme = dst / "README.md"
     assert readme.exists(), "Missing dataset card README.md"
-    assert "zea_repo_id: zeahub/echoxflow" in readme.read_text(), (
+    card = readme.read_text()
+    assert "zea_repo_id: zeahub/echoxflow" in card, (
         "Dataset card must declare the default zea_repo_id"
     )
+    assert "license: cc-by-nc-sa-4.0" in card
+    assert "| **Recordings** | 2 single-plane" in card
+    assert "@inproceedings{stenhede_2026_echoxflow," in card
+
+    # The upstream LICENSE (one level above the data root) is copied next to the data.
+    assert (dst / "LICENSE").read_text() == "CC BY-NC-SA 4.0 test license"
 
 
 @pytest.mark.heavy
@@ -1150,11 +1157,47 @@ def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
     src.mkdir()
 
     expected = create_echoxflow_test_data(src, monkeypatch)
+    # Upstream keeps LICENSE one level above the data root.
+    (base / "LICENSE").write_text("CC BY-NC-SA 4.0 test license")
 
     args = tyro.cli(Dataset, args=["echoxflow", str(src), str(dst)])  # ty: ignore[no-matching-overload]
     convert_echoxflow(args)
 
     verify_converted_echoxflow_test_data(dst, expected)
+
+
+def test_echoxflow_upload_requires_license(tmp_path, monkeypatch):
+    """Uploading must fail before any upload when the EchoXFlow LICENSE is missing."""
+    import zea.data.convert.echoxflow as echoxflow
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echoxflow_test_data(src, monkeypatch)  # no LICENSE next to src
+    uploaded = []
+    monkeypatch.setattr(echoxflow, "upload_echoxflow", lambda *a, **k: uploaded.append(a))
+
+    args = tyro.cli(  # ty: ignore[no-matching-overload]
+        Dataset, args=["echoxflow", str(src), str(dst), "--upload", "--revision", "test"]
+    )
+    with pytest.raises(FileNotFoundError, match="LICENSE"):
+        echoxflow.convert_echoxflow(args)
+    assert not uploaded
+
+
+def test_echoxflow_rejects_legacy_layout(tmp_path, monkeypatch):
+    """HDF5 files outside <dst>/data (old layout) must be rejected, not mixed in."""
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echoxflow_test_data(src, monkeypatch)
+    (dst / "exam_A").mkdir(parents=True)
+    (dst / "exam_A" / "rec_0.hdf5").touch()
+    (dst / "README.md").write_text("---\nzea_repo_id: zeahub/echoxflow\n---\n")
+
+    args = tyro.cli(Dataset, args=["echoxflow", str(src), str(dst)])  # ty: ignore[no-matching-overload]
+    with pytest.raises(RuntimeError, match="older converter layout"):
+        convert_echoxflow(args)
 
 
 def test_echoxflow_missing_package_raises(monkeypatch):
@@ -1666,7 +1709,7 @@ class _FakeHfApi:
     def create_branch(self, repo_id, branch, repo_type):
         self.created_branches.append(branch)
 
-    def upload_large_folder(self, **kwargs):
+    def upload_folder(self, **kwargs):
         self.uploads.append(kwargs)
 
 
