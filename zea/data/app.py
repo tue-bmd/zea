@@ -1344,7 +1344,7 @@ def run_checks(
         return "".join(lines), image
 
     eff_config_rev = config_revision if config_revision is not None else dataset_revision
-    config_hf_kwargs = {"revision": eff_config_rev} if eff_config_rev else {}
+    eff_config_rev = eff_config_rev or None  # the UI sends "" for "no revision"
 
     # HF token check
     if _is_hf(dataset_path) or _is_hf(config_path):
@@ -1397,7 +1397,7 @@ def run_checks(
         yield _emit(_html_info(f"Loading config {_src}…"))
         config_loaded = False
         try:
-            config = Config.from_path(config_path, **config_hf_kwargs)
+            config = Config.from_path(config_path, revision=eff_config_rev)
             config_params = _get_config_parameters(config)
             config_loaded = True
         except Exception as exc:
@@ -1412,7 +1412,9 @@ def run_checks(
             # 3. Build pipeline
             yield _emit(_html_info(f"Building pipeline {_src}…"))
             try:
-                pipeline = Pipeline.from_path(config_path, with_batch_dim=False, **config_hf_kwargs)
+                pipeline = Pipeline.from_path(
+                    config_path, with_batch_dim=False, revision=eff_config_rev
+                )
             except Exception as exc:
                 yield _replace_last(
                     _html_warn(
