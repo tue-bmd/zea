@@ -1985,8 +1985,10 @@ def test_decode_hadamard():
         tx_apodizations=tx_apodizations_synthetic_aperture, **shared_kwargs
     )[None]
     raw_data_decoded, tx_apodizations_decoded = decode_hadamard(raw_data_encoded, hadamard_matrix)
+    # GPU-tolerant: float32 matmul runs in TF32 on Ampere+ GPUs (~1e-3 error here), while a
+    # flipped or swapped Hadamard row deviates by ~1, so 1e-2 still catches decoding bugs.
     np.testing.assert_allclose(
-        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-5, atol=1e-5
+        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-2, atol=1e-2
     )
     np.testing.assert_array_equal(tx_apodizations_decoded, np.eye(hadamard_size))
 
