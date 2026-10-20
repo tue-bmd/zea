@@ -13,7 +13,10 @@ each one to its own zea HDF5 file. Each file holds:
 * the Cartesian ``(x, y, z)`` position of every pixel, from the sector geometry,
 * the frame timestamps,
 * the ECG, if the recording has one,
-* the exam ID, stored as the subject ID so you can split by subject.
+* the exam ID, stored as ``metadata/subject/id``. It groups recordings by
+  examination, not by patient: one patient can have several exams, so do not
+  use it for patient-disjoint splits. Use ``splits.csv`` from the original
+  dataset for that.
 
 .. admonition:: Limitations
 
@@ -139,7 +142,8 @@ def sector_coordinates(geometry, height: int, width: int) -> np.ndarray | None:
 def build_metadata(record, bmode_stream, store) -> dict:
     """Collect EchoXFlow metadata that maps onto zea's MetadataSpec.
 
-    - subject.id  <- exam_id (enables subject-wise splits)
+    - subject.id  <- exam_id (groups by examination, *not* by patient; use the
+      original ``splits.csv`` for patient-disjoint folds)
     - ecg         <- the recording's ECG signal, if present (Signal1D)
     """
     metadata: dict = {"subject": {"id": record.exam_id, "type": "human"}}
