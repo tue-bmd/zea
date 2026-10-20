@@ -174,7 +174,11 @@ class Parameters(BaseParameters):
     """Width of each transducer element [m]."""
 
     element_height: float
-    """Height (elevation) of each transducer element [m]."""
+    """Height (elevation) of each transducer element [m]. The simulators default it to an
+    eighth of the width of a 1D probe."""
+
+    elevation_focus: float
+    """Focal distance of the fixed elevation lens [m]."""
 
     selected_transmits: list[int] | None
     """Indices of the currently selected transmit events, or ``None`` when not yet
@@ -327,6 +331,7 @@ class Parameters(BaseParameters):
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
+        "element_normals": {"dtype": (type(None), np.ndarray), "default": None},
     }
 
     # Add some defaults that are not stored in a file
@@ -371,6 +376,24 @@ class Parameters(BaseParameters):
             return np.float32(fit_curved_probe_radius(probe_geometry))
         except ValueError:  # not a curved array
             return np.float32(0.0)
+
+    @cache_with_dependencies("probe_geometry")
+    def element_normals(self):
+        """Outward unit normal of each element of shape (n_el, 3), used by the simulator.
+
+        Derived from :attr:`probe_geometry` with
+        :func:`~zea.beamform.geometry.compute_element_normals`: +z for flat arrays and the
+        radial normal for curved ones. Set it explicitly for other geometries, such as a
+        tilted array.
+        """
+        value = self._params.get("element_normals")
+        if value is not None:
+            return value
+
+        probe_geometry = self._params.get("probe_geometry")
+        if probe_geometry is None:
+            return None
+        return ops.convert_to_numpy(compute_element_normals(ops.convert_to_tensor(probe_geometry)))
 
     @cache_with_dependencies(
         "xlims",
@@ -1012,6 +1035,16 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_two_way(self):
+        """Two-way transmit waveforms of shape (n_tx, n_samples_two_way), sampled at 250 MHz,
+        or None. Sliced by ``selected_transmits`` when there is one per transmit."""
+        value = self._params.get("waveforms_two_way")
+        if value is None or value.shape[0] != self.n_tx_total:
+            return value
+
+        return value[self.selected_transmits]
+
     @cache_with_dependencies("waveforms_one_way", "waveforms_two_way")
     def n_waveforms(self):
         """The number of unique transmit waveforms."""
@@ -1034,16 +1067,17 @@ class Parameters(BaseParameters):
         it defaults to ``1 / center_frequency``.
         """
         t_peak = self._params.get("t_peak")
-        if t_peak is None:
-            waveforms = self._params.get("waveforms_two_way")
-            if waveforms is not None:
-                t_peak = ops.convert_to_numpy(
-                    compute_time_to_peak_stack(waveforms, self.center_frequency)
-                )
-            else:
-                t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
+        if t_peak is not None:
+            return t_peak[self.selected_transmits]
 
-        return t_peak[self.selected_transmits]
+        # Already sliced by selected_transmits when there is one waveform per transmit.
+        waveforms = self.waveforms_two_way
+        if waveforms is None:
+            return np.full(self.n_tx, 1 / self.center_frequency)
+        t_peak = ops.convert_to_numpy(compute_time_to_peak_stack(waveforms, self.center_frequency))
+        if t_peak.shape[0] == 1:
+            t_peak = np.repeat(t_peak, self.n_tx)
+        return t_peak
 
     @cache_with_dependencies("selected_transmits")
     def time_to_next_transmit(self):

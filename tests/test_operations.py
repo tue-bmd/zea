@@ -29,7 +29,7 @@ from zea.func.ultrasound import (
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
-from zea.simulator import simulate_rf
+from zea.simulator import simulate_rf, transmit_pulse
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
 
@@ -353,7 +353,10 @@ def test_up_and_down_conversion(factor, batch_size):
     """Test rf2iq and iq2rf in sequence.
 
     Tolerance dependent on downsampling factor (no anti-alias filter in downsample, so quite lossy
-    at high factors). Tolerance is defined relative to the RF peak.
+    at high factors). Tolerance is defined relative to the RF peak. The transmit pulse is a
+    4-cycle burst, narrower than the 1-cycle default, so that it fits the decimated band and the
+    test measures the conversion ops rather than the width of the transmit pulse. It is given as
+    the two-way waveform of a zea file, from the trigger, so that t_peak derives from it.
     """
     tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
 
@@ -398,6 +401,7 @@ def test_up_and_down_conversion(factor, batch_size):
         attenuation_coef=0.7,
         n_ch=1,
         selected_transmits="all",
+        waveforms_two_way=np.stack([transmit_pulse(3.125e6, n_period=4.0).waveform(True)] * n_tx),
     )
 
     # use pipeline here so it is easy to propagate the scan parameters
