@@ -837,8 +837,8 @@ class DummySubParameters(DummyParameters):
 def test_subclass_invalidates_inherited_properties():
     """Dependents must be found through the MRO, not only in the subclass itself."""
     assert DummySubParameters._find_all_dependents(
-        DummySubParameters, "param1"
-    ) == DummyParameters._find_all_dependents(DummyParameters, "param1")
+        "param1"
+    ) == DummyParameters._find_all_dependents("param1")
 
     params = DummySubParameters(param1=5, param2=10, param3=1500.0, param4=5e6)
     assert params.computed2[0] == 1
@@ -853,11 +853,11 @@ def test_setattr_looks_up_dependents_once(dummy_params, monkeypatch):
     calls = []
     original = DummyParameters._find_all_dependents
 
-    def counting(self, target):
+    def counting(target):
         calls.append(target)
-        return original(self, target)
+        return original(target)
 
-    monkeypatch.setattr(DummyParameters, "_find_all_dependents", counting)
+    monkeypatch.setattr(DummyParameters, "_find_all_dependents", staticmethod(counting))
     dummy_params.computed2  # populate computed1 and computed2
     dummy_params.param1 = 3
     assert calls == ["param1"]

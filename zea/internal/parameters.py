@@ -486,20 +486,15 @@ class BaseParameters:
                         f"{cls.__name__} class definition."
                     )
 
-    def _find_all_dependents(self, target):
+    @classmethod
+    def _find_all_dependents(cls, target):
         """
         Find all computed properties that depend (directly or indirectly) on the target parameter
-        with a global search. Returns a set of property names that depend on the target.
-        """
-        return self._class_dependents(target)
+        with a global search. Returns a frozenset of property names that depend on the target.
 
-    @classmethod
-    def _class_dependents(cls, target):
-        """`_find_all_dependents`, memoised per class in `_dependents_cache`.
-
-        Every `__setattr__` invalidates through here, and the uncached search rescans
-        the class for each node -- which made `copy()` of a full `Parameters` cost
-        about a second.
+        Memoised per class in `_dependents_cache`: every `__setattr__` invalidates through
+        here, and the uncached search rescans the class for each node -- which made `copy()`
+        of a full `Parameters` cost about a second.
         """
         cache = cls._dependents_cache
         if target not in cache:
