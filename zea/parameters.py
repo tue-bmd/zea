@@ -590,7 +590,9 @@ class Parameters(BaseParameters):
 
         f_number = float(self.f_number)
         half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
-        normals = np.asarray(compute_element_normals(ops.convert_to_tensor(self.probe_geometry)))
+        normals = ops.convert_to_numpy(
+            compute_element_normals(ops.convert_to_tensor(self.probe_geometry))
+        )
         tilt = np.arctan2(normals[:, 0], normals[:, 2])
 
         # Outermost accepted ray of each edge element.
