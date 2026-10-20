@@ -1,24 +1,71 @@
-"""Convert EchoXFlow ``2d_brightness_mode`` recordings to the zea HDF5 format.
+"""Convert the EchoXFlow dataset to the zea format.
 
-Finds all recordings with at least ``--min-frames`` B-mode frames and a frame rate
-above ``--min-fps``, then writes each as a zea-format HDF5 file under ``dst``,
-laid out as ``<dst>/<exam_id>/<recording_id>.hdf5``.
+`EchoXFlow <https://github.com/Ahus-AIM/EchoXFlow>`_ is a public echocardiography
+dataset from Akershus University Hospital: 666 routine-care examinations with
+35,377 recordings, stored in the scanner's native beamspace (polar) grid before
+scan conversion. It covers 1-D, 2-D and 3-D B-mode, colour, tissue and spectral
+Doppler, with a co-registered ECG and dense and sparse annotations.
 
-Usage::
+This converter only takes the **single-plane 2-D B-mode** recordings and writes
+each one to its own zea HDF5 file. Each file holds:
 
-    zea convert echoxflow <src> <dst>
-    zea convert echoxflow <src> <dst> --limit 2
+* the B-mode frames (``uint8``, still on the beamspace grid),
+* the Cartesian ``(x, y, z)`` position of every pixel, from the sector geometry,
+* the frame timestamps,
+* the ECG, if the recording has one,
+* the exam ID, stored as the subject ID so you can split by subject.
 
-``src`` is the EchoXFlow data root (e.g. ``/data/EchoXFlow/data``) containing a
-``croissant.json`` catalog. Reading EchoXFlow recordings requires the optional
-``echoxflow`` package (https://github.com/Ahus-AIM/EchoXFlow), which is not
-published on PyPI; install it directly from GitHub::
+.. admonition:: Limitations
 
-    pip install "echoxflow @ git+https://github.com/Ahus-AIM/EchoXFlow.git"
+   The result is a filtered subset of EchoXFlow, not the full dataset:
 
-EchoXFlow declares ``requires-python = ">=3.13"``, but the reader also runs on
-Python 3.11/3.12 (only pip's metadata check blocks it); there, append
-``--ignore-requires-python`` to the command above.
+   * Other modalities (M-mode, multi-plane and 3-D B-mode, all Doppler) are skipped.
+   * Recordings with fewer than ``--min-frames`` frames (default 10) or a frame rate
+     of ``--min-fps`` or lower (default 30 Hz) are skipped. This drops
+     probe-positioning sweeps and single-frame captures.
+   * Annotations, most recording metadata, the patient-level splits
+     (``splits.csv``) and the view labels are not converted. You can join them
+     back from the original dataset using the exam and recording IDs in the
+     output paths.
+
+.. admonition:: License
+
+   CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+   Non-commercial use only. Converted data must be shared under the same
+   license, with credit to the EchoXFlow authors.
+
+.. citation:: stenhede2026echoxflow
+
+.. rubric:: Links
+
+* `Original dataset on Hugging Face <https://huggingface.co/datasets/Ahus-AIM/EchoXFlow>`_
+* `EchoXFlow code <https://github.com/Ahus-AIM/EchoXFlow>`_
+* `Converted dataset on Hugging Face <https://huggingface.co/datasets/zeahub/echoxflow>`_
+
+.. rubric:: Usage
+
+Download and extract EchoXFlow as described on its
+`dataset page <https://huggingface.co/datasets/Ahus-AIM/EchoXFlow>`_. Then point
+the converter at the data root, which is the folder containing ``croissant.json``.
+The output is laid out as ``<dst>/<exam_id>/<recording_id>.hdf5``.
+
+.. code-block:: console
+
+   zea convert echoxflow /data/EchoXFlow/data ./output
+   zea convert echoxflow /data/EchoXFlow/data ./output --limit 2
+
+.. note::
+
+   Reading EchoXFlow needs the ``echoxflow`` package. It is not on PyPI, so
+   install it from GitHub:
+
+   .. code-block:: console
+
+      pip install "echoxflow @ git+https://github.com/Ahus-AIM/EchoXFlow.git"
+
+   The package declares Python >= 3.13, but the reader also works on 3.11 and
+   3.12. On those versions, add ``--ignore-requires-python`` to the command.
 """
 
 import sys
