@@ -176,7 +176,7 @@ def compute_pfield(
     # Angle between the normal to the transducer and the line joining
     # the point and the transducer
     epsilon = keras.config.epsilon()
-    theta = ops.arcsin(ops.clip(delta_x / distance, -1.0, 1.0)) - element_theta
+    theta = ops.arcsin(ops.clip(delta_x / (distance + epsilon), -1.0, 1.0)) - element_theta
 
     # Directivity of a sub-element. Frequency-independent, so it is computed once here
     # rather than inside the (batched, per-frequency) loop below.
