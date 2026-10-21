@@ -1,4 +1,4 @@
-"""Test the code examples in docs/source/getting-started.rst.
+"""Test the code examples in docs/source/getting-started.rst and README.md.
 
 Not using doctest: these snippets require network access and a full ML
 backend (HuggingFace data + pretrained weights), so they are marked
@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 RST_PATH = Path("docs/source/getting-started.rst")
+README_PATH = Path("README.md")
 
 
 def _extract_python_blocks(path):
@@ -51,6 +52,11 @@ def _extract_python_blocks(path):
     return blocks
 
 
+def _extract_markdown_python_blocks(path):
+    """Return all fenced ``python`` blocks from a Markdown file."""
+    return re.findall(r"^```python\n(.*?)^```", path.read_text(), flags=re.MULTILINE | re.DOTALL)
+
+
 @pytest.mark.heavy
 def test_getting_started_snippets():
     """Execute the first two Python code blocks from getting-started.rst together."""
@@ -59,3 +65,14 @@ def test_getting_started_snippets():
     combined = "\n\n".join(blocks[:2])
     assert combined.strip(), "Extracted Python snippets are empty"
     exec(combined, {})  # noqa: S102
+
+
+@pytest.mark.heavy
+def test_readme_snippet(tmp_path, monkeypatch):
+    """Execute the quick-start snippet from README.md in a temporary directory."""
+    blocks = _extract_markdown_python_blocks(README_PATH.resolve())
+    assert len(blocks) == 1, "Expected exactly one Python code block in README.md"
+    # the snippet writes bmode.png to the working directory; tmp_path gets cleaned up
+    monkeypatch.chdir(tmp_path)
+    exec(blocks[0], {})  # noqa: S102
+    assert (tmp_path / "bmode.png").is_file()
