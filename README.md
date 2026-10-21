@@ -6,15 +6,15 @@
 <p align="center"><em>A Toolbox for Cognitive Ultrasound Imaging</em></p>
 
 <p align="center">
-  <a href="https://pypi.org/project/zea/"><img src="https://img.shields.io/pypi/v/zea" alt="PyPI version"></a>
-  <a href="https://github.com/tue-bmd/zea/actions/workflows/tests.yaml"><img src="https://github.com/tue-bmd/zea/actions/workflows/tests.yaml/badge.svg" alt="Continuous integration"></a>
-  <a href="https://zea.readthedocs.io/en/latest/?badge=latest"><img src="https://img.shields.io/readthedocs/zea" alt="Documentation Status"></a>
-  <a href="https://codecov.io/gh/tue-bmd/zea"><img src="https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg" alt="codecov"></a>
-  <a href="https://github.com/tue-bmd/zea/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tue-bmd/zea" alt="License"></a>
-  <br>
-  <a href="https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d"><img src="https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d/status.svg" alt="JOSS"></a>
-  <a href="https://arxiv.org/abs/2512.01433"><img src="https://img.shields.io/badge/arXiv-B31B1B?style=flat&logo=arXiv&logoColor=white" alt="arXiv"></a>
-  <a href="https://huggingface.co/zeahub"><img src="https://img.shields.io/badge/Hugging%20Face-FFD21E?logo=huggingface&logoColor=black" alt="Hugging Face"></a>
+  <a href="https://pypi.org/project/zea/"><img src="https://img.shields.io/pypi/v/zea?logo=pypi&logoColor=white&labelColor=56395B&color=FBB53E" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/zea/"><img src="https://img.shields.io/pypi/pyversions/zea?logo=python&logoColor=white&labelColor=56395B&color=FBB53E" alt="Python versions"></a>
+  <a href="https://github.com/tue-bmd/zea/actions/workflows/tests.yaml"><img src="https://img.shields.io/github/actions/workflow/status/tue-bmd/zea/tests.yaml?branch=main&label=tests&logo=githubactions&logoColor=white&labelColor=56395B" alt="Tests"></a>
+  <a href="https://zea.readthedocs.io/en/latest/?badge=latest"><img src="https://img.shields.io/readthedocs/zea?logo=readthedocs&logoColor=white&labelColor=56395B" alt="Documentation Status"></a>
+  <a href="https://codecov.io/gh/tue-bmd/zea"><img src="https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/tue-bmd/zea/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tue-bmd/zea?labelColor=56395B&color=FBB53E" alt="License"></a>
+  <a href="https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d"><img src="https://img.shields.io/badge/JOSS-10.21105%2Fjoss.09881-FBB53E?labelColor=56395B" alt="JOSS"></a>
+  <a href="https://arxiv.org/abs/2512.01433"><img src="https://img.shields.io/badge/arXiv-2512.01433-B31B1B?logo=arxiv&logoColor=white&labelColor=56395B" alt="arXiv"></a>
+  <a href="https://huggingface.co/zeahub"><img src="https://img.shields.io/badge/Hugging%20Face-zeahub-FBB53E?logo=huggingface&logoColor=white&labelColor=56395B" alt="Hugging Face"></a>
   <a href="https://github.com/tue-bmd/zea/stargazers"><img src="https://img.shields.io/github/stars/tue-bmd/zea?style=social" alt="GitHub stars"></a>
 </p>
 
