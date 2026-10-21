@@ -77,12 +77,24 @@ The [Getting Started](https://zea.readthedocs.io/en/latest/getting-started.html)
 
 ## Core modules
 
-| | |
-|---|---|
-| 🔧 **[Pipeline](https://zea.readthedocs.io/en/latest/pipeline.html)** | Flexible, differentiable signal processing and image reconstruction, written in your favorite deep learning framework. |
-| 💾 **[Data](https://zea.readthedocs.io/en/latest/data-acquisition.html)** | Loading tools for ultrasound data and acquisition parameters, designed for deep learning workflows. Datasets on Hugging Face are streamed, so only the frames you read are fetched. |
-| 🧠 **[Models](https://zea.readthedocs.io/en/latest/models.html)** | Pretrained models for ultrasound image and signal processing, hosted on [Hugging Face](https://huggingface.co/zeahub). |
-| 🎯 **[Agent](https://zea.readthedocs.io/en/latest/agent.html)** | Action selection for cognitive ultrasound, with flexible transmit and acquisition design: an action decides what to acquire next, such as which scan lines to fire. |
+<table>
+  <tr>
+    <td nowrap>🔧&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/pipeline.html">Pipeline</a></b></td>
+    <td>Flexible, differentiable signal processing and image reconstruction, written in your favorite deep learning framework.</td>
+  </tr>
+  <tr>
+    <td nowrap>💾&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/data-acquisition.html">Data</a></b></td>
+    <td>Loading tools for ultrasound data and acquisition parameters, designed for deep learning workflows. Datasets on Hugging Face are streamed, so only the frames you read are fetched.</td>
+  </tr>
+  <tr>
+    <td nowrap>🧠&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/models.html">Models</a></b></td>
+    <td>Pretrained models for ultrasound image and signal processing, hosted on <a href="https://huggingface.co/zeahub">Hugging Face</a>.</td>
+  </tr>
+  <tr>
+    <td nowrap>🎯&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/agent.html">Agent</a></b></td>
+    <td>Action selection for cognitive ultrasound, with flexible transmit and acquisition design: an action decides what to acquire next, such as which scan lines to fire.</td>
+  </tr>
+</table>
 
 Read the [About](https://zea.readthedocs.io/en/latest/about.html) page for the motivation behind `zea` and the [research](https://zea.readthedocs.io/en/latest/about.html#papers) it supports.
 
