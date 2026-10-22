@@ -162,6 +162,7 @@ def save_video(images, filename, fps=20, **kwargs):
         fps (int): Frames per second of rendered format.
         **kwargs: Additional keyword arguments passed to the specific save function.
             For GIF and mp4 files, this includes `shared_color_palette` (bool).
+            For GIF files, `transparent=True` keeps the alpha channel of RGBA images.
 
     Raises:
         ValueError: If the file extension is not supported.
@@ -178,7 +179,7 @@ def save_video(images, filename, fps=20, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def save_to_gif(images, filename, fps=20, shared_color_palette=True, loop=0):
+def save_to_gif(images, filename, fps=20, shared_color_palette=True, transparent=False, loop=0):
     """Saves a sequence of images to a GIF file.
 
     .. note::
@@ -200,8 +201,23 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True, loop=0):
         loop (int, optional): Number of times to repeat after the first play.
             Defaults to 0, which loops forever. Pass None to write no loop
             extension at all, so the GIF plays once and stops on the last frame.
+        transparent (bool, optional): If True, keeps the alpha channel of RGBA
+            images as GIF transparency. GIF only supports binary transparency,
+            so pixels with alpha < 128 become fully transparent and all others
+            fully opaque. One palette entry is reserved for the transparent
+            color. Requires RGBA input. Defaults to False.
 
     """
+    opaque_masks = None
+    if transparent:
+        images = np.asarray(images)
+        if images.ndim != 4 or images.shape[-1] != 4:
+            raise ValueError(
+                "transparent=True requires RGBA images of shape "
+                f"(n_frames, height, width, 4), got {images.shape}."
+            )
+        opaque_masks = images[..., 3] >= 128
+
     images = preprocess_for_saving(images)
 
     if fps > 50:
@@ -212,10 +228,13 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True, loop=0):
 
     pillow_imgs = [Image.fromarray(img) for img in images]
 
+    # Reserve the last palette index for transparent pixels
+    palette_size = 255 if transparent else 256
+
     if shared_color_palette:
         # Apply the same palette to all frames without dithering for consistent color mapping
         global_palette = compute_global_palette_by_histogram(
-            pillow_imgs, bits_per_channel=5, palette_size=256
+            pillow_imgs, bits_per_channel=5, palette_size=palette_size
         )
 
         # Apply the same palette to all frames without dithering
@@ -226,6 +245,17 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True, loop=0):
             )
             for img in pillow_imgs
         ]
+
+    transparency_kwargs = {}
+    if opaque_masks is not None:
+        transparent_index = palette_size
+        pillow_imgs = [
+            _apply_gif_transparency(img, mask, palette_size, transparent_index)
+            for img, mask in zip(pillow_imgs, opaque_masks)
+        ]
+        # disposal=2 clears each frame to the background before drawing the next,
+        # otherwise transparent pixels would show the previous frame through.
+        transparency_kwargs = {"transparency": transparent_index, "disposal": 2}
 
     pillow_img, *pillow_imgs = pillow_imgs
 
@@ -241,8 +271,40 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True, loop=0):
         interlace=False,
         optimize=False,
         **loop_kwarg,
+        **transparency_kwargs,
     )
     log.success(f"Successfully saved GIF to -> {log.yellow(filename)}")
+
+
+def _apply_gif_transparency(img, opaque_mask, palette_size, transparent_index):
+    """Quantizes ``img`` to at most ``palette_size`` colors (if not already
+    palettized) and sets pixels outside ``opaque_mask`` to ``transparent_index``."""
+    if img.mode != "P":
+        img = img.convert("RGB").quantize(
+            colors=palette_size,
+            dither=Image.NONE,  # ty: ignore[unresolved-attribute]
+        )
+    indices = np.array(img)
+    full_palette = np.zeros(768, dtype=np.uint8)
+    current = np.array(img.getpalette(), dtype=np.uint8)[:768]
+    full_palette[: current.size] = current
+    full_palette = full_palette.reshape(256, 3).astype(np.int32)
+
+    # Quantizing against a 256-entry palette can still pick the reserved index for
+    # opaque pixels; remap those to the nearest color among the real entries.
+    clash = (indices == transparent_index) & opaque_mask
+    if clash.any():
+        distances = np.sum((full_palette[:palette_size] - full_palette[transparent_index]) ** 2, -1)
+        indices[clash] = np.argmin(distances)
+
+    indices[~opaque_mask] = transparent_index
+
+    palette = np.zeros(768, dtype=np.uint8)
+    palette[: palette_size * 3] = full_palette[:palette_size].ravel()
+
+    out = Image.fromarray(indices, mode="P")
+    out.putpalette(palette.tolist())
+    return out
 
 
 def save_to_mp4(images, filename, fps=20, shared_color_palette=False):

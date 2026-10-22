@@ -403,3 +403,42 @@ def test_search_file_tree_skips_hidden(tmp_path):
 
     found_all = sorted(search_file_tree(root, verbose=False, relative=True))
     assert [str(p) for p in found_all] == ["a.hdf5", "sub/b.hdf5", "sub/c.txt"]
+
+
+def test_save_video_gif_transparent(tmp_path):
+    """RGBA frames saved with transparent=True keep (binary) transparency."""
+    from zea.io_lib import save_video
+
+    n_frames, height, width = 3, 16, 16
+    frames = np.zeros((n_frames, height, width, 4), dtype=np.uint8)
+    frames[..., 0] = np.linspace(0, 255, width, dtype=np.uint8)  # red gradient
+    frames[..., 1] = np.arange(n_frames, dtype=np.uint8)[:, None, None] * 100  # distinct frames
+    frames[..., 3] = 255
+    frames[:, :, : width // 2, 3] = 0  # left half transparent
+    frames[:, 0, -1, :3] = 0  # opaque black pixel must stay opaque
+
+    for shared_color_palette in (True, False):
+        gif_path = tmp_path / f"test_transparent_{shared_color_palette}.gif"
+        save_video(
+            frames,
+            gif_path,
+            fps=10,
+            transparent=True,
+            shared_color_palette=shared_color_palette,
+        )
+
+        with Image.open(gif_path) as gif:
+            assert gif.n_frames == n_frames
+            for i in range(n_frames):
+                gif.seek(i)
+                alpha = np.array(gif.convert("RGBA"))[..., 3]
+                assert np.all(alpha[:, : width // 2] == 0)
+                assert np.all(alpha[:, width // 2 :] == 255)
+
+
+def test_save_video_gif_transparent_requires_rgba(tmp_path):
+    from zea.io_lib import save_video
+
+    frames = np.zeros((2, 8, 8, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="RGBA"):
+        save_video(frames, tmp_path / "rgb.gif", transparent=True)

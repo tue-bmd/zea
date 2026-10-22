@@ -528,7 +528,7 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
         waveform (ndarray): The waveform of shape (n_samples), or a stack of them of
             shape (n_waveforms, n_samples).
         center_frequency (float or ndarray): The center frequency in Hz, either a scalar
-            or, for a stack, one per waveform of shape (n_waveforms,).
+            (or size-1 array) or, for a stack, one per waveform of shape (n_waveforms,).
         waveform_sampling_frequency (float): The sampling frequency of the waveform in Hz.
 
     Returns:
@@ -540,8 +540,16 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
     if n_samples == 0:
         raise ValueError("Waveform has zero samples.")
 
-    # Trailing axes for the sample and channel axes of `waveform[..., None]`
     center_frequency = ops.convert_to_tensor(center_frequency)
+    batch_shape = tuple(waveform.shape[:-1])
+    if ops.size(center_frequency) == 1:
+        center_frequency = ops.reshape(center_frequency, ())
+    elif tuple(center_frequency.shape) != batch_shape:
+        raise ValueError(
+            f"center_frequency must be a scalar or have shape {batch_shape} to match the "
+            f"waveforms of shape {tuple(waveform.shape)}, got {tuple(center_frequency.shape)}."
+        )
+    # Trailing axes for the sample and channel axes of `waveform[..., None]`
     center_frequency = ops.reshape(center_frequency, tuple(center_frequency.shape) + (1, 1))
 
     waveforms_iq_complex_channels = demodulate(
@@ -552,6 +560,25 @@ def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency
     peak_idx = ops.argmax(envelope, axis=-1)
     t_peak = ops.cast(peak_idx, dtype="float32") / waveform_sampling_frequency
     return t_peak
+
+
+@deprecated(replacement="zea.func.ultrasound.compute_time_to_peak")
+def compute_time_to_peak_stack(waveforms, center_frequencies, waveform_sampling_frequency=250e6):
+    """Compute the time of the peak of each waveform in a stack of waveforms.
+
+    .. deprecated::
+        Use :func:`compute_time_to_peak`, which also accepts a stack of waveforms.
+
+    Args:
+        waveforms (ndarray): The waveforms of shape (n_waveforms, n_samples).
+        center_frequencies (ndarray): The center frequencies of the waveforms in Hz of shape
+            (n_waveforms,) or a scalar if all waveforms have the same center frequency.
+        waveform_sampling_frequency (float): The sampling frequency of the waveforms in Hz.
+
+    Returns:
+        ndarray: The time to peak for each waveform in seconds.
+    """
+    return compute_time_to_peak(waveforms, center_frequencies, waveform_sampling_frequency)
 
 
 def channels_to_analytic(data, axis):

@@ -828,3 +828,57 @@ def test_mapping_protocol(dummy_params):
 
     del dummy_params["custom"]
     assert "custom" not in dummy_params
+
+
+class DummySubParameters(DummyParameters):
+    """Subclass without its own computed properties, like the deprecated Scan."""
+
+
+def test_subclass_invalidates_inherited_properties():
+    """Dependents must be found through the MRO, not only in the subclass itself."""
+    assert DummySubParameters._find_all_dependents(
+        "param1"
+    ) == DummyParameters._find_all_dependents("param1")
+
+    params = DummySubParameters(param1=5, param2=10, param3=1500.0, param4=5e6)
+    assert params.computed2[0] == 1
+    params.param1 = 3
+    assert params.computed1[0].shape == (3, 10)
+    params.computed2
+    assert params._computed2_count == 2
+
+
+def test_setattr_looks_up_dependents_once(dummy_params, monkeypatch):
+    """The transitive dependent set is popped in one pass, not re-walked per dependent."""
+    calls = []
+    original = DummyParameters._find_all_dependents
+
+    def counting(target):
+        calls.append(target)
+        return original(target)
+
+    monkeypatch.setattr(DummyParameters, "_find_all_dependents", staticmethod(counting))
+    dummy_params.computed2  # populate computed1 and computed2
+    dummy_params.param1 = 3
+    assert calls == ["param1"]
+    assert "computed1" not in dummy_params._cache
+    assert "computed2" not in dummy_params._cache
+
+
+def test_dependents_cache_is_per_class():
+    """The memoised dependency graph lives on each class, so it is freed with the class."""
+    import gc
+    import weakref
+
+    class Temporary(DummyParameters):
+        pass
+
+    params = Temporary(param1=5, param2=10, param3=1500.0, param4=5e6)
+    params.param1 = 3  # populate the cache
+    assert "param1" in Temporary.__dict__["_dependents_cache"]
+    assert Temporary._dependents_cache is not DummyParameters._dependents_cache
+
+    ref = weakref.ref(Temporary)
+    del Temporary, params
+    gc.collect()
+    assert ref() is None

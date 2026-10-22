@@ -86,14 +86,14 @@ html_theme_options = {
     "announcement": (
         "<style>"
         "@media (max-width: 600px) {"
-        "  .openh-rf-detail { display: none; }"
-        "  .openh-rf-link { font-size: 0.85em; }"
+        "  .open-h-rf-detail { display: none; }"
+        "  .open-h-rf-link { font-size: 0.85em; }"
         "}"
         "</style>"
-        '<a class="openh-rf-link" style="text-decoration: none; color: inherit;" '
-        'href="https://github.com/open-h/OpenH-RF" target="_blank">'
-        "🧩 &nbsp; <code>zea</code> &nbsp; supports the OpenH-RF Initiative"
-        '<span class="openh-rf-detail"> &mdash; a large-scale openly licensed ultrasound'
+        '<a class="open-h-rf-link" style="text-decoration: none; color: inherit;" '
+        'href="https://github.com/open-h/Open-H-RF" target="_blank">'
+        "🧩 &nbsp; <code>zea</code> &nbsp; supports the Open-H-RF Initiative"
+        '<span class="open-h-rf-detail"> &mdash; a large-scale openly licensed ultrasound'
         " dataset by Stanford, TU/e &amp; NVIDIA</span>"
         ". Learn more &rarr;</a>"
     ),

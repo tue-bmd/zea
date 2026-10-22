@@ -21,6 +21,7 @@ from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
     compute_time_to_peak,
+    compute_time_to_peak_stack,
     construct_acquisition_from_synthetic_aperture,
     decode_hadamard,
     get_low_pass_iq_filter,
@@ -984,6 +985,22 @@ def test_compute_time_to_peak():
     )
     t_peak = compute_time_to_peak(waveform_sin, center_frequency0, 250e6)
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
+
+    # Deprecated alias still works
+    t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
+    assert np.allclose(t_peak, 1e-6, atol=1e-8)
+
+    # A size-1 frequency acts as a scalar, both for one waveform and for a stack
+    t_peak = compute_time_to_peak(waveform0, np.array([center_frequency0]), 250e6)
+    assert np.shape(t_peak) == ()
+    t_peak = compute_time_to_peak(waveforms, np.array([center_frequency0]), 250e6)
+    assert np.shape(t_peak) == (2,)
+
+    # A frequency per waveform must match the number of waveforms
+    with pytest.raises(ValueError, match="center_frequency"):
+        compute_time_to_peak(waveform0, center_frequencies, 250e6)
+    with pytest.raises(ValueError, match="center_frequency"):
+        compute_time_to_peak(np.stack([waveform0] * 3), center_frequencies, 250e6)
 
 
 # Only the beamformers zea.ops defines itself. A model-backed beamformer (such as
