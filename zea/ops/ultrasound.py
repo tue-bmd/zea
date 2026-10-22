@@ -193,6 +193,17 @@ class TOFCorrection(Operation):
             **kwargs,
         )
 
+    def check_parameters(self, parameters, upstream):
+        """Warn when the grid this operation maps the data onto aliases it.
+
+        See :meth:`zea.Parameters.check_for_aliasing`. The data is IQ when a
+        :class:`Demodulate` runs upstream, or when it arrives with ``n_ch == 2``.
+        """
+        if any(isinstance(operation, Demodulate) for operation in upstream):
+            parameters.check_for_aliasing(demodulated=True)
+        else:
+            parameters.check_for_aliasing()
+
     def call(
         self,
         flatgrid,
@@ -555,30 +566,6 @@ class Demodulate(Operation):
             "center_frequency": 0.0,
             "n_ch": 2,
         }
-
-
-def demodulates_before_grid(pipeline) -> bool | None:
-    """Whether a pipeline demodulates the data before it maps it onto the grid.
-
-    Answered by walking the operations rather than by inspecting tensors: the op
-    that maps channel data onto the grid (:class:`TOFCorrection`) usually runs
-    inside a JIT trace, where nothing about the data can be tested eagerly.
-
-    Args:
-        pipeline: The :class:`~zea.Pipeline` to inspect.
-
-    Returns:
-        bool or None: ``True`` when a :class:`Demodulate` runs before the first
-        :class:`TOFCorrection`, ``False`` when it does not (the pipeline may still
-        be *handed* baseband IQ), and ``None`` when the pipeline never forms a grid.
-    """
-    demodulated = False
-    for operation in pipeline.flat_operations():
-        if isinstance(operation, Demodulate):
-            demodulated = True
-        if isinstance(operation, TOFCorrection):
-            return demodulated
-    return None
 
 
 @ops_registry("fir_filter")

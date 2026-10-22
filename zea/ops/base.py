@@ -312,6 +312,21 @@ class Operation(keras.Operation):
         """
         raise NotImplementedError
 
+    def check_parameters(self, parameters, upstream: List["Operation"]) -> None:
+        """Sanity-check concrete parameters before they are converted to tensors.
+
+        Called eagerly by :meth:`zea.Pipeline.prepare_parameters`, before anything
+        is traced. Override it to warn about configurations that will run but give
+        poor results. A check should warn, never raise: the pipeline catches and
+        logs any exception. Does nothing by default.
+
+        Args:
+            parameters: The :class:`~zea.Parameters` the pipeline is prepared with,
+                including any overrides passed to ``prepare_parameters``.
+            upstream: The operations that run before this one, in execution order,
+                with nested pipelines flattened.
+        """
+
     def set_input_cache(self, input_cache: Dict[str, Any]):
         """
         Set a cache for inputs, then retrace the function if necessary.

@@ -440,46 +440,132 @@ def test_aliasing_limits_iq_axial_includes_oblique_paths():
     assert limits["dz_max"] < 1540.0 / (2 * 4e6)
 
 
-def test_parameters_check_for_aliasing_infers_demodulation_from_pipeline():
-    """The pipeline decides whether the grid carries RF or IQ."""
-    parameters = Parameters(**focused_scan_args)  # dz = 312 um: aliases for RF only
-    bandwidth = 1e6
+@pytest.fixture
+def recorded_aliasing_checks(monkeypatch):
+    """Record the calls to ``Parameters.check_for_aliasing`` instead of running them."""
+    calls = []
 
-    rf = ops.Pipeline([ops.TOFCorrection()])
-    iq = ops.Pipeline([ops.Demodulate(), ops.Pipeline([ops.TOFCorrection()])])
-    assert any("Axial" in m for m in parameters.check_for_aliasing(rf, bandwidth=bandwidth))
-    assert not any("Axial" in m for m in parameters.check_for_aliasing(iq, bandwidth=bandwidth))
+    def record(self, demodulated=None, bandwidth=None):
+        calls.append({"parameters": self, "demodulated": demodulated})
+        return []
 
-    # An explicit `demodulated` takes priority over the pipeline.
-    msgs = parameters.check_for_aliasing(rf, demodulated=True, bandwidth=bandwidth)
-    assert not any("Axial" in m for m in msgs)
+    monkeypatch.setattr(Parameters, "check_for_aliasing", record)
+    return calls
+
+
+def test_prepare_parameters_checks_aliasing_from_tof_correction(recorded_aliasing_checks):
+    """TOFCorrection runs the aliasing check, stating demodulation from the ops before it."""
+    parameters = get_parameters()
+
+    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(parameters)
+    ops.Pipeline([ops.Demodulate(), ops.Pipeline([ops.TOFCorrection()])]).prepare_parameters(
+        parameters
+    )
+    assert [call["demodulated"] for call in recorded_aliasing_checks] == [None, True]
+
+    # No grid, nothing to check; and the check can be turned off.
+    ops.Pipeline([ops.Demodulate()]).prepare_parameters(parameters)
+    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(parameters, check=False)
+    assert len(recorded_aliasing_checks) == 2
+
+
+def test_prepare_parameters_check_sees_overrides(recorded_aliasing_checks):
+    """Overrides reach the check, without touching the caller's parameters."""
+    parameters = get_parameters()
+    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(parameters, f_number=0.0)
+    assert recorded_aliasing_checks[0]["parameters"].f_number == 0.0
+    assert parameters.f_number != 0.0
+
+
+def test_prepare_parameters_survives_failing_check(monkeypatch):
+    """A check that raises is logged and skipped; the parameters are still prepared."""
+
+    def fail(self, parameters, upstream):
+        raise RuntimeError("broken check")
+
+    monkeypatch.setattr(ops.TOFCorrection, "check_parameters", fail)
+    inputs = ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(get_parameters())
+    assert "flatgrid" in inputs
+
+
+def test_parameters_check_for_aliasing_rf_vs_iq():
+    """The axial limit depends on whether the grid carries RF or IQ."""
+    parameters = Parameters(**focused_scan_args)  # dz = 315 um: aliases for RF only
+    rf = parameters.check_for_aliasing(demodulated=False, bandwidth=1e6)
+    iq = parameters.check_for_aliasing(demodulated=True, bandwidth=1e6)
+    assert any("Axial" in m for m in rf)
+    assert not any("Axial" in m for m in iq)
 
 
 def test_parameters_check_for_aliasing_uses_bandwidth_parameter():
     """The ``bandwidth`` parameter is used when no ``bandwidth`` argument is passed."""
-    iq = ops.Pipeline([ops.Demodulate(), ops.TOFCorrection()])
-    without = Parameters(**focused_scan_args).check_for_aliasing(iq)
-    with_bandwidth = Parameters(**focused_scan_args, bandwidth=1e6).check_for_aliasing(iq)
+    without = Parameters(**focused_scan_args).check_for_aliasing(demodulated=True)
+    with_bandwidth = Parameters(**focused_scan_args, bandwidth=1e6).check_for_aliasing(
+        demodulated=True
+    )
     assert any("Axial" in m for m in without)
     assert not any("Axial" in m for m in with_bandwidth)
 
 
-def test_parameters_check_for_aliasing_skips():
-    """Pipelines without a grid and non-cartesian grids are not checked."""
-    parameters = Parameters(**focused_scan_args)
-    assert parameters.check_for_aliasing(ops.Pipeline([ops.Demodulate()])) == []
+def test_parameters_check_for_aliasing_assumes_probe_bandwidth():
+    """Without a ``bandwidth``, RF on a lambda / 4 grid warns: the band reaches past fc."""
+    wavelength = focused_scan_args["sound_speed"] / focused_scan_args["center_frequency"]
+    grid_size_z = int(np.ceil(0.04 / (wavelength / 4.1))) + 1  # just finer than lambda / 4
+    args = {**focused_scan_args, "grid_size_z": grid_size_z}
+    assert any("Axial" in m for m in Parameters(**args).check_for_aliasing(demodulated=False))
+
+    narrow = Parameters(**args, probe_bandwidth_percent=1.0).check_for_aliasing(demodulated=False)
+    assert not any("Axial" in m for m in narrow)
+
+
+def test_parameters_check_for_aliasing_skips_polar_grid():
+    """Non-cartesian grids are not checked."""
     assert Parameters(**focused_scan_args, grid_type="polar").check_for_aliasing() == []
 
 
 def test_parameters_check_for_aliasing_n_ch_marks_iq():
-    """A pipeline handed IQ (``n_ch == 2``) is treated as demodulated."""
+    """Data handed over as IQ (``n_ch == 2``) is treated as demodulated."""
     parameters = Parameters(**{**focused_scan_args, "n_ch": 2})
-    msgs = parameters.check_for_aliasing(ops.Pipeline([ops.TOFCorrection()]), bandwidth=1e6)
+    msgs = parameters.check_for_aliasing(bandwidth=1e6)
     assert not any("Axial" in m for m in msgs)
 
     # An explicit `demodulated=False` takes priority over `n_ch`.
     msgs = parameters.check_for_aliasing(demodulated=False, bandwidth=1e6)
     assert any("Axial" in m for m in msgs)
+
+
+def test_aliasing_limits_directivity_caps_receive():
+    """Element directivity caps the receive term at 0.603 c / w, at any frequency."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    width = 0.3e-3
+    uncapped = aliasing_limits(**args, **_plane_waves(0))
+    capped = aliasing_limits(**args, **_plane_waves(0), element_width=width)
+    assert uncapped["dx_max"] == pytest.approx(1540.0 / 7e6 / 2)
+    assert capped["dx_max"] == pytest.approx(width / (2 * 0.603))
+    # A tiny element caps nothing within the band.
+    tiny = aliasing_limits(**args, **_plane_waves(0), element_width=1e-6)
+    assert tiny["dx_max"] == pytest.approx(uncapped["dx_max"])
+
+
+def test_aliasing_limits_directivity_spares_plane_wave_steering():
+    """A steered plane wave keeps its direction; only the receive term is capped."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    width = 0.3e-3
+    limits = aliasing_limits(**args, **_plane_waves([-60, 60]), element_width=width)
+    k_edge = (7e6 * np.sin(np.deg2rad(60)) + 0.603 * 1540.0 / width) / 1540.0
+    assert limits["dx_max"] == pytest.approx(1 / (2 * k_edge))
+
+
+def test_aliasing_limits_directivity_caps_diverging_transmit():
+    """Diverging rays are capped like receive paths, which relaxes the lateral limit."""
+    transmits = {**_plane_waves(0), "focus_distances": np.array([-1e-3])}
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    width = 0.3e-3
+    uncapped = aliasing_limits(**args, **transmits)
+    capped = aliasing_limits(**args, **transmits, element_width=width)
+    # Both terms at their cap: k_x spans +-2 * 0.603 / w.
+    assert capped["dx_max"] == pytest.approx(width / (4 * 0.603))
+    assert capped["dx_max"] > uncapped["dx_max"]
 
 
 def test_parameters_check_for_aliasing_without_polar_angles():

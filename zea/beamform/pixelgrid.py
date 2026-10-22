@@ -1,7 +1,5 @@
 """Pixel grid calculation for ultrasound beamforming."""
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 
 from zea import log
@@ -60,12 +58,37 @@ def transmit_direction_range(
         transmit geometry is empty or malformed, in which case callers should fall
         back to the symmetric assumption.
     """
+    ranges, _ = _transmit_direction_range(
+        focus_distances,
+        probe_geometry,
+        tx_apodizations,
+        polar_angles,
+        transmit_origins,
+        azimuth_angles,
+    )
+    return ranges
+
+
+def _transmit_direction_range(
+    focus_distances,
+    probe_geometry,
+    tx_apodizations,
+    polar_angles,
+    transmit_origins,
+    azimuth_angles=None,
+):
+    """:func:`transmit_direction_range`, plus which of the kept transmits are plane waves.
+
+    Returns:
+        tuple: ``(ranges, plane)``, with ``plane`` a boolean mask aligned with the
+        rows of ``ranges``. ``(None, None)`` when ``ranges`` is ``None``.
+    """
     focus_distances = np.asarray(focus_distances, dtype=float)
     probe_geometry = np.asarray(probe_geometry, dtype=float)
     tx_apodizations = np.asarray(tx_apodizations, dtype=float)
 
     if focus_distances.size == 0 or tx_apodizations.ndim != 2:
-        return None
+        return None, None
 
     if polar_angles is None:
         polar_angles = np.zeros_like(focus_distances)
@@ -76,7 +99,7 @@ def transmit_direction_range(
     azimuth_angles = np.asarray(azimuth_angles, dtype=float)
 
     plane = is_plane_wave(focus_distances)
-    ranges = []
+    ranges, kept_plane = [], []
     for tx, focus in enumerate(focus_distances):
         polar, azimuth = float(polar_angles[tx]), float(azimuth_angles[tx])
         steering = np.array(
@@ -84,6 +107,7 @@ def transmit_direction_range(
         )
         if plane[tx]:
             ranges.append(np.stack([steering, steering], axis=-1))
+            kept_plane.append(True)
             continue
         active = np.nonzero(np.abs(tx_apodizations[tx]) > eps)[0]
         if active.size == 0 or np.isnan(focus):
@@ -100,8 +124,43 @@ def transmit_direction_range(
         lo[2] = rays[:, 2].min()
         hi[2] = np.sqrt(max(1.0 - nearest[0] ** 2 - nearest[1] ** 2, 0.0))
         ranges.append(np.stack([lo, hi], axis=-1))
+        kept_plane.append(False)
 
-    return np.array(ranges) if ranges else None
+    if not ranges:
+        return None, None
+    return np.array(ranges), np.array(kept_plane)
+
+
+# A rectangular element of width ``w`` has the far-field directivity
+# ``sinc(w sin(theta) / lambda)``, which falls to -6 dB at ``w sin(theta) / lambda``
+# equal to this constant (``np.sinc`` convention, ``sinc(x) = sin(pi x) / (pi x)``).
+DIRECTIVITY_6DB = 0.603
+
+
+def _transverse_edge(t, sin_theta_r, f_min, f_max, cap_t, cap_r):
+    """Largest ``f * (t + r)`` over the band, with ``r`` up to ``sin_theta_r``.
+
+    Each path's transverse term ``f * |sin(theta)|`` is capped at ``cap`` (in Hz) by
+    element directivity. The objective is piecewise linear in ``f`` with kinks only
+    where a term reaches its cap, so evaluating the band edges and those kinks is exact.
+
+    Args:
+        t: Transverse transmit direction component per transmit, shape ``(n_tx,)``.
+        sin_theta_r: Largest receive angle sine.
+        f_min, f_max: The band in Hz.
+        cap_t: Directivity cap of the transmit term per transmit, shape ``(n_tx,)``.
+        cap_r: Directivity cap of the receive term.
+
+    Returns:
+        float: The largest ``f * (t + r)`` in Hz; divide by the sound speed for k.
+    """
+    t = np.asarray(t, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kink_t = np.clip(np.nan_to_num(cap_t / np.abs(t), nan=f_max, posinf=f_max), f_min, f_max)
+        kink_r = np.clip(cap_r / sin_theta_r, f_min, f_max) if sin_theta_r > 0 else f_min
+    f = np.stack(np.broadcast_arrays(f_min, f_max, kink_t, kink_r, t))[:-1]
+    k = np.sign(t) * np.minimum(f * np.abs(t), cap_t) + np.minimum(f * sin_theta_r, cap_r)
+    return float(k.max())
 
 
 def aliasing_limits(
@@ -117,6 +176,8 @@ def aliasing_limits(
     demodulated: bool = False,
     bandwidth: float | None = None,
     azimuth_angles=None,
+    element_width: float | None = None,
+    element_height: float | None = None,
 ) -> dict:
     """Largest pixel pitch the beamforming grid can carry without spatial aliasing.
 
@@ -146,8 +207,18 @@ def aliasing_limits(
     transmit has active elements, ``sin(theta_t)`` is assumed to span
     ``+-sin(theta_r)``.
 
+    Element directivity bounds the angles that carry energy: a path through an
+    element of width ``w`` is down 6 dB once ``f * sin(theta) >= 0.603 c / w``
+    (see :data:`DIRECTIVITY_6DB`). Given ``element_width``, each receive path and
+    each focused or diverging transmit ray contributes at most that much to
+    ``k_x``, at any frequency. Plane waves are not capped: their direction is
+    fixed by the steering, the elements only weaken them. Without the cap, wide
+    apertures (``f_number = 0``, diverging waves, near-field foci) give a limit
+    set by geometric rays that carry hardly any energy.
+
     **Elevation.** For 3D grids, ``dy`` follows from ``k_y`` exactly as ``dx``
-    does from ``k_x``, using the y components of ``t`` and ``r``.
+    does from ``k_x``, using the y components of ``t`` and ``r`` and
+    ``element_height`` for the directivity.
 
     Args:
         sound_speed: Speed of sound in m/s.
@@ -166,6 +237,10 @@ def aliasing_limits(
             falls back to the RF limit.
         azimuth_angles: Azimuth of the steering per transmit, see
             :func:`transmit_direction_range`.
+        element_width: Element width in m, for the lateral directivity cap.
+            ``None`` disables the cap.
+        element_height: Element height in m, for the elevational directivity
+            cap. ``None`` falls back to ``element_width``.
 
     Returns:
         dict: The limits plus the quantities behind them, so callers can report
@@ -177,6 +252,8 @@ def aliasing_limits(
         - ``transmit_direction``: ``(lo, hi)`` of the x, y and z components of the
           transmit directions over all transmits, shape ``(3, 2)``.
         - ``sin_theta_r``: Largest receive angle sine, set by ``f_number``.
+        - ``sin_theta_directivity``: The lateral directivity cap as an angle sine
+          at ``f_max``, ``1`` when uncapped.
         - ``axial_basis``: Readable string on what sets the axial limit.
         - ``kx_range`` / ``ky_range`` / ``kz_range``: Bounding box of the support
           in cycles per metre.
@@ -202,7 +279,7 @@ def aliasing_limits(
     f_number = float(f_number)
     sin_theta_r = 1.0 / np.sqrt(1.0 + 4.0 * f_number**2) if f_number > 0 else 1.0
     cos_r_min = np.sqrt(1.0 - sin_theta_r**2)
-    ranges = transmit_direction_range(
+    ranges, plane = _transmit_direction_range(
         focus_distances,
         probe_geometry,
         tx_apodizations,
@@ -215,18 +292,27 @@ def aliasing_limits(
         ranges = np.array(
             [[[-sin_theta_r, sin_theta_r], [-sin_theta_r, sin_theta_r], [cos_r_min, 1.0]]]
         )
+        plane = np.array([False])
 
-    # Lateral and elevational: k = f * u / c with u = t + r along the axis. Each
-    # edge of u reaches furthest from zero at the frequency that scales it outwards.
-    def transverse_band(axis):
-        u_lo = ranges[:, axis, 0].min() - sin_theta_r
-        u_hi = ranges[:, axis, 1].max() + sin_theta_r
-        k_lo = (f_max if u_lo < 0 else f_min) * u_lo / sound_speed
-        k_hi = (f_max if u_hi > 0 else f_min) * u_hi / sound_speed
+    def directivity_cap(width):
+        """Largest ``f * sin(theta)`` in Hz a path through an element can carry."""
+        return DIRECTIVITY_6DB * sound_speed / float(width) if width else np.inf
+
+    if element_height is None:
+        element_height = element_width
+
+    # Lateral and elevational: k = f * (t + r) / c along the axis, each edge taken
+    # at the frequency that pushes it furthest out, within the directivity caps.
+    def transverse_band(axis, width):
+        cap_r = directivity_cap(width)
+        cap_t = np.where(plane, np.inf, cap_r)
+        k_hi = _transverse_edge(ranges[:, axis, 1], sin_theta_r, f_min, f_max, cap_t, cap_r)
+        k_lo = -_transverse_edge(-ranges[:, axis, 0], sin_theta_r, f_min, f_max, cap_t, cap_r)
+        k_lo, k_hi = k_lo / sound_speed, k_hi / sound_speed
         return (k_lo, k_hi), 1.0 / (k_hi - k_lo) if k_hi > k_lo else np.inf
 
-    kx_range, dx_max = transverse_band(0)
-    ky_range, dy_max = transverse_band(1)
+    kx_range, dx_max = transverse_band(0, element_width)
+    ky_range, dy_max = transverse_band(1, element_height)
 
     # Axial: k_z = f * (t_z + r_z) / c. The top of the patch is the most on-axis
     # transmit with an on-axis receive, the bottom the most oblique transmit with
@@ -253,6 +339,9 @@ def aliasing_limits(
             [ranges[..., 0].min(axis=0), ranges[..., 1].max(axis=0)], -1
         ),
         "sin_theta_r": sin_theta_r,
+        "sin_theta_directivity": (
+            min(directivity_cap(element_width) / f_max, 1.0) if f_max > 0 else 1.0
+        ),
         "axial_basis": axial_basis,
         "kx_range": kx_range,
         "ky_range": ky_range,
@@ -279,6 +368,8 @@ def check_for_aliasing(
     azimuth_angles=None,
     ylims=(0.0, 0.0),
     grid_size_y: int = 1,
+    element_width: float | None = None,
+    element_height: float | None = None,
 ) -> list:
     """Warn when the beamforming grid under-samples the data it is about to carry.
 
@@ -295,8 +386,8 @@ def check_for_aliasing(
         grid_size_z: Number of pixels along z, likewise.
         sound_speed, center_frequency, f_number, focus_distances, probe_geometry,
             tx_apodizations, polar_angles, transmit_origins, demodulation_frequency,
-            demodulated, bandwidth, azimuth_angles: Forwarded to
-            :func:`aliasing_limits`.
+            demodulated, bandwidth, azimuth_angles, element_width, element_height:
+            Forwarded to :func:`aliasing_limits`.
         ylims: Elevational extent ``(ymin, ymax)`` of the grid in metres. The
             default, no extent, is a 2D grid.
         grid_size_y: Number of pixels along y, likewise.
@@ -317,6 +408,8 @@ def check_for_aliasing(
         demodulated=demodulated,
         bandwidth=bandwidth,
         azimuth_angles=azimuth_angles,
+        element_width=element_width,
+        element_height=element_height,
     )
 
     def pitch(lims, size):
@@ -338,10 +431,11 @@ def check_for_aliasing(
             f"{name} grid pitch {d * 1e6:.1f} um exceeds {d_max * 1e6:.1f} um "
             f"(lambda_min = {limits['lambda_min'] * 1e6:.1f} um, "
             f"transmit direction {axis} component in [{lo:.3f}, {hi:.3f}], "
-            f"sin(theta_r) = +-{limits['sin_theta_r']:.3f}). "
+            f"sin(theta_r) = +-{limits['sin_theta_r']:.3f}, "
+            f"element directivity sin(theta) <= {limits['sin_theta_directivity']:.3f}). "
             f"Consider increasing grid_size_{axis} to {int(np.ceil(extent / d_max)) + 1} "
-            "or more, "
-            "unsetting it to size the grid automatically, or narrowing the apertures "
+            "or more (for an automatically sized grid, raise pixels_per_wavelength), "
+            "or narrowing the apertures "
             f"(f_number / transmit steering) so the data stays inside the grid's {name.lower()} "
             "band."
         )
@@ -351,8 +445,8 @@ def check_for_aliasing(
             f"Axial grid pitch {dz * 1e6:.1f} um exceeds {limits['dz_max'] * 1e6:.1f} um "
             f"({limits['axial_basis']}). "
             f"Consider increasing grid_size_z to {int(np.ceil(depth / limits['dz_max'])) + 1} "
-            "or more, "
-            "unsetting it to size the grid automatically, or band-limiting the data further."
+            "or more (for an automatically sized grid, raise pixels_per_wavelength), "
+            "or band-limiting the data further."
         )
 
     for message in messages:

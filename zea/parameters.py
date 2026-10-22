@@ -158,7 +158,7 @@ class Parameters(BaseParameters):
     """Nominal center frequency of the probe [Hz]."""
 
     probe_bandwidth_percent: float
-    """Probe bandwidth as a percentage of the center frequency. Defaults to 200.0."""
+    """Probe bandwidth as a percentage of the center frequency. Defaults to 100.0."""
 
     bandwidth: float
     """Width of the RF band kept by processing [Hz], centered on the
@@ -336,7 +336,7 @@ class Parameters(BaseParameters):
 
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
-    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
+    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 100.0
     # Give these a default of None (rather than leaving them unset) so that they can be
     # declared as dependencies of computed properties (e.g. t_peak, n_waveforms) without
     # tripping MissingDependencyError
@@ -445,48 +445,37 @@ class Parameters(BaseParameters):
                 "'cartesian' and 'polar'."
             )
 
-    def check_for_aliasing(self, pipeline=None, demodulated=None, bandwidth=None) -> list:
+    def check_for_aliasing(self, demodulated=None, bandwidth=None) -> list:
         """Warn when the beamforming grid under-samples the data it will carry.
 
         Whether a pixel pitch under-samples depends on whether the data reaching
-        the grid is RF or baseband IQ, which the parameters alone do not tell. Pass
-        the ``pipeline`` they are fed into to infer it, or state it with
-        ``demodulated``. See :func:`zea.beamform.pixelgrid.aliasing_limits` for the
-        criteria. Only regular cartesian grids, 2D or 3D, are checked.
+        the grid is RF or baseband IQ, which the parameters alone do not tell.
+        :class:`~zea.ops.TOFCorrection` runs this check from
+        :meth:`zea.Pipeline.prepare_parameters`, stating ``demodulated`` from the
+        operations before it. See :func:`zea.beamform.pixelgrid.aliasing_limits`
+        for the criteria. Only regular cartesian grids, 2D or 3D, are checked.
 
         Args:
-            pipeline: The :class:`~zea.Pipeline` these parameters are fed into. A
-                pipeline that never forms a grid has nothing to check.
-            demodulated: Whether the data reaching the grid is baseband IQ. Takes
-                priority over ``pipeline``. When neither says so, ``n_ch == 2``
-                (zea's IQ convention) marks the data as IQ.
-            bandwidth: Overrides the ``bandwidth`` parameter. When neither is
-                set, the carrier is used instead.
+            demodulated: Whether the data reaching the grid is baseband IQ. When
+                ``None``, ``n_ch == 2`` (zea's IQ convention) marks the data as IQ.
+            bandwidth: The RF band in Hz. Overrides the ``bandwidth`` parameter;
+                when neither is set, ``probe_bandwidth_percent`` of the
+                ``center_frequency`` is assumed.
 
         Returns:
             list of str: The warnings emitted; empty when the grid is adequate.
-
-        Example:
-            .. code-block:: python
-
-                parameters.check_for_aliasing(pipeline)
         """
         if self.grid_type != "cartesian" or self.enable_scanline:
             return []
 
         if demodulated is None:
-            if pipeline is not None:
-                # Imported here: `zea.ops` imports this module.
-                from zea.ops.ultrasound import demodulates_before_grid
-
-                demodulated = demodulates_before_grid(pipeline)
-                if demodulated is None:
-                    return []
-            # The pipeline may be handed IQ rather than demodulate it itself.
-            demodulated = bool(demodulated) or getattr(self, "n_ch", None) == 2
+            demodulated = bool(self._params.get("n_ch") == 2)
 
         if bandwidth is None:
-            bandwidth = getattr(self, "bandwidth", None)
+            bandwidth = self._params.get("bandwidth")
+        if bandwidth is None:
+            center_frequency = np.max(np.asarray(self.center_frequency, dtype=float))
+            bandwidth = self.probe_bandwidth_percent / 100 * center_frequency
 
         return check_for_aliasing(
             self.xlims,
@@ -508,6 +497,8 @@ class Parameters(BaseParameters):
             azimuth_angles=self.azimuth_angles if "azimuth_angles" in self._params else None,
             ylims=self.ylims if self.is_3d else (0.0, 0.0),
             grid_size_y=self.grid_size_y if self.is_3d else 1,
+            element_width=self._params.get("element_width"),
+            element_height=self._params.get("element_height"),
         )
 
     @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
