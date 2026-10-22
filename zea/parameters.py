@@ -202,12 +202,6 @@ class Parameters(BaseParameters):
     - ``slice``: use transmits given by the slice (e.g. ``slice(0, 10, 2)``).
     """
 
-    waveforms_one_way: np.ndarray | None
-    """One-way transmit waveforms, shape (n_tx, n_samples_one_way). None if absent."""
-
-    waveforms_two_way: np.ndarray | None
-    """Two-way transmit waveforms, shape (n_tx, n_samples_two_way). None if absent."""
-
     pixels_per_wavelength: int
     """Number of grid pixels per wavelength. Defaults to 4."""
 
@@ -1082,9 +1076,27 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_one_way(self):
+        """One-way transmit waveforms of shape (n_tx, n_samples_one_way), or None."""
+        value = self._params.get("waveforms_one_way")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_two_way(self):
+        """Two-way transmit waveforms of shape (n_tx, n_samples_two_way), or None."""
+        value = self._params.get("waveforms_two_way")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
     @cache_with_dependencies("waveforms_one_way", "waveforms_two_way")
     def n_waveforms(self):
-        """The number of unique transmit waveforms."""
+        """The number of transmit waveforms, one per selected transmit."""
 
         if self.waveforms_one_way is not None:
             return self.waveforms_one_way.shape[0]
