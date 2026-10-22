@@ -696,14 +696,19 @@ def test_cache_invalidated_when_dependency_hash_fails():
     assert params._marker_count == 2
 
 
-def test_update_ignores_keys_colliding_with_methods_and_properties(dummy_params):
-    """Names that shadow a method or property are silently skipped by update()."""
-    dummy_params.update({"copy": 1, "serialized": 2, "custom": 3})
+@pytest.mark.parametrize("key", ["copy", "serialized"])
+def test_update_raises_on_keys_colliding_with_methods_and_properties(dummy_params, key):
+    """Names that shadow a method or property raise in update(), like __setitem__."""
+    with pytest.raises((AttributeError, ValueError)):
+        dummy_params[key] = 1
+    with pytest.raises((AttributeError, ValueError)):
+        dummy_params.update({"custom": 3, "param1": 99, key: 1})
 
+    # Keys are checked up front, so nothing was applied.
     assert callable(dummy_params.copy)
-    assert "copy" not in dummy_params._custom_params
-    assert "serialized" not in dummy_params._custom_params
-    assert dummy_params.custom == 3
+    assert key not in dummy_params._custom_params
+    assert "custom" not in dummy_params._custom_params
+    assert dummy_params.param1 != 99
 
 
 def test_update_sets_parameter_that_was_never_set(dummy_params):
