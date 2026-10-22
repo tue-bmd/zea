@@ -15,7 +15,7 @@ def transmit_direction_range(
     polar_angles,
     transmit_origins,
     azimuth_angles=None,
-) -> np.ndarray | None:
+) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
     r"""Range of the ray directions of each transmit.
 
     This is the transmit half of the image's k-space support (see
@@ -51,37 +51,13 @@ def transmit_direction_range(
             ``(n_tx,)``. ``None`` means zeros, i.e. steering in the x-z plane.
 
     Returns:
-        np.ndarray or None: ``(lo, hi)`` of the ``x``, ``y`` and ``z`` components
-        of the unit ray direction per transmit, shape ``(n_tx, 3, 2)``, with
-        transmits that have no active elements or a ``NaN`` focus distance left
-        out. ``None`` when the
-        transmit geometry is empty or malformed, in which case callers should fall
-        back to the symmetric assumption.
-    """
-    ranges, _ = _transmit_direction_range(
-        focus_distances,
-        probe_geometry,
-        tx_apodizations,
-        polar_angles,
-        transmit_origins,
-        azimuth_angles,
-    )
-    return ranges
-
-
-def _transmit_direction_range(
-    focus_distances,
-    probe_geometry,
-    tx_apodizations,
-    polar_angles,
-    transmit_origins,
-    azimuth_angles=None,
-):
-    """:func:`transmit_direction_range`, plus which of the kept transmits are plane waves.
-
-    Returns:
-        tuple: ``(ranges, plane)``, with ``plane`` a boolean mask aligned with the
-        rows of ``ranges``. ``(None, None)`` when ``ranges`` is ``None``.
+        tuple: ``(ranges, plane)``. ``ranges`` holds ``(lo, hi)`` of the ``x``,
+        ``y`` and ``z`` components of the unit ray direction per transmit, shape
+        ``(n_tx, 3, 2)``, with transmits that have no active elements or a ``NaN``
+        focus distance left out. ``plane`` is a boolean mask of the plane waves,
+        aligned with the rows of ``ranges``. ``(None, None)`` when the transmit
+        geometry is empty or malformed, in which case callers should fall back to
+        the symmetric assumption.
     """
     focus_distances = np.asarray(focus_distances, dtype=float)
     probe_geometry = np.asarray(probe_geometry, dtype=float)
@@ -105,12 +81,12 @@ def _transmit_direction_range(
         steering = np.array(
             [np.sin(polar) * np.cos(azimuth), np.sin(polar) * np.sin(azimuth), np.cos(polar)]
         )
+        active = np.nonzero(np.abs(tx_apodizations[tx]) > eps)[0]
+        if active.size == 0 or np.isnan(focus):
+            continue
         if plane[tx]:
             ranges.append(np.stack([steering, steering], axis=-1))
             kept_plane.append(True)
-            continue
-        active = np.nonzero(np.abs(tx_apodizations[tx]) > eps)[0]
-        if active.size == 0 or np.isnan(focus):
             continue
         focal_point = transmit_origins[tx] + float(focus) * steering
         # Rays run from each element towards a focus, or away from the virtual
@@ -158,7 +134,7 @@ def _transverse_edge(t, sin_theta_r, f_min, f_max, cap_t, cap_r):
     with np.errstate(divide="ignore", invalid="ignore"):
         kink_t = np.clip(np.nan_to_num(cap_t / np.abs(t), nan=f_max, posinf=f_max), f_min, f_max)
         kink_r = np.clip(cap_r / sin_theta_r, f_min, f_max) if sin_theta_r > 0 else f_min
-    f = np.stack(np.broadcast_arrays(f_min, f_max, kink_t, kink_r, t))[:-1]
+    f = np.stack(np.broadcast_arrays(f_min, f_max, kink_t, kink_r))
     k = np.sign(t) * np.minimum(f * np.abs(t), cap_t) + np.minimum(f * sin_theta_r, cap_r)
     return float(k.max())
 
@@ -279,7 +255,7 @@ def aliasing_limits(
     f_number = float(f_number)
     sin_theta_r = 1.0 / np.sqrt(1.0 + 4.0 * f_number**2) if f_number > 0 else 1.0
     cos_r_min = np.sqrt(1.0 - sin_theta_r**2)
-    ranges, plane = _transmit_direction_range(
+    ranges, plane = transmit_direction_range(
         focus_distances,
         probe_geometry,
         tx_apodizations,
@@ -287,7 +263,7 @@ def aliasing_limits(
         transmit_origins,
         azimuth_angles,
     )
-    if ranges is None:
+    if ranges is None or plane is None:
         # Symmetric, the transmit cone matching the receive cone: lambda * F / 2.
         ranges = np.array(
             [[[-sin_theta_r, sin_theta_r], [-sin_theta_r, sin_theta_r], [cos_r_min, 1.0]]]

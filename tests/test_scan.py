@@ -323,7 +323,7 @@ def test_transmit_direction_range_steered_focus():
     transmits = _plane_waves(20, n_el=3, pitch=10e-3)
     focus, angle = 40e-3, transmits["polar_angles"][0]
     transmits["focus_distances"] = np.array([focus])
-    sin_range = transmit_direction_range(**transmits)[:, 0]
+    sin_range = transmit_direction_range(**transmits)[0][:, 0]
 
     focus_x, focus_z = focus * np.sin(angle), focus * np.cos(angle)
     edge_rays = [(focus_x - x) / np.hypot(focus_x - x, focus_z) for x in (10e-3, -10e-3)]
@@ -332,9 +332,9 @@ def test_transmit_direction_range_steered_focus():
     # Unsteered it reduces to the symmetric +-s; mirrored for a diverging wave.
     transmits["polar_angles"] = np.zeros(1)
     s = 10 / np.hypot(40, 10)
-    np.testing.assert_allclose(transmit_direction_range(**transmits)[:, 0], [[-s, s]])
+    np.testing.assert_allclose(transmit_direction_range(**transmits)[0][:, 0], [[-s, s]])
     transmits["focus_distances"] = -transmits["focus_distances"]
-    np.testing.assert_allclose(transmit_direction_range(**transmits)[:, 0], [[-s, s]])
+    np.testing.assert_allclose(transmit_direction_range(**transmits)[0][:, 0], [[-s, s]])
 
 
 def test_aliasing_limits_symmetric_fallback_without_active_elements():
@@ -404,7 +404,7 @@ def test_transmit_direction_range_matrix_focus():
     """An unsteered focus on a square aperture spans +-s in x and y; on axis in z."""
     transmits = _matrix_plane_waves(0, 0, n_side=3, pitch=10e-3)
     transmits["focus_distances"] = np.array([40e-3])
-    (x_range, y_range, z_range) = transmit_direction_range(**transmits)[0]
+    (x_range, y_range, z_range) = transmit_direction_range(**transmits)[0][0]
     s = 10 / np.hypot(40, 10)
     np.testing.assert_allclose(x_range, [-s, s])
     np.testing.assert_allclose(y_range, [-s, s])
@@ -475,6 +475,21 @@ def test_prepare_parameters_check_sees_overrides(recorded_aliasing_checks):
     ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(parameters, f_number=0.0)
     assert recorded_aliasing_checks[0]["parameters"].f_number == 0.0
     assert parameters.f_number != 0.0
+
+
+def test_prepare_parameters_check_does_not_reslice_overrides(recorded_aliasing_checks):
+    """Per-transmit overrides span the selected transmits, so they are not sliced again."""
+    parameters = get_parameters()
+    selection = [0, parameters.n_tx - 1]
+    parameters.set_transmits(selection)
+    focus_distances = np.array([10e-3, 20e-3])
+    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(
+        parameters, focus_distances=focus_distances
+    )
+    checked = recorded_aliasing_checks[0]["parameters"]
+    np.testing.assert_allclose(checked.focus_distances, focus_distances)
+    assert checked.tx_apodizations.shape[0] == len(selection)
+    np.testing.assert_array_equal(parameters.selected_transmits, selection)
 
 
 def test_prepare_parameters_survives_failing_check(monkeypatch):
@@ -578,9 +593,18 @@ def test_parameters_check_for_aliasing_without_polar_angles():
 def test_transmit_direction_range_skips_nan_focus():
     """A ``NaN`` focus distance marks no transmit type, so that transmit is left out."""
     transmits = {**_plane_waves([0, 0]), "focus_distances": np.array([np.nan, 40e-3])}
-    ranges = transmit_direction_range(**transmits)
+    ranges = transmit_direction_range(**transmits)[0]
     assert ranges.shape == (1, 3, 2)
     assert np.all(np.isfinite(ranges))
+
+
+def test_transmit_direction_range_skips_inactive_plane_waves():
+    """A plane wave without active elements never fires, so it does not widen the range."""
+    transmits = _plane_waves([0, 20])
+    transmits["tx_apodizations"][1] = 0.0
+    ranges, plane = transmit_direction_range(**transmits)
+    np.testing.assert_allclose(ranges[:, 0], [[0.0, 0.0]], atol=1e-12)
+    np.testing.assert_array_equal(plane, [True])
 
 
 def test_transmit_direction_range_keeps_horizontal_rays():
@@ -588,7 +612,7 @@ def test_transmit_direction_range_keeps_horizontal_rays():
     transmits = _plane_waves(0, n_el=2, pitch=20e-3)
     transmits["probe_geometry"][0, 2] = 10e-3  # first element at the focal depth
     transmits["focus_distances"] = np.array([10e-3])
-    x_range, _, z_range = transmit_direction_range(**transmits)[0]
+    x_range, _, z_range = transmit_direction_range(**transmits)[0][0]
     np.testing.assert_allclose(x_range, [-1 / np.sqrt(2), 1.0])
     assert z_range[0] == pytest.approx(0.0)
 

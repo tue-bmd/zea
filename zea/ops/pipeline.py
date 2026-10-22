@@ -1062,6 +1062,13 @@ class Pipeline:
         try:
             if valid:
                 parameters = parameters.copy()
+                # Overrides reach the pipeline as-is, so per-transmit overrides already
+                # span only the selected transmits. Bake the selection into the copy
+                # so they are not sliced a second time.
+                if parameters.selected_transmits is not None:
+                    n_selected = parameters.n_tx
+                    parameters.update(parameters.to_scan_dict(), n_tx=n_selected)
+                    parameters.set_transmits(None)
                 parameters.update({key: overrides[key] for key in valid})
         except Exception as exc:  # e.g. an override that only makes sense as a tensor
             log.debug(f"[zea.Pipeline] Skipping parameter checks: {exc!r}")
