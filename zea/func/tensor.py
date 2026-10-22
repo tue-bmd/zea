@@ -1879,7 +1879,9 @@ def translate(array, range_from=None, range_to=(0, 255)):
 def normalize(data, output_range, input_range=None):
     """Normalize data to a given range.
 
-    Equivalent to `translate` with clipping.
+    Equivalent to `translate` with clipping. The clip is applied to the output, so
+    the result stays inside ``output_range`` exactly: clipping the input instead lets
+    the affine map round a value one ulp past the bound (seen under JIT on GPU).
 
     Args:
         data (ops.Tensor): Input data to normalize.
@@ -1895,9 +1897,9 @@ def normalize(data, output_range, input_range=None):
         minval = ops.min(data)
     if maxval is None:
         maxval = ops.max(data)
-    data = ops.clip(data, minval, maxval)
     normalized_data = translate(data, (minval, maxval), output_range)
-    return normalized_data
+    lo, hi = output_range
+    return ops.clip(normalized_data, ops.minimum(lo, hi), ops.maximum(lo, hi))
 
 
 def split_into_windows(
