@@ -1965,8 +1965,12 @@ class ScanSpec(Spec):
             raise ValueError(
                 f"Demodulation frequency cannot be negative, got {self.demodulation_frequency}"
             )
+        if not np.all(np.isfinite(self.t0_delays)):
+            raise ValueError(f"Transmit delays must be finite, got {self.t0_delays}")
         if np.any(self.t0_delays < 0):
             raise ValueError(f"Transmit delays cannot be negative, got {self.t0_delays}")
+        if not np.all(np.isfinite(self.tx_apodizations)):
+            raise ValueError(f"Transmit apodizations must be finite, got {self.tx_apodizations}")
         if np.any(np.logical_and(self.focus_distances >= 1, self.focus_distances != np.inf)):
             log.warning(
                 "Focus distances greater than or equal to 1 meter may be unusually large. "
