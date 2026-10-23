@@ -711,14 +711,6 @@ class Pipeline:
                     f"of operation {operations[i + 1].__class__.__name__}"
                 )
 
-    def flat_operations(self):
-        """Yield the operations in execution order, flattening nested pipelines."""
-        for operation in self.operations:
-            if isinstance(operation, Pipeline):
-                yield from operation.flat_operations()
-            else:
-                yield operation
-
     def set_params(self, **params):
         """Set parameters for the operations in the pipeline by adding them to the cache."""
         for operation in self.operations:
@@ -989,7 +981,6 @@ class Pipeline:
         self,
         parameters: Union["Parameters", None] = None,
         device: Union[str, None] = None,
-        check: bool = True,
         **overrides,
     ) -> Dict[str, Any]:
         """Prepare a :class:`~zea.Parameters` object for the pipeline.
@@ -1006,9 +997,6 @@ class Pipeline:
                 converted, so derivation is lazy and minimal.
             device: Device to place the tensors on. Defaults to the pipeline
                 device.
-            check: Whether to let each operation sanity-check the parameters
-                (see :meth:`~zea.ops.Operation.check_parameters`), which may log
-                warnings. Defaults to True.
             **overrides: Additional parameters to include in the inputs
                 (converted to tensors). These overwrite values taken from
                 ``parameters``.
@@ -1032,8 +1020,6 @@ class Pipeline:
         if parameters is not None:
             if not isinstance(parameters, Parameters):
                 raise TypeError(f"Expected an instance of `zea.Parameters`, got {type(parameters)}")
-            if check:
-                self._check_parameters(parameters, overrides)
             # Only convert keys the pipeline needs and that are not overridden,
             # so we avoid deriving unnecessary parameters.
             needs_keys = self.needs_keys - override_keys
@@ -1050,39 +1036,6 @@ class Pipeline:
         prepared = {**params_dict, **tensor_overrides}
 
         return prepared
-
-    def _check_parameters(self, parameters: "Parameters", overrides: Dict[str, Any]):
-        """Run each operation's :meth:`~zea.ops.Operation.check_parameters`.
-
-        Deliberately before the tensor conversion: the checks need concrete values.
-        Overrides of known parameters are applied to a copy first, so the checks see
-        the configuration that will actually run.
-        """
-        valid = overrides.keys() & parameters.VALID_PARAMS.keys()
-        try:
-            if valid:
-                parameters = parameters.copy()
-                # Overrides reach the pipeline as-is, so per-transmit overrides already
-                # span only the selected transmits. Bake the selection into the copy
-                # so they are not sliced a second time.
-                if parameters.selected_transmits is not None:
-                    n_selected = parameters.n_tx
-                    parameters.update(parameters.to_scan_dict(), n_tx=n_selected)
-                    parameters.set_transmits(None)
-                parameters.update({key: overrides[key] for key in valid})
-        except Exception as exc:  # e.g. an override that only makes sense as a tensor
-            log.debug(f"[zea.Pipeline] Skipping parameter checks: {exc!r}")
-            return
-
-        operations = list(self.flat_operations())
-        for i, operation in enumerate(operations):
-            try:
-                operation.check_parameters(parameters, upstream=operations[:i])
-            except Exception as exc:  # a check must never stop a pipeline from running
-                log.debug(
-                    f"[zea.Pipeline] Skipping {operation.__class__.__name__} parameter check: "
-                    f"{exc!r}"
-                )
 
 
 @ops_registry("map")

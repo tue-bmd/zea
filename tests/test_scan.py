@@ -5,7 +5,7 @@ import pickle
 import numpy as np
 import pytest
 
-from zea import Parameters, ops
+from zea import Parameters
 from zea.beamform.pixelgrid import aliasing_limits, check_for_aliasing, transmit_direction_range
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
@@ -440,67 +440,54 @@ def test_aliasing_limits_iq_axial_includes_oblique_paths():
     assert limits["dz_max"] < 1540.0 / (2 * 4e6)
 
 
-@pytest.fixture
-def recorded_aliasing_checks(monkeypatch):
-    """Record the calls to ``Parameters.check_for_aliasing`` instead of running them."""
+def test_grid_checks_aliasing(monkeypatch):
+    """Building a cartesian grid runs the aliasing check, assuming IQ data."""
     calls = []
-
-    def record(self, demodulated=None, bandwidth=None):
-        calls.append({"parameters": self, "demodulated": demodulated})
-        return []
-
-    monkeypatch.setattr(Parameters, "check_for_aliasing", record)
-    return calls
-
-
-def test_prepare_parameters_checks_aliasing_from_tof_correction(recorded_aliasing_checks):
-    """TOFCorrection runs the aliasing check, stating demodulation from the ops before it."""
-    parameters = get_parameters()
-
-    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(parameters)
-    ops.Pipeline([ops.Demodulate(), ops.Pipeline([ops.TOFCorrection()])]).prepare_parameters(
-        parameters
+    monkeypatch.setattr(
+        Parameters, "check_for_aliasing", lambda self, **kwargs: calls.append(kwargs) or []
     )
-    assert [call["demodulated"] for call in recorded_aliasing_checks] == [None, True]
+    _ = Parameters(**focused_scan_args).grid
+    assert calls == [{}]
 
-    # No grid, nothing to check; and the check can be turned off.
-    ops.Pipeline([ops.Demodulate()]).prepare_parameters(parameters)
-    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(parameters, check=False)
-    assert len(recorded_aliasing_checks) == 2
+    _ = Parameters(**focused_scan_args, grid_type="polar").grid
+    assert len(calls) == 1
 
 
-def test_prepare_parameters_check_sees_overrides(recorded_aliasing_checks):
-    """Overrides reach the check, without touching the caller's parameters."""
+def test_grid_warns_on_lateral_aliasing(attach_caplog_warnings):
+    """An under-sized grid warns when it is built, without a pipeline."""
+    _ = Parameters(**focused_scan_args).grid
+    messages = [record.message for record in attach_caplog_warnings.records]
+    assert any("Lateral grid pitch" in m for m in messages)
+
+
+def test_grid_automatic_size_does_not_warn(attach_caplog_warnings):
+    """An automatically sized grid passes the IQ check, and the check itself does not
+    trigger the "No ... provided" fallback warnings of the transmit parameters."""
     parameters = get_parameters()
-    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(parameters, f_number=0.0)
-    assert recorded_aliasing_checks[0]["parameters"].f_number == 0.0
-    assert parameters.f_number != 0.0
+    parameters.update(grid_size_x=None, grid_size_z=None)
+    _ = parameters.grid
+    assert attach_caplog_warnings.records == []
 
 
-def test_prepare_parameters_check_does_not_reslice_overrides(recorded_aliasing_checks):
-    """Per-transmit overrides span the selected transmits, so they are not sliced again."""
-    parameters = get_parameters()
-    selection = [0, parameters.n_tx - 1]
-    parameters.set_transmits(selection)
-    focus_distances = np.array([10e-3, 20e-3])
-    ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(
-        parameters, focus_distances=focus_distances
+def test_parameters_check_for_aliasing_follows_transmit_selection():
+    """Only the selected transmits set the limit, here a single unsteered plane wave."""
+    transmits = _plane_waves([-30, 0, 30])
+    args = dict(
+        xlims=(-5e-3, 5e-3),
+        zlims=(0.0, 10e-3),
+        sound_speed=1540.0,
+        center_frequency=5e6,
+        n_el=128,
+        n_tx=3,
+        **transmits,
     )
-    checked = recorded_aliasing_checks[0]["parameters"]
-    np.testing.assert_allclose(checked.focus_distances, focus_distances)
-    assert checked.tx_apodizations.shape[0] == len(selection)
-    np.testing.assert_array_equal(parameters.selected_transmits, selection)
-
-
-def test_prepare_parameters_survives_failing_check(monkeypatch):
-    """A check that raises is logged and skipped; the parameters are still prepared."""
-
-    def fail(self, parameters, upstream):
-        raise RuntimeError("broken check")
-
-    monkeypatch.setattr(ops.TOFCorrection, "check_parameters", fail)
-    inputs = ops.Pipeline([ops.TOFCorrection()]).prepare_parameters(get_parameters())
-    assert "flatgrid" in inputs
+    # A pitch between the compounded and the single plane-wave lateral limits.
+    limit = 1540.0 / 7.5e6 / (2 / np.sqrt(5))
+    size_x = int(np.ceil(10e-3 / (0.8 * limit))) + 1
+    parameters = Parameters(**args, grid_size_x=size_x, grid_size_z=1024)
+    assert any("Lateral" in m for m in parameters.check_for_aliasing())
+    parameters.set_transmits([1])
+    assert parameters.check_for_aliasing() == []
 
 
 def test_parameters_check_for_aliasing_rf_vs_iq():
@@ -536,17 +523,6 @@ def test_parameters_check_for_aliasing_assumes_probe_bandwidth():
 def test_parameters_check_for_aliasing_skips_polar_grid():
     """Non-cartesian grids are not checked."""
     assert Parameters(**focused_scan_args, grid_type="polar").check_for_aliasing() == []
-
-
-def test_parameters_check_for_aliasing_n_ch_marks_iq():
-    """Data handed over as IQ (``n_ch == 2``) is treated as demodulated."""
-    parameters = Parameters(**{**focused_scan_args, "n_ch": 2})
-    msgs = parameters.check_for_aliasing(bandwidth=1e6)
-    assert not any("Axial" in m for m in msgs)
-
-    # An explicit `demodulated=False` takes priority over `n_ch`.
-    msgs = parameters.check_for_aliasing(demodulated=False, bandwidth=1e6)
-    assert any("Axial" in m for m in msgs)
 
 
 def test_aliasing_limits_directivity_caps_receive():

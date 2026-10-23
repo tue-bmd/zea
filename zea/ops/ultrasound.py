@@ -193,17 +193,6 @@ class TOFCorrection(Operation):
             **kwargs,
         )
 
-    def check_parameters(self, parameters, upstream):
-        """Warn when the grid this operation maps the data onto aliases it.
-
-        See :meth:`zea.Parameters.check_for_aliasing`. The data is IQ when a
-        :class:`Demodulate` runs upstream, or when it arrives with ``n_ch == 2``.
-        """
-        if any(isinstance(operation, Demodulate) for operation in upstream):
-            parameters.check_for_aliasing(demodulated=True)
-        else:
-            parameters.check_for_aliasing()
-
     def call(
         self,
         flatgrid,

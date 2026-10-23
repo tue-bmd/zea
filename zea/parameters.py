@@ -437,7 +437,7 @@ class Parameters(BaseParameters):
                 self.distance_to_apex,
             )
         elif self.grid_type == "cartesian":
-            return cartesian_pixel_grid(
+            grid = cartesian_pixel_grid(
                 self.xlims,
                 self.zlims,
                 self.ylims,
@@ -445,25 +445,32 @@ class Parameters(BaseParameters):
                 grid_size_x=self.grid_size_x,
                 grid_size_y=self.grid_size_y,
             )
+            try:
+                self.check_for_aliasing()
+            except MissingDependencyError:
+                # No wavelength (e.g. missing center frequency); cannot assess aliasing.
+                pass
+            return grid
         else:
             raise ValueError(
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
 
-    def check_for_aliasing(self, demodulated=None, bandwidth=None) -> list:
+    def check_for_aliasing(self, demodulated=True, bandwidth=None) -> list:
         """Warn when the beamforming grid under-samples the data it will carry.
 
-        Whether a pixel pitch under-samples depends on whether the data reaching
-        the grid is RF or baseband IQ, which the parameters alone do not tell.
-        :class:`~zea.ops.TOFCorrection` runs this check from
-        :meth:`zea.Pipeline.prepare_parameters`, stating ``demodulated`` from the
-        operations before it. See :func:`zea.beamform.pixelgrid.aliasing_limits`
-        for the criteria. Only regular cartesian grids, 2D or 3D, are checked.
+        Run by :attr:`grid` for cartesian grids. Whether a pixel pitch
+        under-samples depends on whether the data reaching the grid is RF or
+        baseband IQ, which the parameters alone do not tell. By default IQ is
+        assumed: its axial limit is never stricter than the RF one, so a grid
+        that fails it aliases either way, and the lateral limit is the same for
+        both. See :func:`zea.beamform.pixelgrid.aliasing_limits` for the
+        criteria. Only regular cartesian grids, 2D or 3D, are checked.
 
         Args:
-            demodulated: Whether the data reaching the grid is baseband IQ. When
-                ``None``, ``n_ch == 2`` (zea's IQ convention) marks the data as IQ.
+            demodulated: Whether the data reaching the grid is baseband IQ.
+                Pass ``False`` to check against the stricter RF axial limit.
             bandwidth: The RF band in Hz. Overrides the ``bandwidth`` parameter;
                 when neither is set, ``probe_bandwidth_percent`` of the
                 ``center_frequency`` is assumed.
@@ -474,8 +481,21 @@ class Parameters(BaseParameters):
         if self.grid_type != "cartesian" or self.enable_scanline:
             return []
 
-        if demodulated is None:
-            demodulated = bool(self._params.get("n_ch") == 2)
+        def stored(name):
+            # Read through the property so the transmit selection applies, but only
+            # when the value was provided: the fallbacks log a warning that the
+            # check should not trigger.
+            return getattr(self, name) if self._params.get(name) is not None else None
+
+        focus_distances = stored("focus_distances")
+        tx_apodizations = stored("tx_apodizations")
+        if focus_distances is None or tx_apodizations is None:
+            # Unknown transmit geometry: an empty one makes aliasing_limits assume
+            # the symmetric transmit cone.
+            focus_distances, tx_apodizations = np.zeros(0), np.zeros((0, 0))
+        transmit_origins = stored("transmit_origins")
+        if transmit_origins is None:
+            transmit_origins = np.zeros((len(focus_distances), 3))
 
         if bandwidth is None:
             bandwidth = self._params.get("bandwidth")
@@ -492,11 +512,11 @@ class Parameters(BaseParameters):
             self.center_frequency,
             self.f_number,
             demodulation_frequency=self.demodulation_frequency,
-            focus_distances=self.focus_distances,
+            focus_distances=focus_distances,
             probe_geometry=self.probe_geometry,
-            tx_apodizations=self.tx_apodizations,
+            tx_apodizations=tx_apodizations,
             polar_angles=self.polar_angles,
-            transmit_origins=self.transmit_origins,
+            transmit_origins=transmit_origins,
             demodulated=demodulated,
             bandwidth=bandwidth,
             # The raw parameter avoids the "using zeros" warning for 2D data.
