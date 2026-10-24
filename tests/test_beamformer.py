@@ -9,6 +9,8 @@ from zea.beamform.beamformer import (
     calculate_delays,
     complex_rotate,
     compute_receive_distances,
+    fnum_window_fn_rect,
+    fnumber_mask,
     tof_correction,
     transmit_delays,
 )
@@ -754,6 +756,24 @@ def test_tof_correction_with_fnumber(probe_geometry, flatgrid):
     result = keras.ops.convert_to_numpy(tof_correction(**inputs))
     assert np.any(result == 0.0), "Expected some masked-out values with f_number > 0"
     return result
+
+
+def test_tof_correction_transmit_fnumber_mask(probe_geometry, flatgrid):
+    """For multistatic data, transmit_f_number_mask masks transmit ``i`` wherever
+    element ``i`` is outside a pixel's f-number cone, on top of the receive mask."""
+    # enough samples to reach the deepest pixel, so the data is not all zero
+    inputs = _make_tof_inputs(probe_geometry, flatgrid, n_tx=N_EL, n_ax=1500)
+    inputs["t0_delays"] = np.zeros((N_EL, N_EL), np.float32)
+    inputs["tx_apodizations"] = np.eye(N_EL, dtype=np.float32)
+    inputs["transmit_origins"] = probe_geometry
+    inputs["f_number"] = 1.0
+    rx_only = keras.ops.convert_to_numpy(tof_correction(**inputs))
+    both = keras.ops.convert_to_numpy(tof_correction(**inputs, transmit_f_number_mask=True))
+    mask = keras.ops.convert_to_numpy(
+        fnumber_mask(flatgrid, probe_geometry, 1.0, fnum_window_fn_rect)
+    )[..., 0]  # (n_pix, n_el)
+    np.testing.assert_allclose(both, rx_only * mask.T[:, :, None, None], atol=1e-6)
+    assert np.any((both == 0) & (rx_only != 0)), "expected transmits masked beyond receive"
 
 
 @backend_equality_check()

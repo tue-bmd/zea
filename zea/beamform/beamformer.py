@@ -134,6 +134,7 @@ def tof_correction(
     sos_grid_x=None,
     sos_grid_z=None,
     focal_region_length=None,
+    transmit_f_number_mask=False,
 ):
     """Time-of-flight (TOF) correction for ultrasound data on a flat pixel grid.
 
@@ -206,6 +207,13 @@ def tof_correction(
             smooths the focal-plane transition while preserving the same model
             outside the region. See :func:`transmit_delays`. Defaults to
             ``None`` (disabled).
+        transmit_f_number_mask (bool, optional): Also apply the f-number
+            mask on the transmit leg, masking transmit ``i`` wherever element
+            ``i`` lies outside the acceptance cone of a pixel. Requires a
+            multistatic acquisition (``n_tx == n_el``), where transmit ``i``
+            fires element ``i``. The heterogeneous (``sos_map``) path always
+            does this; for the homogeneous path it defaults to ``False``, which
+            masks the receive leg only. Defaults to ``False``.
 
     Returns:
         Tensor: Time-of-flight corrected data of shape
@@ -343,7 +351,13 @@ def tof_correction(
     txdel = ops.moveaxis(txdel, 1, 0)[..., None]
 
     if sos_map is None:
-        return vmap(_correct_single_tx)(data, txdel)
+        if not transmit_f_number_mask:
+            return vmap(_correct_single_tx)(data, txdel)
+        assert n_tx == n_el, (
+            "transmit_f_number_mask requires a multistatic dataset (n_tx == n_el), "
+            f"got n_tx={n_tx}, n_el={n_el}."
+        )
+        return vmap(_correct_single_tx)(data, txdel, ops.moveaxis(mask, 1, 0))
 
     # Heterogeneous path: apply transmit f-number mask and use gradient
     # checkpointing to limit memory consumption.
