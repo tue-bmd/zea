@@ -17,7 +17,7 @@ from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
 from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
 from zea.simulator import simulate_rf, simulate_rf_td, transmit_pulse
-from zea.simulator.time_domain import _scattered_waveform
+from zea.simulator.time_domain import _scatter_spike_map, _scattered_waveform
 
 N_EL = 80
 APERTURE = 32e-3
@@ -39,6 +39,69 @@ def test_time_domain_scatter_exponent_weights_pulse_spectrum():
     frequencies = np.fft.rfftfreq(len(unweighted), 1 / (CENTER_FREQUENCY * 4))
     expected = np.fft.rfft(unweighted) * (frequencies / CENTER_FREQUENCY) ** 2
     np.testing.assert_allclose(np.fft.rfft(weighted), expected, rtol=2e-5, atol=2e-5)
+
+
+def _spike_map_inputs(n_scat=300, n_el=12, n_ax=64, seed=0):
+    """Factored splat inputs, with delays partly outside the record on both ends."""
+    rng = np.random.default_rng(seed)
+    return (
+        rng.uniform(-8, n_ax / 2, (n_scat, n_el)).astype("float32"),
+        rng.standard_normal((n_scat, n_el)).astype("float32"),
+        rng.uniform(0, n_ax / 2 + 8, (n_scat, n_el)).astype("float32"),
+        rng.standard_normal((n_scat, n_el)).astype("float32"),
+    )
+
+
+def _reference_spike_map(tx_samples, tx_gain, rx_samples, rx_gain, n_ax):
+    """Plain linear-interpolation splat, one contribution at a time."""
+    positions = (tx_samples[:, :, None] + rx_samples[:, None, :]).astype("float64")
+    weights = (tx_gain[:, :, None] * rx_gain[:, None, :]).astype("float64")
+    lower = np.floor(positions)
+    fractional = positions - lower
+    rx = np.broadcast_to(np.arange(positions.shape[2]), positions.shape)
+    spike_map = np.zeros((n_ax, positions.shape[2]))
+    for index, weight in ((lower, weights * (1 - fractional)), (lower + 1, weights * fractional)):
+        valid = (index >= 0) & (index < n_ax)
+        np.add.at(spike_map, (index[valid].astype(int), rx[valid]), weight[valid])
+    return spike_map
+
+
+def test_time_domain_spike_map_matches_plain_splat():
+    """The replicated, paired-tap splat sums to the plain one, also at the record edges."""
+    inputs = _spike_map_inputs()
+    tensors = [keras.ops.convert_to_tensor(x) for x in inputs]
+    spike_map = keras.ops.convert_to_numpy(_scatter_spike_map(*tensors, n_ax=64, n_replicas=4))
+    np.testing.assert_allclose(spike_map, _reference_spike_map(*inputs, 64), atol=1e-4)
+
+
+@pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax gradients")
+def test_time_domain_spike_map_gradient_is_the_autodiff_one():
+    """The custom gradient of the splat equals autodiff through the plain segment-sum splat."""
+    import jax
+    import jax.numpy as jnp
+
+    n_ax = 64
+    inputs = tuple(jnp.asarray(x) for x in _spike_map_inputs())
+    upstream = jnp.asarray(np.random.default_rng(1).standard_normal((n_ax, 12)), "float32")
+
+    def plain(tx_samples, tx_gain, rx_samples, rx_gain):
+        positions = tx_samples[:, :, None] + rx_samples[:, None, :]
+        weights = tx_gain[:, :, None] * rx_gain[:, None, :]
+        lower = jnp.floor(positions)
+        fractional = positions - lower
+        rx = jnp.broadcast_to(jnp.arange(positions.shape[2]), positions.shape)
+        spike_map = jnp.zeros((n_ax, positions.shape[2]))
+        for index, weight in ((lower, 1 - fractional), (lower + 1, fractional)):
+            # jax wraps negative indices, so send every out-of-range tap past the end.
+            index = jnp.where((index >= 0) & (index < n_ax), index, n_ax).astype("int32")
+            spike_map = spike_map.at[index, rx].add(weights * weight, mode="drop")
+        return spike_map
+
+    fast = lambda *x: _scatter_spike_map(*x, n_ax=n_ax, n_replicas=4)  # noqa: E731
+    expected = jax.grad(lambda *x: jnp.sum(plain(*x) * upstream), argnums=(0, 1, 2, 3))(*inputs)
+    actual = jax.grad(lambda *x: jnp.sum(fast(*x) * upstream), argnums=(0, 1, 2, 3))(*inputs)
+    for a, e in zip(actual, expected):
+        np.testing.assert_allclose(a, e, rtol=1e-4, atol=1e-4)
 
 
 def _parameters(probe_geometry):
