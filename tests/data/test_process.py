@@ -234,8 +234,20 @@ def test_run_passthrough_overwrite_true(tmp_path):
 # ── run_processing — passthrough fallback ─────────────────────────────────────
 
 
-def test_run_processing_passthrough_fallback(tmp_path):
-    """run_processing falls back to passthrough for image keys when config has no pipeline."""
+@pytest.mark.parametrize(
+    "config_revision, expected_config_revision",
+    [
+        (None, None),  # falls back to the dataset revision (None here)
+        ("", None),  # the app sends "" for "no revision"
+        ("v1", "v1"),  # an explicit config revision is forwarded as-is
+    ],
+)
+def test_run_processing_passthrough_fallback(tmp_path, config_revision, expected_config_revision):
+    """run_processing falls back to passthrough for image keys when config has no pipeline.
+
+    Also checks the revision the config (and pipeline) is loaded at.
+    """
+    from zea.config import Config
     from zea.data.process import run_processing
 
     ds_dir = tmp_path / "ds"
@@ -243,16 +255,27 @@ def test_run_processing_passthrough_fallback(tmp_path):
     cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
     out_dir = tmp_path / "out"
 
-    run_processing(
-        str(ds_dir),
-        str(cfg),
-        key="data/image/values",
-        n_frames=None,
-        save_dir=out_dir,
-        save_as="gif",
-    )
+    seen = []
+    original = Config.from_path
+
+    def spy(path, revision=None, **kwargs):
+        seen.append(revision)
+        return original(path, **kwargs)  # local config: revision is irrelevant
+
+    with patch("zea.data.process.Config.from_path", spy):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/image/values",
+            n_frames=None,
+            save_dir=out_dir,
+            save_as="gif",
+            config_revision=config_revision,
+        )
 
     assert (out_dir / "scan.gif").exists()
+    # Config and Pipeline loading must both use the effective config revision.
+    assert seen and all(rev == expected_config_revision for rev in seen)
 
 
 def test_run_processing_raw_without_pipeline_raises(tmp_path):
@@ -653,3 +676,139 @@ def test_run_processing_accepts_consistently_ordered_tracks(tmp_path):
     for name in ("a_first.hdf5", "b_second.hdf5"):
         with File(out_dir / name) as f:
             assert np.all(f[f.format_key("data/image/values")][:] == 1)
+
+
+# ── run_processing — custom operations ────────────────────────────────────────
+
+
+_CUSTOM_OP_MODULE = """
+from zea.internal.registry import ops_registry
+from zea.ops.base import Operation
+
+
+@ops_registry("{name}")
+class ProcessTmpOp(Operation):
+    def call(self, data, **kwargs):
+        return {{"data": data}}
+"""
+
+
+def _write_custom_op_module(path: Path, name: str) -> Path:
+    """Write a module registering one operation under ``name``."""
+    path.write_text(_CUSTOM_OP_MODULE.format(name=name), encoding="utf-8")
+    return path
+
+
+def test_run_processing_imports_custom_op_from_config(tmp_path):
+    """A config declaring `imports` runs an operation that is not part of zea."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    _write_custom_op_module(tmp_path / "my_ops.py", "process_cfg_custom_op")
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n"
+        "  sound_speed: 1540\n"
+        "pipeline:\n"
+        "  imports:\n"
+        "    - my_ops.py\n"
+        "  operations:\n"
+        "    - envelope_detect\n"
+        "    - process_cfg_custom_op\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+        save_as="png",
+    )
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_processing_imports_custom_op_from_cli(tmp_path):
+    """--imports covers a module the config does not mention itself."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    module = _write_custom_op_module(tmp_path / "cli_ops.py", "process_cli_custom_op")
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n"
+        "  sound_speed: 1540\n"
+        "pipeline:\n"
+        "  operations:\n"
+        "    - envelope_detect\n"
+        "    - process_cli_custom_op\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+
+    run_processing(
+        str(ds_dir),
+        str(cfg),
+        key="data/raw_data",
+        n_frames=1,
+        save_dir=out_dir,
+        save_as="png",
+        imports=[str(module)],
+    )
+
+    assert (out_dir / "scan.png").exists()
+
+
+def test_run_processing_unknown_custom_op_explains_imports(tmp_path):
+    """Without the module, the failure tells the user how to declare it."""
+    from zea.data.process import run_processing
+
+    ds_dir = tmp_path / "ds"
+    generate_example_dataset(ds_dir / "scan.hdf5", n_frames=1, n_ax=8, n_el=4, n_tx=2)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "parameters:\n  sound_speed: 1540\npipeline:\n  operations:\n    - never_registered_op\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KeyError, match="imports:"):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/raw_data",
+            n_frames=1,
+            save_dir=tmp_path / "out",
+        )
+
+
+def test_run_processing_remote_import_needs_trust(tmp_path, monkeypatch):
+    """A config pulling code off the Hub stops and asks, rather than executing it.
+
+    The gate has to survive the `except (ValueError, KeyError)` around the pipeline
+    build, which otherwise degrades a failed build into a silent passthrough.
+    """
+    from zea.data.process import run_processing
+    from zea.ops.imports import RemoteCodeError
+
+    monkeypatch.delenv("ZEA_TRUST_REMOTE_CODE", raising=False)
+    ds_dir = tmp_path / "ds"
+    _make_image_file(ds_dir / "img.hdf5", n_frames=1)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(
+        "pipeline:\n  imports:\n    - hf://org/repo/remote_ops.py\n  operations:\n    - identity\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RemoteCodeError, match="--trust-remote-code"):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/image/values",
+            n_frames=1,
+            save_dir=tmp_path / "out",
+        )

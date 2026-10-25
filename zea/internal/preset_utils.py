@@ -14,6 +14,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import quote
 
 from huggingface_hub import RepoFile, hf_hub_download, list_repo_tree, login
 from huggingface_hub.utils import (
@@ -433,7 +434,10 @@ def _hf_stream_url(
     if not subpath:
         raise ValueError(f"Expected an 'hf://' path to a single file, got '{hf_path}'.")
     prefix = _hf_repo_type_prefix(repo_type)
-    return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{revision or 'main'}/{subpath}"
+    # The revision is one path segment: a PR ref ("refs/pr/66") or a branch with a slash
+    # must be percent-encoded, or the hub reads "refs" as the revision and answers 404.
+    rev = quote(revision or "main", safe="")
+    return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{rev}/{quote(subpath)}"
 
 
 def _hf_stream_open(

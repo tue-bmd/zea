@@ -111,10 +111,14 @@ class Config(dict):
         super().__setattr__(
             "__protected__",
             [x[0] for x in inspect.getmembers(Config, predicate=inspect.isroutine)]
-            + ["__protected__", "__accessed__", "__parent__"],
+            + ["__protected__", "__accessed__", "__parent__", "__source__", "__revision__"],
         )
         super().__setattr__("__accessed__", {})
         super().__setattr__("__parent__", __parent__)
+        # Where the config was loaded from (set by ``from_path``), so that paths inside
+        # it, such as ``pipeline.imports``, can be resolved relative to the file.
+        super().__setattr__("__source__", None)
+        super().__setattr__("__revision__", None)
 
         if isinstance(dictionary, (str, Path)):
             raise TypeError(
@@ -488,7 +492,9 @@ class Config(dict):
                 for example ``repo_type`` or ``revision``.
 
         Returns:
-            Config: config object.
+            Config: config object. It remembers the path it was loaded from (and the
+            ``revision``), so that a pipeline built from it resolves relative
+            ``imports`` next to the file.
 
         Example:
             .. doctest::
@@ -498,10 +504,18 @@ class Config(dict):
 
         """
         if str(path).startswith(HF_PREFIX):
+            # Keep the hf:// URI as the source rather than the local cache path, so
+            # that files next to the config are fetched from the same repo.
+            source = str(path)
             path = _hf_resolve_path(str(path), **kwargs)
+        else:
+            source = str(Path(path).expanduser().resolve())
         if isinstance(path, str):
             path = Path(path)
-        return _load_config_from_yaml(path, config_class=cls, loader=loader)
+        config = _load_config_from_yaml(path, config_class=cls, loader=loader)
+        object.__setattr__(config, "__source__", source)
+        object.__setattr__(config, "__revision__", kwargs.get("revision"))
+        return config
 
     @classmethod
     @deprecated(replacement="Config.from_path")
