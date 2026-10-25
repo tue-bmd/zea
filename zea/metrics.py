@@ -313,6 +313,11 @@ def get_ultrapips(image_range, clip=False, preset="ultrapips-tusa"):
     """
     Get the UltraPIPS perceptual similarity metric for B-mode ultrasound.
 
+    .. note::
+        Unlike LPIPS, UltraPIPS resizes all images to a fixed square size, so
+        non-square images are stretched (a warning is logged). Crop or pad them
+        to a square first if the aspect ratio matters.
+
     Args:
         image_range (list): The range of the images. Will be translated to [-1, 1] for UltraPIPS.
         clip (bool): Whether to clip the images to `image_range`.
@@ -336,6 +341,9 @@ def get_ultrapips(image_range, clip=False, preset="ultrapips-tusa"):
         Returns (float): The UltraPIPS distance between img1 and img2 with shape (batch_size,)
             or scalar if no batch dimension.
         """
+        # cast to float first so translate does not subtract in an integer dtype
+        img1 = ops.cast(img1, "float32")
+        img2 = ops.cast(img2, "float32")
         if clip:
             img1 = ops.clip(img1, *image_range)
             img2 = ops.clip(img2, *image_range)
