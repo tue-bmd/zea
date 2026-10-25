@@ -217,7 +217,11 @@ def test_generate_admire_models(iq_models):
 
 
 def test_generate_admire_models_parallel(iq_models):
-    """Generating windows in worker processes gives the same models."""
+    """Generating windows in worker processes gives the same models, up to rounding.
+
+    The workers run single-threaded BLAS, which can sum in a different order than
+    the (multithreaded) parent process.
+    """
     depths, models = iq_models
     with cache_disabled():
         parallel = generate_admire_models(
@@ -230,7 +234,7 @@ def test_generate_admire_models_parallel(iq_models):
             analytic=True,
             n_workers=2,
         )
-    np.testing.assert_array_equal(parallel.models, models.models)
+    np.testing.assert_allclose(parallel.models, models.models, rtol=0, atol=1e-6)
     np.testing.assert_array_equal(parallel.roi_mask, models.roi_mask)
 
 

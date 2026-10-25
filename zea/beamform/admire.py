@@ -631,7 +631,8 @@ def generate_admire_models(
             reference settings.
         verbose (bool): Show a progress bar.
         n_workers (int, optional): Number of processes that generate windows in
-            parallel. Defaults to one. Does not affect the result (or its cache key).
+            parallel. Defaults to one. Does not affect the result (up to floating-point
+            rounding) or its cache key.
 
     Returns:
         ADMIREModels: The models of every STFT window and selected frequency.
