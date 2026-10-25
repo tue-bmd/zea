@@ -117,6 +117,70 @@ def test_process_boolean_flags():
     assert args.keep_dynamic_range is True
 
 
+def test_process_custom_op_imports():
+    """--imports takes several modules and --trust-remote-code gates remote ones."""
+    args = parse_args(
+        [
+            "process",
+            "-d",
+            "data/",
+            "-c",
+            "cfg.yaml",
+            "--imports",
+            "my_project.my_ops",
+            "./local_ops.py",
+            "hf://org/repo/remote_ops.py",
+            "--trust-remote-code",
+        ]
+    ).subcommand
+    assert args.imports == ["my_project.my_ops", "./local_ops.py", "hf://org/repo/remote_ops.py"]
+    assert args.trust_remote_code is True
+
+
+@pytest.mark.parametrize("flag", ["-i", "--import", "--imports"])
+def test_process_import_flag_spellings(flag):
+    """``--import`` reads naturally for one module; the other two are aliases of it."""
+    args = parse_args(["process", "-d", "data/", "-c", "cfg.yaml", flag, "my_ops.py"]).subcommand
+    assert args.imports == ["my_ops.py"]
+
+
+def test_process_imports_default_to_nothing():
+    """Configs that need no custom modules are unaffected."""
+    args = parse_args(["process", "-d", "data/", "-c", "cfg.yaml"]).subcommand
+    assert args.imports == []
+    assert args.trust_remote_code is False
+
+
+def test_process_forwards_imports_to_run_processing(monkeypatch):
+    """The two new flags reach zea.data.process.run_processing."""
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "zea",
+            "process",
+            "-d",
+            "data/",
+            "-c",
+            "cfg.yaml",
+            "-i",
+            "my_ops.py",
+            "--trust-remote-code",
+        ],
+    )
+
+    with (
+        patch("zea.internal.device.init_device"),
+        patch("zea.data.process.run_processing") as mock_run,
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    _, kwargs = mock_run.call_args
+    assert kwargs["imports"] == ["my_ops.py"]
+    assert kwargs["trust_remote_code"] is True
+
+
 # ── app subcommand ────────────────────────────────────────────────────────────
 
 

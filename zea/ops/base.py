@@ -84,7 +84,22 @@ def get_ops(ops_name: str):
             "even after attempting to import module."
         )
 
-    return ops_registry[ops_name]  # raises KeyError with a helpful message
+    try:
+        return ops_registry[ops_name]
+    except KeyError as exc:
+        # A name that is in no registry is most often a custom operation whose
+        # defining module was never imported, so point at how to declare it.
+        raise KeyError(
+            f"Operation '{ops_name}' is not registered.\n\n"
+            f"If '{ops_name}' is defined outside zea, the module defining it has to be "
+            "imported first. Declare it in the config:\n"
+            "    pipeline:\n"
+            "        imports:\n"
+            "          - path/to/your_module.py\n"
+            "or pass --import path/to/your_module.py to `zea process`. See "
+            "https://zea.readthedocs.io/en/latest/pipeline.html#custom-operations\n\n"
+            f"{exc.args[0]}"
+        ) from exc
 
 
 def _to_native(value):
