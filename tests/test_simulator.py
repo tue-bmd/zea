@@ -9,6 +9,7 @@ import pytest
 
 import zea
 from zea import Parameters, Probe, display
+from zea.backend.autograd import AutoGrad
 from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
@@ -74,34 +75,45 @@ def test_time_domain_spike_map_matches_plain_splat():
     np.testing.assert_allclose(spike_map, _reference_spike_map(*inputs, 64), atol=1e-4)
 
 
-@pytest.mark.skipif(keras.backend.backend() != "jax", reason="jax gradients")
-def test_time_domain_spike_map_gradient_is_the_autodiff_one():
-    """The custom gradient of the splat equals autodiff through the plain segment-sum splat."""
-    import jax
-    import jax.numpy as jnp
+def _reference_spike_map_gradients(tx_samples, tx_gain, rx_samples, rx_gain, upstream):
+    """Gradients of ``sum(spike_map * upstream)``: the upstream map read at both taps."""
+    positions = (tx_samples[:, :, None] + rx_samples[:, None, :]).astype("float64")
+    weights = (tx_gain[:, :, None] * rx_gain[:, None, :]).astype("float64")
+    lower = np.floor(positions)
+    fractional = positions - lower
+    rx = np.broadcast_to(np.arange(positions.shape[2]), positions.shape)
 
-    n_ax = 64
-    inputs = tuple(jnp.asarray(x) for x in _spike_map_inputs())
-    upstream = jnp.asarray(np.random.default_rng(1).standard_normal((n_ax, 12)), "float32")
+    def read(index):
+        valid = (index >= 0) & (index < len(upstream))
+        return np.where(valid, upstream[np.clip(index, 0, len(upstream) - 1).astype(int), rx], 0)
 
-    def plain(tx_samples, tx_gain, rx_samples, rx_gain):
-        positions = tx_samples[:, :, None] + rx_samples[:, None, :]
-        weights = tx_gain[:, :, None] * rx_gain[:, None, :]
-        lower = jnp.floor(positions)
-        fractional = positions - lower
-        rx = jnp.broadcast_to(jnp.arange(positions.shape[2]), positions.shape)
-        spike_map = jnp.zeros((n_ax, positions.shape[2]))
-        for index, weight in ((lower, 1 - fractional), (lower + 1, fractional)):
-            # jax wraps negative indices, so send every out-of-range tap past the end.
-            index = jnp.where((index >= 0) & (index < n_ax), index, n_ax).astype("int32")
-            spike_map = spike_map.at[index, rx].add(weights * weight, mode="drop")
-        return spike_map
+    d_positions = weights * (read(lower + 1) - read(lower))
+    d_weights = (1 - fractional) * read(lower) + fractional * read(lower + 1)
+    return (
+        d_positions.sum(2),
+        (d_weights * rx_gain[:, None, :]).sum(2),
+        d_positions.sum(1),
+        (d_weights * tx_gain[:, :, None]).sum(1),
+    )
 
-    fast = lambda *x: _scatter_spike_map(*x, n_ax=n_ax, n_replicas=4)  # noqa: E731
-    expected = jax.grad(lambda *x: jnp.sum(plain(*x) * upstream), argnums=(0, 1, 2, 3))(*inputs)
-    actual = jax.grad(lambda *x: jnp.sum(fast(*x) * upstream), argnums=(0, 1, 2, 3))(*inputs)
-    for a, e in zip(actual, expected):
-        np.testing.assert_allclose(a, e, rtol=1e-4, atol=1e-4)
+
+@pytest.mark.parametrize("argnum", range(4))
+def test_time_domain_spike_map_custom_gradient(argnum):
+    """The custom gradient of the splat is the exact transpose, also at the record edges."""
+    inputs = _spike_map_inputs()
+    upstream = np.random.default_rng(1).standard_normal((64, 12)).astype("float32")
+
+    def loss(variable):
+        args = [keras.ops.convert_to_tensor(x) for x in inputs]
+        args[argnum] = variable
+        spike_map = _scatter_spike_map(*args, n_ax=64, n_replicas=4)
+        return keras.ops.sum(spike_map * keras.ops.convert_to_tensor(upstream))
+
+    autograd = AutoGrad()
+    autograd.set_function(loss)
+    gradient = keras.ops.convert_to_numpy(autograd.gradient(inputs[argnum]))
+    expected = _reference_spike_map_gradients(*inputs, upstream)[argnum]
+    np.testing.assert_allclose(gradient, expected, rtol=1e-4, atol=1e-4)
 
 
 def _parameters(probe_geometry):
