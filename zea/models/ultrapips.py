@@ -49,6 +49,7 @@ import keras
 import numpy as np
 from keras import layers, ops
 
+from zea import log
 from zea.internal.registry import model_registry
 from zea.models.base import BaseModel
 from zea.models.preset_utils import get_preset_loader, register_presets
@@ -548,6 +549,12 @@ class UltraPIPS(BaseModel):
         antialiasing, like ``torchvision``) and keeps the ``[-1, 1]`` range, which
         is the ``(x - 0.5) / 0.5`` normalization TUSA was trained with.
 
+        .. warning::
+            Images are resized to a square ``image_size x image_size``, so
+            non-square inputs are stretched and lose their aspect ratio, as in the
+            reference implementation. A warning is logged once per input shape;
+            crop or pad to a square beforehand to avoid the distortion.
+
         Args:
             image (Tensor): ``(B, H, W, C)`` image in ``[-1, 1]`` with 1 or 3 channels.
 
@@ -559,7 +566,16 @@ class UltraPIPS(BaseModel):
             # Convert in [0, 1] where the luma weights are defined (they sum to 0.9999).
             weights = ops.convert_to_tensor(_GRAYSCALE_WEIGHTS, dtype=image.dtype)
             image = ops.sum((image + 1.0) / 2.0 * weights, axis=-1, keepdims=True) * 2.0 - 1.0
-        if tuple(image.shape[1:3]) != (self.image_size, self.image_size):
+        height, width = image.shape[1:3]
+        if height is not None and width is not None and height != width:
+            log.warning_once(
+                f"UltraPIPS resizes inputs to {self.image_size}x{self.image_size}, so"
+                f" non-square {height}x{width} images are stretched, which changes their"
+                " aspect ratio (the reference implementation does the same). Crop or pad"
+                " the images to a square first to avoid this.",
+                key=(height, width),
+            )
+        if (height, width) != (self.image_size, self.image_size):
             image = ops.image.resize(
                 image,
                 (self.image_size, self.image_size),

@@ -305,3 +305,18 @@ def test_matches_the_reference_implementation():
     distance = ops.convert_to_numpy(model([x * 2 - 1, y * 2 - 1]))
 
     np.testing.assert_allclose(distance, [0.25759995, 1.7587278, 5.3710604], rtol=1e-4)
+
+
+def test_non_square_inputs_warn_once_about_the_aspect_ratio(model, caplog):
+    """Non-square images are stretched to a square, so the user is told (once per shape)."""
+    square = np.zeros((1, 64, 64, 1), dtype="float32")
+    rectangular = np.zeros((1, 50, 70, 1), dtype="float32")
+
+    with caplog.at_level("WARNING"):
+        model.preprocess_input(square)
+    assert "non-square" not in caplog.text
+
+    with caplog.at_level("WARNING"):
+        model.preprocess_input(rectangular)
+        model.preprocess_input(rectangular)
+    assert caplog.text.count("non-square 50x70") == 1
