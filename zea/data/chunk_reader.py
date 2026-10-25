@@ -42,6 +42,8 @@ from typing import Any, Callable, Sequence, cast
 import h5py
 import numpy as np
 
+from zea.data.chunk_cache import _count_network_bytes
+
 #: Called with the byte size of each chunk as it arrives. Runs on worker threads.
 Ticker = Callable[[int], None] | None
 
@@ -322,6 +324,7 @@ class HTTPFetcher(Fetcher):
 
         async def one(index: int, offset: int, size: int) -> None:
             data = await self._cat_range(offset, size)
+            _count_network_bytes(len(data))
             out[index] = data
             if self.cache is not None:
                 self.cache.put(offset, size, data)

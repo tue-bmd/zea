@@ -8,7 +8,7 @@ import types
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Sequence
 
 import numpy as np
 import tyro
@@ -26,6 +26,7 @@ from zea.data.spec import strip_track_prefix
 from zea.func import translate
 from zea.internal.checks import _NON_IMAGE_DATA_TYPES
 from zea.internal.device import init_device
+from zea.ops.imports import import_ops_modules
 from zea.ops.pipeline import Pipeline
 from zea.utils import FunctionTimer, ProgressBar
 
@@ -163,14 +164,14 @@ def _run_passthrough(
     overwrite: bool,
     track_index: int | None = None,
     track_label: str | None = None,
-    **hf_kwargs,
+    revision: str | None = None,
 ) -> None:
     """Save data frames directly without a beamforming pipeline."""
     if save_as is not None and save_as not in ("gif", "mp4", "png", "hdf5"):
         raise ValueError(f"Passthrough mode only supports gif/mp4/png/hdf5, got {save_as!r}")
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    with Dataset(dataset_path, lazy=True, _suggest_lazy=False, **hf_kwargs) as ds:
+    with Dataset(dataset_path, lazy=True, _suggest_lazy=False, revision=revision) as ds:
         pbar = ProgressBar(len(ds))
         for i in range(len(ds)):
             f = ds[i]  # lazy download for hf:// paths; returns cached File handle
@@ -232,6 +233,8 @@ def run_processing(
     revision: str | None = None,
     config_revision: str | None = None,
     track: str | None = None,
+    imports: Sequence[str] = (),
+    trust_remote_code: bool = False,
 ) -> None:
     if keep_dynamic_range and save_as != "hdf5":
         raise ValueError("--keep_dynamic_range is only supported with --save_as hdf5.")
@@ -240,13 +243,15 @@ def run_processing(
     if save_as is not None and save_as not in SUPPORTED_FORMATS:
         raise ValueError(f"save_as must be one of {SUPPORTED_FORMATS}, got {save_as!r}")
 
-    dataset_hf_kwargs = {"revision": revision} if revision is not None else {}
-    config_hf_kwargs = (
-        {"revision": config_revision if config_revision is not None else revision}
-        if (config_revision or revision)
-        else {}
-    )
-    config = Config.from_path(config_path, **config_hf_kwargs)
+    if config_revision is None:
+        config_revision = revision
+    config_revision = config_revision or None
+
+    # Imported after init_device has run (custom operations may touch keras at import
+    # time) and before anything resolves an operation name.
+    import_ops_modules(imports, trust_remote_code=trust_remote_code)
+
+    config = Config.from_path(config_path, revision=config_revision)
     config_params = _get_config_parameters(config)
 
     # Peek at the first file for the track to read (the Dataloader takes one key for
@@ -259,7 +264,7 @@ def run_processing(
     data_key = key
     axis_selections: dict | None = None
     with Dataset(
-        dataset_path, validate=False, lazy=True, _suggest_lazy=False, **dataset_hf_kwargs
+        dataset_path, validate=False, lazy=True, _suggest_lazy=False, revision=revision
     ) as _peek_ds:
         if len(_peek_ds) > 0:
             _peek_f = _peek_ds[0]
@@ -277,7 +282,15 @@ def run_processing(
                     pass  # fall back to runtime slicing if the peek fails
 
     try:
-        pipeline = Pipeline.from_path(config_path, with_batch_dim=False, **config_hf_kwargs)
+        pipeline = Pipeline.from_path(
+            config_path,
+            with_batch_dim=False,
+            trust_remote_code=trust_remote_code,
+            revision=config_revision,
+        )
+    # A missing/unbuildable pipeline is recoverable for keys that need no beamforming.
+    # Failures from the config's own ``imports`` are not: those raise RemoteCodeError /
+    # OpsModuleImportError, which deliberately fall outside this except clause.
     except (ValueError, KeyError) as exc:
         if _key_requires_pipeline(data_key):
             raise
@@ -295,7 +308,7 @@ def run_processing(
             overwrite,
             track_index=track_index,
             track_label=track_label,
-            **dataset_hf_kwargs,
+            revision=revision,
         )
         return
 
@@ -313,7 +326,7 @@ def run_processing(
         sort_files=True,
         dtype="float32",
         axis_selections=axis_selections,
-        **dataset_hf_kwargs,
+        revision=revision,
     )
 
     iterator = iter(dataloader)

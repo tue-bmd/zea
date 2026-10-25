@@ -115,7 +115,7 @@ from zea.beamform.pixelgrid import (
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
-from zea.func.ultrasound import compute_time_to_peak_stack
+from zea.func.ultrasound import compute_time_to_peak
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated, renamed_items
 from zea.probes import Probe, fit_curved_probe_radius
@@ -635,7 +635,9 @@ class Parameters(BaseParameters):
 
         f_number = float(self.f_number)
         half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
-        normals = np.asarray(compute_element_normals(ops.convert_to_tensor(self.probe_geometry)))
+        normals = ops.convert_to_numpy(
+            compute_element_normals(ops.convert_to_tensor(self.probe_geometry))
+        )
         tilt = np.arctan2(normals[:, 0], normals[:, 2])
 
         # Outermost accepted ray of each edge element.
@@ -1090,7 +1092,7 @@ class Parameters(BaseParameters):
         simulators place the pulse peak there, so an image of simulated data is consistent for
         any value. If not set explicitly and ``waveforms_two_way`` (the two-way, pulse-echo transmit
         waveform) is available, this is estimated from it via
-        :func:`~zea.func.compute_time_to_peak_stack`, as for a waveform of a zea file, which
+        :func:`~zea.func.compute_time_to_peak`, as for a waveform of a zea file, which
         starts at the trigger. Otherwise it defaults to ``1 / center_frequency``, a convention:
         the peak of the default simulator pulse is later, at
         :attr:`~zea.simulator.Pulse.time_to_peak` of :func:`~zea.simulator.transmit_pulse`.
@@ -1104,9 +1106,7 @@ class Parameters(BaseParameters):
         if waveforms is None:
             return np.full(self.n_tx, 1 / self.center_frequency)
         t_peak = ops.convert_to_numpy(
-            compute_time_to_peak_stack(
-                waveforms, self.center_frequency, self.waveform_sampling_frequency
-            )
+            compute_time_to_peak(waveforms, self.center_frequency, self.waveform_sampling_frequency)
         )
         if t_peak.shape[0] == 1:
             t_peak = np.repeat(t_peak, self.n_tx)
