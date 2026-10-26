@@ -29,8 +29,10 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import os
 import random
+import re
 import threading
 import warnings
 import zlib
@@ -184,6 +186,30 @@ class _Location(Protocol):
     def current(self) -> tuple[str, dict[str, str]]: ...
 
     def refresh(self, stale_url: str) -> bool: ...
+
+
+class _RedactQueryStrings(logging.Filter):
+    """Strip query strings from URLs in log records: they carry the signature of a CDN URL."""
+
+    _url = re.compile(r"(https?://[^\s?]+)\?\S*")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = self._url.sub(r"\1?<redacted>", message)
+        if redacted != message:
+            record.msg, record.args = redacted, ()
+        return True
+
+
+_redaction_lock = threading.Lock()
+
+
+def _redact_fsspec_http_logs() -> None:
+    """Keep signed URLs out of fsspec's HTTP debug log, which logs every requested URL."""
+    logger = logging.getLogger("fsspec.http")
+    with _redaction_lock:
+        if not any(isinstance(f, _RedactQueryStrings) for f in logger.filters):
+            logger.addFilter(_RedactQueryStrings())
 
 
 class _FixedURL:
@@ -374,6 +400,7 @@ class HTTPFetcher(Fetcher):
             self.location = url
         self.cache = cache  # zea.data.chunk_cache.ChunkCache, or None
         self._fs = fsspec.filesystem("http")
+        _redact_fsspec_http_logs()
 
     @property
     def url(self) -> str:

@@ -13,6 +13,7 @@ layouts and selections where it could plausibly diverge. The cases that earn the
 
 import http.server
 import inspect
+import logging
 import os
 import socketserver
 import threading
@@ -1098,6 +1099,22 @@ def test_retry_log_does_not_refresh_or_leak_the_url(structured_file, fast_backof
         assert location.calls == 1  # only the one call in fetch(), none from the retry
         message = debug.call_args[0][0]
         assert "retrying" in message and "secret" not in message
+    finally:
+        server.close()
+
+
+def test_fsspec_debug_log_redacts_signed_urls(structured_file, caplog):
+    """fsspec logs every URL it requests; the signature must not end up in the log."""
+    server = _CountingServer(structured_file.parent, latency=0)
+    try:
+        url = server.url + structured_file.name + "?Policy=abc&Signature=secret"
+        fetcher = HTTPFetcher(url)  # the test server ignores the query string
+        with caplog.at_level(logging.DEBUG, logger="fsspec.http"):
+            data = fetcher.fetch([(0, 16)])
+        assert data[0] == structured_file.read_bytes()[:16]  # requested with the full URL
+        logged = [r.getMessage() for r in caplog.records if r.name == "fsspec.http"]
+        assert any(structured_file.name in m for m in logged)
+        assert not any("secret" in m or "Policy" in m for m in logged)
     finally:
         server.close()
 
