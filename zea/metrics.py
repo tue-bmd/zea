@@ -14,6 +14,7 @@ from zea.func.tensor import translate
 from zea.internal.registry import metrics_registry
 from zea.internal.utils import reduce_to_signature
 from zea.models.lpips import LPIPS
+from zea.models.ultrapips import UltraPIPS
 
 
 def get_metric(name, **kwargs):
@@ -303,6 +304,55 @@ def get_lpips(image_range, clip=False):
         return _lpips([img1, img2])
 
     return lpips
+
+
+@metrics_registry(
+    name="ultrapips", paired=True, jittable=True, torch_vmappable=False, torch_jittable=False
+)
+def get_ultrapips(image_range, clip=False, preset="ultrapips-tusa"):
+    """
+    Get the UltraPIPS perceptual similarity metric for B-mode ultrasound.
+
+    .. note::
+        Unlike LPIPS, UltraPIPS resizes all images to a fixed square size, so
+        non-square images are stretched (a warning is logged). Crop or pad them
+        to a square first if the aspect ratio matters.
+
+    Args:
+        image_range (list): The range of the images. Will be translated to [-1, 1] for UltraPIPS.
+        clip (bool): Whether to clip the images to `image_range`.
+        preset (str): The UltraPIPS preset (backbone) to load.
+
+    Returns:
+        The UltraPIPS metric function.
+    """
+    _ultrapips = UltraPIPS.from_preset(preset)
+    _ultrapips.trainable = False
+    _ultrapips.disable_checks = True
+
+    def ultrapips(img1, img2):
+        """
+        The UltraPIPS metric function.
+
+        Args:
+            img1 (tensor) with shape (height, width, channels) with optional batch dimension
+            img2 (tensor) with shape (height, width, channels) with optional batch dimension
+
+        Returns (float): The UltraPIPS distance between img1 and img2 with shape (batch_size,)
+            or scalar if no batch dimension.
+        """
+        # cast to float first so translate does not subtract in an integer dtype
+        img1 = ops.cast(img1, "float32")
+        img2 = ops.cast(img2, "float32")
+        if clip:
+            img1 = ops.clip(img1, *image_range)
+            img2 = ops.clip(img2, *image_range)
+        img1 = translate(img1, image_range, [-1, 1])
+        img2 = translate(img2, image_range, [-1, 1])
+
+        return _ultrapips([img1, img2])
+
+    return ultrapips
 
 
 class Metrics:
