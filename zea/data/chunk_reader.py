@@ -32,6 +32,7 @@ import functools
 import os
 import random
 import threading
+import warnings
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -87,12 +88,36 @@ MAX_RETRIES = 5
 BASE_BACKOFF = 1.0
 MAX_BACKOFF = 8.0
 
+
 #: Range requests in flight at once, across every fetcher sharing fsspec's event loop, i.e.
 #: per process (``ZEA_MAX_CONCURRENT_REQUESTS``). Streamed reads go to the CDN, which is not
 #: rate limited, so this only bounds connections and memory (at most this many merged
 #: requests of up to :data:`MERGE_MAX` each). Measured with five streaming dataloaders in one
 #: process: 16 gave ~37 MB/s, 32 to 128 gave ~45-50 MB/s.
-MAX_CONCURRENT_REQUESTS = int(os.environ.get("ZEA_MAX_CONCURRENT_REQUESTS", 64))
+def _max_concurrent_requests(default: int = 64) -> int:
+    """``ZEA_MAX_CONCURRENT_REQUESTS``, or ``default`` if unset or not a positive integer.
+
+    Zero must not get through: it would make a semaphore no request can ever acquire. Warns
+    with :mod:`warnings`, as ``zea.log`` cannot be imported yet when this module loads.
+    """
+    value = os.environ.get("ZEA_MAX_CONCURRENT_REQUESTS")
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        parsed = 0
+    if parsed < 1:
+        warnings.warn(
+            f"Ignoring ZEA_MAX_CONCURRENT_REQUESTS={value!r}: expected a positive integer. "
+            f"Using {default}.",
+            stacklevel=2,
+        )
+        return default
+    return parsed
+
+
+MAX_CONCURRENT_REQUESTS = _max_concurrent_requests()
 
 #: Merge ranges into one request when the gap between them is at most this many bytes.
 #: The chunks of a frame are stored almost back to back, so a frame (or a block of
@@ -383,8 +408,11 @@ class HTTPFetcher(Fetcher):
                 status = getattr(exc, "status", None)
                 reason = f"HTTP {status}" if status is not None else type(exc).__name__
                 delay = _retry_delay(attempt, getattr(exc, "headers", None))
+                # The local url, not self.url: that may refresh it, which would block the
+                # event loop. Named by its hf:// source, since a signed URL is a credential.
+                name = self.source or url.split("?", 1)[0]
                 log.debug(
-                    f"{reason} for {size} bytes at {offset} of {self.url}; "
+                    f"{reason} for {size} bytes at {offset} of {name}; "
                     f"retrying in {delay:.1f}s ({attempt + 1}/{MAX_RETRIES})"
                 )
                 await asyncio.sleep(delay)

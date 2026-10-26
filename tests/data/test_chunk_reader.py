@@ -18,7 +18,7 @@ import socketserver
 import threading
 from importlib import import_module
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import aiohttp
 import h5py
@@ -1065,6 +1065,41 @@ def test_request_cap_is_read_from_the_environment():
         check=True,
     )
     assert out.stdout.strip().splitlines()[-1] == "7"
+
+
+@pytest.mark.parametrize("value", ["0", "-3", "lots"])
+def test_bad_request_cap_falls_back_to_the_default(monkeypatch, value):
+    """A cap of zero would hang every request; a non-number would break the import."""
+    monkeypatch.setenv("ZEA_MAX_CONCURRENT_REQUESTS", value)
+    with pytest.warns(UserWarning, match="ZEA_MAX_CONCURRENT_REQUESTS"):
+        assert chunk_reader._max_concurrent_requests(default=64) == 64
+
+
+def test_retry_log_does_not_refresh_or_leak_the_url(structured_file, fast_backoff):
+    """The retry message neither reads ``self.url`` (which may refresh) nor logs a signature."""
+
+    class Location:
+        def __init__(self, url):
+            self.url, self.calls = url, 0
+
+        def current(self):
+            self.calls += 1
+            return self.url, {}
+
+        def refresh(self, stale_url):
+            return False
+
+    server = _CountingServer(structured_file.parent, latency=0, reject_first=1)
+    try:
+        location = Location(server.url + structured_file.name + "?Signature=secret")
+        fetcher = HTTPFetcher(location)
+        with patch("zea.log.debug") as debug:
+            fetcher.fetch([(0, 16)])
+        assert location.calls == 1  # only the one call in fetch(), none from the retry
+        message = debug.call_args[0][0]
+        assert "retrying" in message and "secret" not in message
+    finally:
+        server.close()
 
 
 class TestIsTransient:
