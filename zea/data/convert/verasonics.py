@@ -202,7 +202,36 @@ def bs100bw_to_iq(data: np.ndarray) -> np.ndarray:
     if data.shape[2] % 2 != 0:
         raise ValueError(f"Axial dimension must be even for IQ deinterleaving, got {data.shape[2]}")
     d = data.astype(np.float32)
-    return np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
+    iq_data = np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
+    return align_bs100bw_quadrature(iq_data, axis=2)
+
+
+def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2) -> np.ndarray:
+    """Remove the quarter-sample delay of Q in IQ data built from BS100BW pairs.
+
+    BS100BW data captures I(t) and Q(t+1/4Ts). This function shifts Q back to the I
+    sample times.
+
+    Args:
+        iq: IQ data with I and Q on the last axis.
+        axis: The axial (fast-time) axis.
+
+    Returns:
+        IQ data of the same shape and dtype where Q is evaluated at the I sample times.
+    """
+    q_data = np.moveaxis(iq[..., 1], axis, -1)
+    n_ax = q_data.shape[-1]
+    # Zero-pad so the fractional shift does not wrap the end of the record to the start.
+    n_fft = 2 * n_ax
+    spectrum = np.fft.rfft(q_data.astype(np.float64), n=n_fft, axis=-1)
+    frequency = np.fft.rfftfreq(n_fft)
+    # Q[n] holds Im b at sample n + 1/4; evaluate it at sample n (a delay of 1/4).
+    spectrum *= np.exp(-2j * np.pi * frequency * 0.25)
+    q_aligned = np.fft.irfft(spectrum, n=n_fft, axis=-1)[..., :n_ax]
+
+    out = np.array(iq, copy=True)
+    out[..., 1] = np.moveaxis(q_aligned, -1, axis).astype(iq.dtype)
+    return out
 
 
 def _validate_convert_config(data):
