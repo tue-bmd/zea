@@ -9,6 +9,8 @@ import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import httpx
 import keras
@@ -518,22 +520,37 @@ def test_stream_url_rejects_bad_repo_type():
         ipu._hf_stream_url(f"hf://{REPO_ID}/a.hdf5", repo_type="banana")
 
 
-def test_stream_open_retries_after_login(monkeypatch):
+def _fake_metadata(url="https://cdn.example/x", etag="sha", commit="c0ffee", size=10):
+    return SimpleNamespace(location=url, etag=etag, commit_hash=commit, size=size)
+
+
+@pytest.fixture
+def no_byte_reads(monkeypatch):
+    """Answer the streamed file's reads (e.g. its metadata prefetch) without a network."""
+    from zea.data import hf_remote
+
+    monkeypatch.setattr(hf_remote.RemoteFile, "_fetch", lambda self, start, end: bytes(end - start))
+
+
+def test_stream_open_retries_after_login(monkeypatch, no_byte_reads):
     """A stream open that 404s anonymously is retried once after logging in."""
+    from zea.data import hf_remote
+
+    hf_remote.clear()
     logins = []
     monkeypatch.setattr(ipu, "_hf_login", lambda: logins.append(1))
     attempts = []
 
-    class FakeFS:
-        def open(self, path, mode, **kwargs):
-            attempts.append(path)
-            if len(attempts) == 1:
-                raise _repo_not_found()
-            return "FILEOBJ"
+    def fake_metadata(url, **kwargs):
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise _repo_not_found()
+        return _fake_metadata()
 
-    monkeypatch.setattr("huggingface_hub.HfFileSystem", FakeFS)
+    monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", fake_metadata)
 
-    assert ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5") == "FILEOBJ"
+    fileobj = ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5")
+    assert fileobj.size == 10
     assert len(attempts) == 2
     assert len(logins) == 1
 
@@ -1381,20 +1398,38 @@ def test_cache_ttl_falls_back_on_an_unparseable_value(monkeypatch):
     assert ipu._hf_cache_ttl() == 0
 
 
-def test_streaming_does_not_go_through_the_caches(monkeypatch):
-    """Streamed reads must reach the hub every time; they are not downloads."""
-    opens = []
+def test_stream_opens_share_one_resolution(monkeypatch, no_byte_reads):
+    """Opening a streamed file twice asks the Hub once, and never downloads it."""
+    from zea.data import hf_remote
 
-    class FakeFS:
-        def open(self, path, mode, **kwargs):
-            opens.append(path)
-            return "FILEOBJ"
-
-    monkeypatch.setattr("huggingface_hub.HfFileSystem", FakeFS)
+    hf_remote.clear()
+    heads = []
+    monkeypatch.setattr(
+        "huggingface_hub.get_hf_file_metadata",
+        lambda url, **kwargs: heads.append(url) or _fake_metadata(),
+    )
+    monkeypatch.setattr(ipu, "hf_hub_download", MagicMock(side_effect=AssertionError))
 
     for _ in range(2):
         ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5")
-    assert len(opens) == 2
+    assert len(heads) == 1
+    hf_remote.clear()
+
+
+def test_listing_is_shared_through_disk(fake_tree):
+    """A second process (simulated by clearing the in-memory cache) reuses the listing."""
+    first = ipu._hf_list_h5_files(f"hf://{REPO_ID}")
+    ipu._LISTING_CACHE.clear()
+    assert ipu._hf_list_h5_files(f"hf://{REPO_ID}") == first
+    assert len(fake_tree) == 1
+
+
+def test_listing_is_not_shared_when_caching_is_off(fake_tree, monkeypatch):
+    monkeypatch.setattr(ipu, "_HF_CACHE_TTL", 0)
+    monkeypatch.setattr(ipu, "_LISTING_CACHE", ipu._TTLCache(0))
+    ipu._hf_list_h5_files(f"hf://{REPO_ID}")
+    ipu._hf_list_h5_files(f"hf://{REPO_ID}")
+    assert len(fake_tree) == 2
 
 
 def test_dtype_size_falls_back_for_unsizeable_dtypes():

@@ -295,6 +295,23 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolated_hf_caches(tmp_path_factory):
+    """Keep the on-disk HF location and listing caches of this session in a temp dir.
+
+    Tests mock repos (some under real names), and CI runners share one ZEA_CACHE_DIR
+    between concurrent jobs, so those caches must never be written to or wiped there.
+    """
+    from zea.data import hf_remote
+    from zea.internal import preset_utils
+
+    root = tmp_path_factory.mktemp("hf_caches")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(hf_remote, "_CACHE_DIR", root / "locations")
+        mp.setattr(preset_utils, "_LISTING_DIR", root / "listings")
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def run_once_after_all_tests():
     """Fixture to stop workers after all tests have run."""
     yield

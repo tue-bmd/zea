@@ -47,6 +47,12 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
        (reading HDF5 file shapes, and validating files against the zea format).
      - ``1``
      - ``0``, ``1``
+   * - ``ZEA_FIND_H5_SHAPES_WORKERS``
+     - Number of worker processes for those parallel sweeps. The sweeps mostly wait on file
+       opens (over the network for ``hf://`` files), so more processes than this rarely help,
+       and each one has to import ``zea``. Never more than the number of cores or files.
+     - ``32``
+     - Any positive integer.
    * - ``ZEA_TEST_DEVICE``
      - Can be used to only run the tests with a particular device.
      - ``auto:1``
@@ -69,6 +75,13 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - Byte budget for that cache; least-recently-used chunks are evicted once it is exceeded.
      - ``10737418240`` (10 GiB)
      - Any positive integer (bytes).
+   * - ``ZEA_MAX_CONCURRENT_REQUESTS``
+     - Maximum number of HTTP range requests in flight at once per process while streaming
+       (``hf://``), shared by all open files and dataloaders. Streamed reads go to the Hugging
+       Face CDN, which is not rate limited, so this only bounds connections and memory. Raise
+       it when many dataloader threads stream at once; lower it on a slow or shared connection.
+     - ``64``
+     - Any positive integer.
    * - ``BLOSC_NTHREADS``
      - Threads Blosc uses within a single HDF5 chunk, which is most of the write throughput
        (~4x). Turn it **down** when writes are already parallel (several dataloader workers each

@@ -216,48 +216,48 @@ def test_download_files_in_path(fake_files, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "hf_path, kwargs, expected_fs_path",
+    "kwargs, expected_url_path",
     [
-        (FILE_STR, {}, f"datasets/{REPO_ID}/{FILE_SUBPATH}"),
-        (FILE_STR, {"repo_type": "model"}, f"{REPO_ID}/{FILE_SUBPATH}"),
-        (FILE_STR, {"repo_type": "space"}, f"spaces/{REPO_ID}/{FILE_SUBPATH}"),
-        (
-            FILE_STR,
-            {"revision": "v0.1.0"},
-            f"datasets/{REPO_ID}@v0.1.0/{FILE_SUBPATH}",
-        ),
+        ({}, f"datasets/{REPO_ID}/resolve/main/{FILE_SUBPATH}"),
+        ({"repo_type": "model"}, f"{REPO_ID}/resolve/main/{FILE_SUBPATH}"),
+        ({"repo_type": "space"}, f"spaces/{REPO_ID}/resolve/main/{FILE_SUBPATH}"),
+        ({"revision": "v0.1.0"}, f"datasets/{REPO_ID}/resolve/v0.1.0/{FILE_SUBPATH}"),
     ],
 )
-def test_hf_stream_open_path_construction(hf_path, kwargs, expected_fs_path, monkeypatch):
-    """The fsspec path (prefix + repo + revision + subpath) is built correctly."""
-    opened = {}
+def test_hf_stream_open_path_construction(kwargs, expected_url_path, monkeypatch):
+    """The file is resolved at the right repo, repo type and revision."""
+    from types import SimpleNamespace
 
-    class FakeFS:
-        def open(self, path, mode, block_size=None, **kw):
-            opened["path"] = path
-            opened["mode"] = mode
-            opened["block_size"] = block_size
-            return "FAKE_FILEOBJ"
+    from huggingface_hub import constants
 
-    monkeypatch.setattr("huggingface_hub.HfFileSystem", FakeFS)
+    from zea.data import hf_remote
 
-    result = _hf_stream_open(hf_path, block_size=1234, **kwargs)
-    assert result == "FAKE_FILEOBJ"
-    assert opened["path"] == expected_fs_path
-    assert opened["mode"] == "rb"
-    assert opened["block_size"] == 1234
+    hf_remote.clear()
+    heads = []
+
+    def fake_metadata(url, **kw):
+        heads.append(url)
+        return SimpleNamespace(location="https://cdn.example/x", etag="e", commit_hash="c", size=10)
+
+    monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", fake_metadata)
+    monkeypatch.setattr(hf_remote.RemoteFile, "_fetch", lambda self, start, end: bytes(end - start))
+
+    result = _hf_stream_open(FILE_STR, block_size=1234, **kwargs)
+    assert heads == [f"{constants.ENDPOINT}/{expected_url_path}"]
+    assert result.blocksize == 1234
+    hf_remote.clear()
 
 
 def test_hf_stream_open_requires_file(monkeypatch):
     """Streaming a repo root / directory (no subpath) raises a clear error."""
-    monkeypatch.setattr("huggingface_hub.HfFileSystem", object)
+    monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", object)
     with pytest.raises(ValueError, match="single file"):
         _hf_stream_open(FOLDER_STR)
 
 
 def test_hf_stream_open_rejects_bad_repo_type(monkeypatch):
     """An unknown repo_type is rejected before any network access."""
-    monkeypatch.setattr("huggingface_hub.HfFileSystem", object)
+    monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", object)
     with pytest.raises(ValueError, match="repo_type"):
         _hf_stream_open(FILE_STR, repo_type="banana")
 
