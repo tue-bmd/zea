@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from zea import Parameters
-from zea.beamform.pixelgrid import aliasing_limits, check_for_aliasing, transmit_direction_range
+from zea.beamform.pixelgrid import aliasing_limits, check_for_aliasing, transmit_direction_bounds
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
 from zea.probes import create_curved_probe_geometry
@@ -312,29 +312,29 @@ def test_aliasing_limits_transmit_angle_from_geometry():
     )
     # 38 mm aperture focused at 40 mm -> sin(theta_t) spans +-19 / hypot(40, 19).
     sin_theta_t = 19 / np.hypot(40, 19)
-    x_range = limits["transmit_direction"][0]
-    assert x_range == pytest.approx((-sin_theta_t, sin_theta_t), rel=1e-6)
+    x_bounds = limits["transmit_direction"][0]
+    assert x_bounds == pytest.approx((-sin_theta_t, sin_theta_t), rel=1e-6)
     # f_number defaults to 1.0 -> sin(theta_r) = 1 / sqrt(5).
     assert limits["sin_theta_r"] == pytest.approx(1 / np.sqrt(5), rel=1e-6)
 
 
-def test_transmit_direction_range_steered_focus():
+def test_transmit_direction_bounds_steered_focus():
     """A steered focus skews the range to the edge rays through the focal point."""
     transmits = _plane_waves(20, n_el=3, pitch=10e-3)
     focus, angle = 40e-3, transmits["polar_angles"][0]
     transmits["focus_distances"] = np.array([focus])
-    sin_range = transmit_direction_range(**transmits)[0][:, 0]
+    x_bounds = transmit_direction_bounds(**transmits)[0][:, 0]
 
     focus_x, focus_z = focus * np.sin(angle), focus * np.cos(angle)
     edge_rays = [(focus_x - x) / np.hypot(focus_x - x, focus_z) for x in (10e-3, -10e-3)]
-    np.testing.assert_allclose(sin_range, [edge_rays])
+    np.testing.assert_allclose(x_bounds, [edge_rays])
 
     # Unsteered it reduces to the symmetric +-s; mirrored for a diverging wave.
     transmits["polar_angles"] = np.zeros(1)
     s = 10 / np.hypot(40, 10)
-    np.testing.assert_allclose(transmit_direction_range(**transmits)[0][:, 0], [[-s, s]])
+    np.testing.assert_allclose(transmit_direction_bounds(**transmits)[0][:, 0], [[-s, s]])
     transmits["focus_distances"] = -transmits["focus_distances"]
-    np.testing.assert_allclose(transmit_direction_range(**transmits)[0][:, 0], [[-s, s]])
+    np.testing.assert_allclose(transmit_direction_bounds(**transmits)[0][:, 0], [[-s, s]])
 
 
 def test_aliasing_limits_symmetric_fallback_without_active_elements():
@@ -400,16 +400,16 @@ def test_aliasing_limits_azimuth_compounding_widens_elevational_band():
     assert limits["dx_max"] == pytest.approx(1540.0 / 7e6 / (2 / np.sqrt(5)))
 
 
-def test_transmit_direction_range_matrix_focus():
+def test_transmit_direction_bounds_matrix_focus():
     """An unsteered focus on a square aperture spans +-s in x and y; on axis in z."""
     transmits = _matrix_plane_waves(0, 0, n_side=3, pitch=10e-3)
     transmits["focus_distances"] = np.array([40e-3])
-    (x_range, y_range, z_range) = transmit_direction_range(**transmits)[0][0]
+    (x_bounds, y_bounds, z_bounds) = transmit_direction_bounds(**transmits)[0][0]
     s = 10 / np.hypot(40, 10)
-    np.testing.assert_allclose(x_range, [-s, s])
-    np.testing.assert_allclose(y_range, [-s, s])
+    np.testing.assert_allclose(x_bounds, [-s, s])
+    np.testing.assert_allclose(y_bounds, [-s, s])
     # The corner elements give the most oblique ray.
-    np.testing.assert_allclose(z_range, [40 / np.sqrt(40**2 + 2 * 10**2), 1.0])
+    np.testing.assert_allclose(z_bounds, [40 / np.sqrt(40**2 + 2 * 10**2), 1.0])
 
 
 def test_check_for_aliasing_3d_grid_checks_elevation():
@@ -566,31 +566,31 @@ def test_parameters_check_for_aliasing_without_polar_angles():
     assert without == Parameters(**focused_scan_args).check_for_aliasing(demodulated=False)
 
 
-def test_transmit_direction_range_skips_nan_focus():
+def test_transmit_direction_bounds_skips_nan_focus():
     """A ``NaN`` focus distance marks no transmit type, so that transmit is left out."""
     transmits = {**_plane_waves([0, 0]), "focus_distances": np.array([np.nan, 40e-3])}
-    ranges = transmit_direction_range(**transmits)[0]
-    assert ranges.shape == (1, 3, 2)
-    assert np.all(np.isfinite(ranges))
+    bounds = transmit_direction_bounds(**transmits)[0]
+    assert bounds.shape == (1, 3, 2)
+    assert np.all(np.isfinite(bounds))
 
 
-def test_transmit_direction_range_skips_inactive_plane_waves():
+def test_transmit_direction_bounds_skips_inactive_plane_waves():
     """A plane wave without active elements never fires, so it does not widen the range."""
     transmits = _plane_waves([0, 20])
     transmits["tx_apodizations"][1] = 0.0
-    ranges, plane = transmit_direction_range(**transmits)
-    np.testing.assert_allclose(ranges[:, 0], [[0.0, 0.0]], atol=1e-12)
+    bounds, plane = transmit_direction_bounds(**transmits)
+    np.testing.assert_allclose(bounds[:, 0], [[0.0, 0.0]], atol=1e-12)
     np.testing.assert_array_equal(plane, [True])
 
 
-def test_transmit_direction_range_keeps_horizontal_rays():
+def test_transmit_direction_bounds_keeps_horizontal_rays():
     """A ray level with the focus (z component 0) keeps its direction."""
     transmits = _plane_waves(0, n_el=2, pitch=20e-3)
     transmits["probe_geometry"][0, 2] = 10e-3  # first element at the focal depth
     transmits["focus_distances"] = np.array([10e-3])
-    x_range, _, z_range = transmit_direction_range(**transmits)[0][0]
-    np.testing.assert_allclose(x_range, [-1 / np.sqrt(2), 1.0])
-    assert z_range[0] == pytest.approx(0.0)
+    x_bounds, _, z_bounds = transmit_direction_bounds(**transmits)[0][0]
+    np.testing.assert_allclose(x_bounds, [-1 / np.sqrt(2), 1.0])
+    assert z_bounds[0] == pytest.approx(0.0)
 
 
 def test_set_transmits_focused_excludes_plane_waves():
