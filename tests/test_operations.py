@@ -1970,6 +1970,18 @@ def hadamard_encode(data, hadamard_matrix):
     return np.einsum("itklm,jt->ijklm", data, hadamard_matrix)
 
 
+def _is_on_gpu(tensor):
+    """Whether a backend tensor lives on a GPU (keras has no public API for this)."""
+    backend = keras.backend.backend()
+    if backend == "jax":
+        return any(device.platform == "gpu" for device in tensor.devices())
+    if backend == "torch":
+        return tensor.device.type == "cuda"
+    if backend == "tensorflow":
+        return "GPU" in tensor.device
+    return False
+
+
 def test_decode_hadamard():
     """Hadamard encoding followed by decoding recovers the original data up to a factor n_tx."""
     n_el = 32
@@ -2010,10 +2022,11 @@ def test_decode_hadamard():
         tx_apodizations=tx_apodizations_synthetic_aperture, **shared_kwargs
     )[None]
     raw_data_decoded, tx_apodizations_decoded = decode_hadamard(raw_data_encoded, hadamard_matrix)
-    # GPU-tolerant: float32 matmul runs in TF32 on Ampere+ GPUs (~1e-3 error here), while a
-    # flipped or swapped Hadamard row deviates by ~1, so 1e-2 still catches decoding bugs.
+    # On GPU, float32 matmul runs in TF32 on Ampere+ (~1e-3 error here), while a flipped or
+    # swapped Hadamard row deviates by ~1, so 1e-2 still catches decoding bugs.
+    tol = 1e-2 if _is_on_gpu(raw_data_decoded) else 1e-5
     np.testing.assert_allclose(
-        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-2, atol=1e-2
+        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=tol, atol=tol
     )
     np.testing.assert_array_equal(tx_apodizations_decoded, np.eye(hadamard_size))
 
