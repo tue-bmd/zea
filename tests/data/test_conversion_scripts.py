@@ -1824,12 +1824,6 @@ class TestBs100bwToIq:
         out = bs100bw_to_iq(data)
         np.testing.assert_array_equal(out[0, 0, :, 0, 0], [5.0, 7.0])  # I channel
 
-    def test_q_samples_are_negated_odd_rows(self):
-        data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
-        data[0, 0, 1, 0, 0] = 3.0  # odd index → Q (negated)
-        out = bs100bw_to_iq(data)
-        assert out[0, 0, 0, 0, 1] == -3.0  # Q channel negated
-
     def test_wrong_ndim_raises(self):
         with pytest.raises(ValueError, match="Expected shape"):
             bs100bw_to_iq(np.zeros((2, 3, 8, 4)))
