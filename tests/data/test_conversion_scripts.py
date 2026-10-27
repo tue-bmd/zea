@@ -1836,6 +1836,52 @@ class TestBs100bwToIq:
         with pytest.raises(ValueError, match="Axial dimension must be even"):
             bs100bw_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
 
+    CENTER_FREQUENCY = 5e6
+    NUMBER_OF_IQ_SAMPLES = 256
+
+    def _true_baseband(self, time: np.ndarray) -> np.ndarray:
+        """Band-limited complex baseband pulse centered in the record."""
+        pulse_center = self.NUMBER_OF_IQ_SAMPLES / self.CENTER_FREQUENCY / 2
+        pulse_width = 3 / self.CENTER_FREQUENCY
+        relative_time = time - pulse_center
+        envelope = np.exp(-0.5 * (relative_time / pulse_width) ** 2)
+        frequency_offset = 0.2 * self.CENTER_FREQUENCY
+        phase = 2 * np.pi * frequency_offset * relative_time + 0.7
+        return envelope * np.exp(1j * phase)
+
+    def _nyquist_sampled_rf(self) -> np.ndarray:
+        """RF signal sampled at four times the center frequency."""
+        sampling_frequency = 4 * self.CENTER_FREQUENCY
+        time = np.arange(4 * self.NUMBER_OF_IQ_SAMPLES) / sampling_frequency
+        carrier = np.exp(2j * np.pi * self.CENTER_FREQUENCY * time)
+        return np.real(self._true_baseband(time) * carrier)
+
+    def _bs100bw_samples(self) -> np.ndarray:
+        """Keep the first two of every four RF samples, as BS100BW does."""
+        rf = self._nyquist_sampled_rf()
+        return rf.reshape(self.NUMBER_OF_IQ_SAMPLES, 4)[:, :2].reshape(-1)
+
+    def _true_baseband_at_iq_times(self) -> np.ndarray:
+        iq_times = np.arange(self.NUMBER_OF_IQ_SAMPLES) / self.CENTER_FREQUENCY
+        return self._true_baseband(iq_times)
+
+    @staticmethod
+    def _relative_error(estimate: np.ndarray, reference: np.ndarray) -> float:
+        return np.linalg.norm(estimate - reference) / np.linalg.norm(reference)
+
+    def test_bs100bw_matches_true_baseband(self):
+        interleaved = self._bs100bw_samples()
+        iq = bs100bw_to_iq(interleaved[None, None, :, None, None])[0, 0, :, 0]
+        estimated_baseband = iq[:, 0] + 1j * iq[:, 1]
+        error = self._relative_error(estimated_baseband, self._true_baseband_at_iq_times())
+        assert error < 1e-3
+
+    def test_unaligned_bs100bw_differs_from_true_baseband(self):
+        interleaved = self._bs100bw_samples()
+        unaligned_baseband = interleaved[0::2] - 1j * interleaved[1::2]
+        error = self._relative_error(unaligned_baseband, self._true_baseband_at_iq_times())
+        assert error > 1e-2
+
     def test_int16_saturation_no_overflow(self):
         data = np.full((1, 1, 2, 1, 1), -32768, dtype=np.int16)
         out = bs100bw_to_iq(data)
