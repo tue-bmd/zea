@@ -9,6 +9,7 @@ import pytest
 
 import zea
 from zea import Parameters, Probe, display
+from zea.backend.autograd import AutoGrad
 from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
@@ -17,7 +18,7 @@ from zea.ops import Simulate
 from zea.ops.ultrasound import simulator_settings
 from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
 from zea.simulator import simulate_rf, simulate_rf_td, transmit_pulse
-from zea.simulator.time_domain import _scattered_waveform
+from zea.simulator.time_domain import _scatter_spike_map, _scattered_waveform
 
 N_EL = 80
 APERTURE = 32e-3
@@ -39,6 +40,80 @@ def test_time_domain_scatter_exponent_weights_pulse_spectrum():
     frequencies = np.fft.rfftfreq(len(unweighted), 1 / (CENTER_FREQUENCY * 4))
     expected = np.fft.rfft(unweighted) * (frequencies / CENTER_FREQUENCY) ** 2
     np.testing.assert_allclose(np.fft.rfft(weighted), expected, rtol=2e-5, atol=2e-5)
+
+
+def _spike_map_inputs(n_scat=300, n_el=12, n_ax=64, seed=0):
+    """Factored splat inputs, with delays partly outside the record on both ends."""
+    rng = np.random.default_rng(seed)
+    return (
+        rng.uniform(-8, n_ax / 2, (n_scat, n_el)).astype("float32"),
+        rng.standard_normal((n_scat, n_el)).astype("float32"),
+        rng.uniform(0, n_ax / 2 + 8, (n_scat, n_el)).astype("float32"),
+        rng.standard_normal((n_scat, n_el)).astype("float32"),
+    )
+
+
+def _reference_spike_map(tx_samples, tx_gain, rx_samples, rx_gain, n_ax):
+    """Plain linear-interpolation splat, one contribution at a time."""
+    positions = (tx_samples[:, :, None] + rx_samples[:, None, :]).astype("float64")
+    weights = (tx_gain[:, :, None] * rx_gain[:, None, :]).astype("float64")
+    lower = np.floor(positions)
+    fractional = positions - lower
+    rx = np.broadcast_to(np.arange(positions.shape[2]), positions.shape)
+    spike_map = np.zeros((n_ax, positions.shape[2]))
+    for index, weight in ((lower, weights * (1 - fractional)), (lower + 1, weights * fractional)):
+        valid = (index >= 0) & (index < n_ax)
+        np.add.at(spike_map, (index[valid].astype(int), rx[valid]), weight[valid])
+    return spike_map
+
+
+def test_time_domain_spike_map_matches_plain_splat():
+    """The replicated, paired-tap splat sums to the plain one, also at the record edges."""
+    inputs = _spike_map_inputs()
+    tensors = [keras.ops.convert_to_tensor(x) for x in inputs]
+    spike_map = keras.ops.convert_to_numpy(_scatter_spike_map(*tensors, n_ax=64, n_replicas=4))
+    np.testing.assert_allclose(spike_map, _reference_spike_map(*inputs, 64), atol=1e-4)
+
+
+def _reference_spike_map_gradients(tx_samples, tx_gain, rx_samples, rx_gain, upstream):
+    """Gradients of ``sum(spike_map * upstream)``: the upstream map read at both taps."""
+    positions = (tx_samples[:, :, None] + rx_samples[:, None, :]).astype("float64")
+    weights = (tx_gain[:, :, None] * rx_gain[:, None, :]).astype("float64")
+    lower = np.floor(positions)
+    fractional = positions - lower
+    rx = np.broadcast_to(np.arange(positions.shape[2]), positions.shape)
+
+    def read(index):
+        valid = (index >= 0) & (index < len(upstream))
+        return np.where(valid, upstream[np.clip(index, 0, len(upstream) - 1).astype(int), rx], 0)
+
+    d_positions = weights * (read(lower + 1) - read(lower))
+    d_weights = (1 - fractional) * read(lower) + fractional * read(lower + 1)
+    return (
+        d_positions.sum(2),
+        (d_weights * rx_gain[:, None, :]).sum(2),
+        d_positions.sum(1),
+        (d_weights * tx_gain[:, :, None]).sum(1),
+    )
+
+
+@pytest.mark.parametrize("argnum", range(4))
+def test_time_domain_spike_map_custom_gradient(argnum):
+    """The custom gradient of the splat is the exact transpose, also at the record edges."""
+    inputs = _spike_map_inputs()
+    upstream = np.random.default_rng(1).standard_normal((64, 12)).astype("float32")
+
+    def loss(variable):
+        args = [keras.ops.convert_to_tensor(x) for x in inputs]
+        args[argnum] = variable
+        spike_map = _scatter_spike_map(*args, n_ax=64, n_replicas=4)
+        return keras.ops.sum(spike_map * keras.ops.convert_to_tensor(upstream))
+
+    autograd = AutoGrad()
+    autograd.set_function(loss)
+    gradient = keras.ops.convert_to_numpy(autograd.gradient(inputs[argnum]))
+    expected = _reference_spike_map_gradients(*inputs, upstream)[argnum]
+    np.testing.assert_allclose(gradient, expected, rtol=1e-4, atol=1e-4)
 
 
 def _parameters(probe_geometry):
