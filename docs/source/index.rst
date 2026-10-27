@@ -46,6 +46,7 @@ Core modules
 ------------
 
 - :doc:`pipeline`: flexible, differentiable signal processing and image reconstruction, written in your favorite deep learning framework.
+- :doc:`simulator`: a differentiable ultrasound simulator that generates RF data from point scatterers, in the same pipeline as the reconstruction.
 - :doc:`data-acquisition`: loading tools for ultrasound data and acquisition parameters, designed for deep learning workflows. Datasets on Hugging Face are streamed, so only the frames you read are fetched.
 - :doc:`models`: pretrained models for ultrasound image and signal processing, hosted on `Hugging Face <https://huggingface.co/zeahub>`__.
 - :doc:`agent`: action selection for cognitive ultrasound, with flexible transmit and acquisition design: an action decides what to acquire next, such as which scan lines to fire.
@@ -80,6 +81,7 @@ Check out the :doc:`about` page for the motivation behind ``zea`` and the :ref:`
    data-acquisition
    config
    pipeline
+   simulator
    models
    agent
    environment

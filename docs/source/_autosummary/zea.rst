@@ -55,7 +55,6 @@ zea
    probes
    parameters
    simulator
-   simulator_time_domain
    tools
    tracking
    utils
