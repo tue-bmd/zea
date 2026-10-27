@@ -223,7 +223,8 @@ def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2) -> np.ndarray:
     n_ax = q_data.shape[-1]
     # Zero-pad so the fractional shift does not wrap the end of the record to the start.
     n_fft = 2 * n_ax
-    spectrum = np.fft.rfft(q_data.astype(np.float64), n=n_fft, axis=-1)
+    q_data_extended = np.concatenate([q_data, q_data[..., ::-1]], axis=-1)
+    spectrum = np.fft.rfft(q_data_extended, n=n_fft, axis=-1)
     frequency = np.fft.rfftfreq(n_fft)
     # Q[n] holds Im b at sample n + 1/4; evaluate it at sample n (a delay of 1/4).
     spectrum *= np.exp(-2j * np.pi * frequency * 0.25)
