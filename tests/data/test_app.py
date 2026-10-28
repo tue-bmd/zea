@@ -43,6 +43,7 @@ def test_zea_app_main_calls_build_interface(monkeypatch):
             main()
 
     assert launched.get("share") is False
+    assert launched.get("server_name") is None
     assert launched.get("server_port") is None
     assert launched.get("inbrowser") is True
     # Dark mode only: the JS that pins Gradio's dark class must reach launch().
@@ -72,6 +73,40 @@ def test_zea_app_passes_share_flag(monkeypatch):
     assert launched.get("share") is True
     assert launched.get("server_port") == 7861
     assert launched.get("inbrowser") is False
+
+
+def test_zea_app_passes_ssl_files(monkeypatch):
+    """--server-name, --ssl-certfile and --ssl-keyfile are forwarded to demo.launch()."""
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "zea",
+            "app",
+            "--server-name",
+            "0.0.0.0",
+            "--ssl-certfile",
+            "cert.pem",
+            "--ssl-keyfile",
+            "key.pem",
+        ],
+    )
+
+    launched = {}
+
+    class _FakeDemo:
+        def launch(self, **kwargs):
+            launched.update(kwargs)
+
+    with patch("zea.data.app.build_interface", return_value=_FakeDemo()):
+        with patch("zea.internal.device.init_device"):
+            from zea.__main__ import main
+
+            main()
+
+    assert launched.get("server_name") == "0.0.0.0"
+    assert launched.get("ssl_certfile") == "cert.pem"
+    assert launched.get("ssl_keyfile") == "key.pem"
+    assert launched.get("ssl_verify") is False
 
 
 # ── Helper-function unit tests ────────────────────────────────────────────────

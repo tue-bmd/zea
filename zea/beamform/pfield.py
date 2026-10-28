@@ -34,7 +34,6 @@ def compute_pfield(
     sound_speed,
     center_frequency,
     probe_bandwidth_percent,
-    n_el,
     probe_geometry,
     tx_apodizations,
     grid,
@@ -64,17 +63,21 @@ def compute_pfield(
         imaging. Part I: Theory & examples. *Computer Methods and Programs in
         Biomedicine, 218*, 106726. https://www.biomecardio.com/publis/cmpb22.pdf
 
+    Only linear (and phased) arrays are supported: all elements must lie on the x-axis
+    and face +z.
+
     Args:
         sound_speed (float): Speed of sound in the medium.
         center_frequency (float): Center frequency of the transmit pulse in Hz.
         probe_bandwidth_percent (float): Bandwidth of the probe, pulse-echo 6dB
             fractional bandwidth (%)
-        n_el (int): Number of elements in the probe.
-        probe_geometry (array): Geometry of the probe elements.
+        probe_geometry (array): Geometry of the probe elements of shape (n_el, 3).
         tx_apodizations (array): Transmit apodizations of shape (n_tx, n_el).
         grid (array): Grid points where the pressure field is computed
             of shape (grid_size_z, grid_size_x, 3).
         t0_delays (array): Transmit delays for each transmit event.
+        element_width (float, optional): Width of a single element in metres.
+            Default is None, which infers it as 90% of the pitch.
         frequency_step (int, optional): Frequency step. Default is 4.
             Higher is faster but less accurate.
         db_thresh (float, optional): dB threshold. Default is -1.0
@@ -110,7 +113,16 @@ def compute_pfield(
     # medium params: attenuation dB/(cm·MHz) -> Np/(cm·MHz) -> Np/(m·Hz)
     attenuation_coef = float(attenuation_coef) / 8.686 * 1e2 / 1e6
 
-    n_el = int(n_el)
+    # Element orientation (theta) is assumed zero and sub-elements are laid out along x.
+    geometry = ops.convert_to_numpy(probe_geometry)
+    if not (np.allclose(geometry[:, 1], 0) and np.allclose(geometry[:, 2], 0)):
+        raise NotImplementedError(
+            "Pfield computation currently only supports linear arrays, with all elements "
+            "at y=0 and z=0."
+        )
+    from zea.probes import _resolve_element_width
+
+    element_width = _resolve_element_width(geometry, element_width)
 
     # cast to float32
     sound_speed = ops.cast(sound_speed, "float32")
@@ -123,6 +135,9 @@ def compute_pfield(
     probe_geometry = ops.convert_to_tensor(probe_geometry, dtype="float32")
     grid_x = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
     grid_z = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
+    for name, value in (("t0_delays", t0_delays), ("tx_apodizations", tx_apodizations)):
+        if not np.all(np.isfinite(ops.convert_to_numpy(value))):
+            raise ValueError(f"`{name}` must be finite to compute the pressure field.")
     t0_delays = ops.convert_to_tensor(t0_delays, dtype="float32")
     tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="complex64")
 
@@ -132,14 +147,6 @@ def compute_pfield(
 
     # pulse params
     num_waveforms = 1  # number of waveforms in the pulse
-
-    # array params
-    if element_width is None:
-        from zea.probes import Probe
-
-        pitch = Probe.get_pitch(probe_geometry)
-        kerf = 0.1 * pitch
-        element_width = pitch - kerf
 
     # %------------------------------------%
     # % POINT LOCATIONS, DISTANCES & GRIDS %
@@ -163,7 +170,7 @@ def compute_pfield(
     # Centers of the transducer elements (x- and z-coordinates)
     element_x = probe_geometry[:, 0]
     element_z = probe_geometry[:, 2]
-    element_theta = ops.zeros(n_el)
+    element_theta = ops.zeros_like(element_x)
 
     # Centroids of the sub-elements
     seg_length = element_width / num_sub_elements
@@ -183,7 +190,7 @@ def compute_pfield(
     # Angle between the normal to the transducer and the line joining
     # the point and the transducer
     epsilon = keras.config.epsilon()
-    theta = ops.arcsin(ops.clip(delta_x / distance, -1.0, 1.0)) - element_theta
+    theta = ops.arcsin(ops.clip(delta_x / (distance + epsilon), -1.0, 1.0)) - element_theta
 
     # Directivity of a sub-element (Eq. 17). It varies over the band, but we approximate it at the
     # center frequency such that it doesn't need to be recomputed for each frequency sample.

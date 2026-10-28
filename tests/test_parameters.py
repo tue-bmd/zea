@@ -76,6 +76,7 @@ class DummyParameters(BaseParameters):
         computed1: A computed property depending on param1 and param2
         computed2: A computed property depending on computed1
         computed3: A computed property depending on param3 and param4
+        computed4: A computed property depending on param3, and optionally on param5
         optional_param: A property that is either set directly or computed from dependencies
     """
 
@@ -117,6 +118,11 @@ class DummyParameters(BaseParameters):
             self._computed3_count = 0
         self._computed3_count += 1
         return self.param3 / self.param4
+
+    @cache_with_dependencies("param3", optional=("param5",))
+    def computed4(self):
+        param5 = self._params.get("param5")
+        return self.param3 if param5 is None else self.param3 + param5
 
     @cache_with_dependencies("param3", "param1", "param4")
     def optional_param(self):
@@ -256,6 +262,13 @@ def test_missing_dependency_error_message():
         _ = s.computed2
     msg = str(excinfo.value)
     assert "param1" in msg and "param2" in msg
+
+
+def test_optional_dependency(dummy_params):
+    """An optional dependency is not required, but setting it invalidates the cache."""
+    assert dummy_params.computed4 == 1500.0
+    dummy_params.param5 = 10.0
+    assert dummy_params.computed4 == 1510.0
 
 
 def test_to_tensor_includes_all(dummy_params: DummyParameters):
