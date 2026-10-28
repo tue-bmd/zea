@@ -1,9 +1,10 @@
 """Pixel grid calculation for ultrasound beamforming."""
 
 import numpy as np
+from keras import ops
 
 from zea import log
-from zea.beamform.geometry import is_plane_wave
+from zea.beamform.geometry import compute_element_normals, is_plane_wave
 
 eps = 1e-10
 
@@ -39,7 +40,6 @@ def _focused_ray_direction_bounds(focal_point, element_positions) -> np.ndarray:
     # The rays fill the aperture, so the ray nearest the axis is on axis wherever
     # the x and y bounds straddle zero.
     nearest = np.where(lo * hi <= 0, 0.0, np.minimum(np.abs(lo), np.abs(hi)))
-    lo[2] = rays[:, 2].min()
     hi[2] = np.sqrt(max(1.0 - nearest[0] ** 2 - nearest[1] ** 2, 0.0))
     return np.stack([lo, hi], axis=-1)
 
@@ -113,6 +113,8 @@ def transmit_direction_bounds(
 # A rectangular element of width ``w`` has the far-field directivity
 # ``sinc(w sin(theta) / lambda)``, which falls to -6 dB at ``w sin(theta) / lambda``
 # equal to this constant (``np.sinc`` convention, ``sinc(x) = sin(pi x) / (pi x)``).
+# The soft-baffle model of Selfridge et al. (Appl. Phys. Lett. 37, 35, 1980) adds a
+# ``cos(theta)`` factor, which only narrows the pattern, so leaving it out is conservative.
 DIRECTIVITY_6DB = 0.603
 
 
@@ -163,10 +165,30 @@ def _frequency_band(center_frequency, demodulation_frequency, bandwidth) -> tupl
     return f_min, f_max
 
 
-def _receive_angle_sine(f_number) -> float:
-    """Largest receive angle sine ``1 / sqrt(1 + 4 F^2)``; ``1`` for ``F = 0``."""
+def _max_element_tilt(probe_geometry) -> float:
+    """Largest angle in radians between an element normal and ``+z``; ``0`` for a flat array.
+
+    Uses the same normals as the receive f-number mask, see
+    :func:`zea.beamform.geometry.compute_element_normals`.
+    """
+    probe_geometry = np.asarray(probe_geometry, dtype=float)
+    if probe_geometry.ndim != 2 or probe_geometry.shape[0] < 2 or probe_geometry.shape[1] != 3:
+        return 0.0
+    normals = ops.convert_to_numpy(compute_element_normals(ops.convert_to_tensor(probe_geometry)))
+    return float(np.arccos(np.clip(np.min(normals[:, 2]), -1.0, 1.0)))
+
+
+def _receive_angle_sine(f_number, tilt: float = 0.0) -> float:
+    """Largest receive angle sine relative to ``+z``.
+
+    The f-number cone has half-angle ``arctan(1 / (2 F))`` around each element's
+    normal (``90`` degrees for ``F = 0``). Normals tilted by up to ``tilt`` widen
+    it to ``sin(arctan(1 / (2 F)) + tilt)``, which is ``1 / sqrt(1 + 4 F^2)`` for
+    a flat array.
+    """
     f_number = float(f_number)
-    return 1.0 / np.sqrt(1.0 + 4.0 * f_number**2) if f_number > 0 else 1.0
+    theta_r = np.arctan(1.0 / (2.0 * f_number)) if f_number > 0 else np.pi / 2
+    return float(np.sin(min(theta_r + tilt, np.pi / 2)))
 
 
 def _symmetric_transmit_direction_bounds(sin_theta_r) -> tuple[np.ndarray, np.ndarray]:
@@ -283,7 +305,10 @@ def aliasing_limits(
     ``f`` give spatial frequency ``k = f * (t + r) / c`` in the image. Sweeping
     ``f`` over the band, ``r`` over the receive cone (set by ``f_number``) and
     ``t`` over the transmit rays (see :func:`transmit_direction_bounds`) gives the
-    image's k-space support. The limits follow from its bounding box:
+    image's k-space support, as in the k-space description of pulse-echo imaging by
+    Walker and Trahey, IEEE Trans. Ultrason. Ferroelectr. Freq. Control 45 (3),
+    pp. 541-558, 1998, https://doi.org/10.1109/58.677599. The limits follow from
+    its bounding box:
 
     - Lateral: ``dx <= 1 / (k_x_max - k_x_min)``, about ``lambda_min * F / 2``
       for equal transmit and receive apertures. Elevational ``dy`` likewise.
@@ -293,6 +318,11 @@ def aliasing_limits(
     Given an element size, element directivity (-6 dB, see :data:`DIRECTIVITY_6DB`)
     limits how oblique a path can be and still carry energy. Plane waves are not
     limited this way, as their direction is fixed by the steering.
+
+    For a curved array the receive cone is measured from each element's tilted
+    normal (as in :func:`zea.beamform.beamformer.fnumber_mask`), so it is widened
+    by the largest tilt. Directivity is then not applied, since it too is relative
+    to each element's normal.
 
     Args:
         sound_speed: Speed of sound in m/s.
@@ -314,14 +344,16 @@ def aliasing_limits(
         dict: ``dx_max``, ``dy_max`` and ``dz_max`` in metres, plus the quantities
         behind them for reporting: ``lambda_min``, ``transmit_direction``
         (``(lo, hi)`` of the x, y and z of the transmit directions), ``sin_theta_r``,
-        ``sin_theta_directivity``, ``axial_basis`` (a readable explanation) and
+        ``sin_theta_directivity`` (along x and y), ``axial_basis`` (a readable
+        explanation) and
         ``kx_range`` / ``ky_range`` / ``kz_range`` (the ``(lowest, highest)``
         spatial frequency of the image along each axis, in cycles per metre).
     """
     sound_speed = float(sound_speed)
     f_min, f_max = _frequency_band(center_frequency, demodulation_frequency, bandwidth)
     lambda_min = sound_speed / f_max if f_max > 0 else np.inf
-    sin_theta_r = _receive_angle_sine(f_number)
+    tilt = _max_element_tilt(probe_geometry)
+    sin_theta_r = _receive_angle_sine(f_number, tilt)
 
     bounds, plane = transmit_direction_bounds(
         focus_distances,
@@ -338,6 +370,9 @@ def aliasing_limits(
         element_height = element_width
     cap_x = _directivity_cap(element_width, sound_speed)
     cap_y = _directivity_cap(element_height, sound_speed)
+    if tilt > 0:
+        # Directivity bounds the angle to each element's own normal, not to +z.
+        cap_x = cap_y = np.inf
 
     band = (sin_theta_r, f_min, f_max)
     # Spatial frequency ranges of the image along x, y and z.
@@ -357,7 +392,9 @@ def aliasing_limits(
             [bounds[..., 0].min(axis=0), bounds[..., 1].max(axis=0)], -1
         ),
         "sin_theta_r": sin_theta_r,
-        "sin_theta_directivity": min(cap_x / f_max, 1.0) if f_max > 0 else 1.0,
+        "sin_theta_directivity": tuple(
+            min(cap / f_max, 1.0) if f_max > 0 else 1.0 for cap in (cap_x, cap_y)
+        ),
         "axial_basis": axial_basis,
         "kx_range": kx_range,
         "ky_range": ky_range,
@@ -380,7 +417,7 @@ def _transverse_aliasing_message(name, axis, axis_index, extent, d, limits) -> s
         f"(lambda_min = {limits['lambda_min'] * 1e6:.1f} um, "
         f"{axis} of the transmit directions in [{lo:.3f}, {hi:.3f}], "
         f"sin(theta_r) = +-{limits['sin_theta_r']:.3f}, "
-        f"element directivity sin(theta) <= {limits['sin_theta_directivity']:.3f}). "
+        f"element directivity sin(theta) <= {limits['sin_theta_directivity'][axis_index]:.3f}). "
         f"Consider increasing grid_size_{axis} to {int(np.ceil(extent / d_max)) + 1} "
         "or more (for an automatically sized grid, raise pixels_per_wavelength), "
         "or narrowing the apertures "

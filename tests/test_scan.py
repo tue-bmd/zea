@@ -559,6 +559,32 @@ def test_aliasing_limits_directivity_caps_diverging_transmit():
     assert capped["dx_max"] > uncapped["dx_max"]
 
 
+def test_aliasing_limits_curved_probe_widens_receive_cone():
+    """A curved array's receive cone opens around tilted normals, as in fnumber_mask."""
+    n_el, pitch, radius = 128, 0.3e-3, 40e-3
+    transmits = _plane_waves(0, n_el=n_el, pitch=pitch)
+    transmits["probe_geometry"] = create_curved_probe_geometry(n_el, pitch, radius)
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=1.0, bandwidth=2e6)
+    flat = aliasing_limits(**args, **_plane_waves(0, n_el=n_el, pitch=pitch))
+    curved = aliasing_limits(**args, **transmits, element_width=pitch)
+    # The edge normal comes from a one-sided difference, so it sits half a pitch in
+    # from the edge element on the arc.
+    tilt = (n_el - 2) / 2 * pitch / radius
+    assert curved["sin_theta_r"] == pytest.approx(np.sin(np.arctan(0.5) + tilt), rel=1e-3)
+    assert curved["dx_max"] < flat["dx_max"]
+    # Directivity is relative to each tilted normal, so it no longer caps the band.
+    assert curved["sin_theta_directivity"] == (1.0, 1.0)
+
+
+def test_aliasing_limits_directivity_reported_per_axis():
+    """The elevational directivity is reported from the element height."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    limits = aliasing_limits(**args, **_plane_waves(0), element_width=0.3e-3, element_height=5e-3)
+    assert limits["sin_theta_directivity"] == pytest.approx(
+        (0.603 * 1540.0 / 0.3e-3 / 7e6, 0.603 * 1540.0 / 5e-3 / 7e6)
+    )
+
+
 def test_parameters_check_for_aliasing_without_polar_angles():
     """Missing ``polar_angles`` are treated as unsteered transmits."""
     args = {k: v for k, v in focused_scan_args.items() if k != "polar_angles"}
