@@ -1836,12 +1836,13 @@ class TestBasebandModeToIq:
         with pytest.raises(ValueError, match="Axial dimension must be even"):
             baseband_mode_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
 
-    def test_q_samples_are_negated_odd_rows(self):
-        # A constant Q is unchanged by the fractional delay, so only the negation remains.
+    def test_odd_rows_hold_negated_q(self):
+        # Odd samples hold -Q, so Q is the negated odd sample. A constant Q is unchanged
+        # by the fractional delay, so only the negation remains.
         data = np.zeros((1, 1, 8, 1, 1), dtype=np.float32)
-        data[0, 0, 1::2, 0, 0] = 3.0  # odd index → Q (negated)
+        data[0, 0, 1::2, 0, 0] = 3.0  # odd index holds -Q
         out = baseband_mode_to_iq(data)
-        np.testing.assert_allclose(out[0, 0, :, 0, 1], -3.0, rtol=1e-5)
+        np.testing.assert_allclose(out[0, 0, :, 0, 1], -3.0, rtol=1e-5)  # Q channel
 
     def test_invalid_carrier_periods_per_pair_raises(self):
         with pytest.raises(ValueError, match="carrier_periods_per_pair"):
@@ -1912,6 +1913,7 @@ class TestBasebandModeToIq:
     @pytest.mark.parametrize("periods_per_pair", [1, 2], ids=["bs100bw", "bs50bw"])
     def test_unaligned_differs_from_true_baseband(self, periods_per_pair):
         interleaved = self._baseband_samples(periods_per_pair, **self.NARROWBAND_PULSE)
+        # Even samples hold I and odd samples hold -Q, so I + jQ = even - j * odd.
         unaligned_baseband = interleaved[0::2] - 1j * interleaved[1::2]
         reference = self._true_baseband_at_iq_times(periods_per_pair, **self.NARROWBAND_PULSE)
         assert self._relative_error(unaligned_baseband, reference) > 1e-2
@@ -1926,6 +1928,6 @@ class TestBasebandModeToIq:
     def test_int16_saturation_no_overflow(self):
         data = np.full((1, 1, 2, 1, 1), -32768, dtype=np.int16)
         out = baseband_mode_to_iq(data)
-        # Q channel negation of -32768 would overflow in int16; must be 32768.0
+        # Negating the odd sample -32768 to recover Q would overflow in int16; must be 32768.0
         assert out[0, 0, 0, 0, 1] == 32768.0
         assert out.dtype == np.float32
