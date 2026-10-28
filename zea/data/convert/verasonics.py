@@ -55,6 +55,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import scipy.fft
 import yaml
 from keras import ops
 
@@ -234,16 +235,16 @@ def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.2
     Returns:
         IQ data of the same shape and dtype where Q is evaluated at the I sample times.
     """
-    q_data = np.moveaxis(iq[..., 1], axis, -1)
+    q_data = np.moveaxis(iq[..., 1], axis, -1).astype(np.float32)
     n_ax = q_data.shape[-1]
     # Mirror the record so the circular FFT shift sees no jump between its end and start.
     n_fft = 2 * n_ax
     q_data_extended = np.concatenate([q_data, q_data[..., ::-1]], axis=-1)
-    spectrum = np.fft.rfft(q_data_extended, n=n_fft, axis=-1)
-    frequency = np.fft.rfftfreq(n_fft)
+    spectrum = scipy.fft.rfft(q_data_extended, axis=-1, workers=-1)
+    frequency = scipy.fft.rfftfreq(n_fft)
     # Q[n] holds Im b at sample n + q_delay; evaluate it at sample n.
-    spectrum *= np.exp(-2j * np.pi * frequency * q_delay)
-    q_aligned = np.fft.irfft(spectrum, n=n_fft, axis=-1)[..., :n_ax]
+    spectrum *= np.exp(-2j * np.pi * frequency * q_delay).astype(spectrum.dtype)
+    q_aligned = scipy.fft.irfft(spectrum, n=n_fft, axis=-1, workers=-1)[..., :n_ax]
 
     out = np.array(iq, copy=True)
     out[..., 1] = np.moveaxis(q_aligned, -1, axis).astype(iq.dtype)
