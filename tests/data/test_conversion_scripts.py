@@ -1836,6 +1836,17 @@ class TestBs100bwToIq:
         with pytest.raises(ValueError, match="Axial dimension must be even"):
             bs100bw_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
 
+    def test_q_samples_are_negated_odd_rows(self):
+        # A constant Q is unchanged by the fractional delay, so only the negation remains.
+        data = np.zeros((1, 1, 8, 1, 1), dtype=np.float32)
+        data[0, 0, 1::2, 0, 0] = 3.0  # odd index → Q (negated)
+        out = bs100bw_to_iq(data)
+        np.testing.assert_allclose(out[0, 0, :, 0, 1], -3.0, rtol=1e-5)
+
+    def test_invalid_carrier_periods_per_pair_raises(self):
+        with pytest.raises(ValueError, match="carrier_periods_per_pair"):
+            bs100bw_to_iq(self._make_data(), carrier_periods_per_pair=3)
+
     CENTER_FREQUENCY = 5e6
     NUMBER_OF_IQ_SAMPLES = 256
 
