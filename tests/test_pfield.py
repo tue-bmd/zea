@@ -82,3 +82,37 @@ def test_pfield_not_triggered():
     assert "flat_pfield" not in inputs and "pfield" not in inputs, (
         "pfield was computed in default pipeline but should not have been."
     )
+
+
+def test_pfield_single_transmit_auto_xlims_is_finite():
+    """Regression: grid points coinciding with an element must not produce NaNs.
+
+    With a single 0° plane wave and auto-derived xlims, the grid spans the aperture
+    exactly and starts at z=0, so some grid points land on an element position.
+    """
+    probe = Verasonics_l11_4v()
+    n_el = probe.n_el
+    angles = np.zeros(1)
+    t0_delays = compute_t0_delays_planewave(
+        probe_geometry=probe.probe_geometry,
+        polar_angles=angles,
+    )
+
+    parameters = Parameters(
+        probe_geometry=probe.probe_geometry,
+        n_tx=1,
+        n_el=n_el,
+        zlims=(0, 40e-3),
+        n_ax=1024,
+        sampling_frequency=probe.probe_center_frequency * 4,
+        center_frequency=probe.probe_center_frequency,
+        polar_angles=angles,
+        t0_delays=t0_delays,
+        focus_distances=np.array([np.inf]),
+        tx_apodizations=np.ones((1, n_el)),
+    )
+
+    pfield = np.asarray(parameters.pfield)
+    assert np.all(np.isfinite(pfield)), (
+        f"pfield contains {np.sum(~np.isfinite(pfield))} non-finite values"
+    )
