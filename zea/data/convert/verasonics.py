@@ -184,7 +184,7 @@ def estimate_lens_probe_params(
     }
 
 
-def bs100bw_to_iq(data: np.ndarray) -> np.ndarray:
+def bs100bw_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> np.ndarray:
     """Convert BS100BW/BS50BW interleaved data to IQ format.
 
     Both Verasonics baseband modes (BS100BW and BS50BW) interleave I and Q
@@ -193,6 +193,8 @@ def bs100bw_to_iq(data: np.ndarray) -> np.ndarray:
 
     Args:
         data: Input array of shape ``(n_frames, n_tx, n_ax_raw, n_el, 1)``.
+        carrier_periods_per_pair: Number of carrier periods between consecutive sample
+            pairs: 1 for BS100BW, 2 for BS50BW. Defaults to 1.
 
     Returns:
         IQ array of shape ``(n_frames, n_tx, n_ax, n_el, 2)``.
@@ -201,12 +203,19 @@ def bs100bw_to_iq(data: np.ndarray) -> np.ndarray:
         raise ValueError(f"Expected shape (n_frames, n_tx, n_ax_raw, n_el, 1), got {data.shape}")
     if data.shape[2] % 2 != 0:
         raise ValueError(f"Axial dimension must be even for IQ deinterleaving, got {data.shape[2]}")
+    if carrier_periods_per_pair not in (1, 2):
+        raise ValueError(
+            f"carrier_periods_per_pair must be 1 (BS100BW) or 2 (BS50BW), "
+            f"got {carrier_periods_per_pair}"
+        )
     d = data.astype(np.float32)
     iq_data = np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
-    return align_bs100bw_quadrature(iq_data, axis=2)
+    # Q lags I by a quarter carrier period, expressed here in IQ samples.
+    q_delay = 0.25 / carrier_periods_per_pair
+    return align_bs100bw_quadrature(iq_data, axis=2, q_delay=q_delay)
 
 
-def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2) -> np.ndarray:
+def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.25) -> np.ndarray:
     """Remove the quarter-sample delay of Q in IQ data built from BS100BW pairs.
 
     BS100BW data captures I(t) and Q(t+1/4Ts). This function shifts Q back to the I
@@ -215,6 +224,8 @@ def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2) -> np.ndarray:
     Args:
         iq: IQ data with I and Q on the last axis.
         axis: The axial (fast-time) axis.
+        q_delay: How far Q lags I, in IQ samples. 0.25 for BS100BW, 0.125 for BS50BW.
+            Defaults to 0.25.
 
     Returns:
         IQ data of the same shape and dtype where Q is evaluated at the I sample times.
@@ -226,8 +237,8 @@ def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2) -> np.ndarray:
     q_data_extended = np.concatenate([q_data, q_data[..., ::-1]], axis=-1)
     spectrum = np.fft.rfft(q_data_extended, n=n_fft, axis=-1)
     frequency = np.fft.rfftfreq(n_fft)
-    # Q[n] holds Im b at sample n + 1/4; evaluate it at sample n (a delay of 1/4).
-    spectrum *= np.exp(-2j * np.pi * frequency * 0.25)
+    # Q[n] holds Im b at sample n + q_delay; evaluate it at sample n.
+    spectrum *= np.exp(-2j * np.pi * frequency * q_delay)
     q_aligned = np.fft.irfft(spectrum, n=n_fft, axis=-1)[..., :n_ax]
 
     out = np.array(iq, copy=True)
@@ -780,7 +791,8 @@ class VerasonicsFile(h5py.File):
         raw_data = raw_data[..., None]
 
         if self.is_baseband_mode:
-            raw_data = bs100bw_to_iq(raw_data)
+            # BS100BW takes a sample pair every carrier period, BS50BW every two.
+            raw_data = bs100bw_to_iq(raw_data, carrier_periods_per_pair=100 // self.sample_mode)
 
         return raw_data
 

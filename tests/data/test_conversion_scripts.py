@@ -1839,48 +1839,78 @@ class TestBs100bwToIq:
     CENTER_FREQUENCY = 5e6
     NUMBER_OF_IQ_SAMPLES = 256
 
-    def _true_baseband(self, time: np.ndarray) -> np.ndarray:
-        """Band-limited complex baseband pulse centered in the record."""
-        pulse_center = self.NUMBER_OF_IQ_SAMPLES / self.CENTER_FREQUENCY / 2
-        pulse_width = 3 / self.CENTER_FREQUENCY
-        relative_time = time - pulse_center
+    def _true_baseband(
+        self,
+        time: np.ndarray,
+        periods_per_pair: int,
+        pulse_width_periods: float,
+        frequency_offset_fraction: float,
+    ) -> np.ndarray:
+        """Band-limited complex baseband pulse centered in the record.
+
+        Pulse width and frequency offset scale with ``periods_per_pair`` so that the
+        pulse occupies the same fraction of the IQ band in every sample mode.
+        """
+        record_duration = self.NUMBER_OF_IQ_SAMPLES * periods_per_pair / self.CENTER_FREQUENCY
+        pulse_width = pulse_width_periods * periods_per_pair / self.CENTER_FREQUENCY
+        relative_time = time - record_duration / 2
         envelope = np.exp(-0.5 * (relative_time / pulse_width) ** 2)
-        frequency_offset = 0.2 * self.CENTER_FREQUENCY
+        frequency_offset = frequency_offset_fraction * self.CENTER_FREQUENCY / periods_per_pair
         phase = 2 * np.pi * frequency_offset * relative_time + 0.7
         return envelope * np.exp(1j * phase)
 
-    def _nyquist_sampled_rf(self) -> np.ndarray:
-        """RF signal sampled at four times the center frequency."""
-        sampling_frequency = 4 * self.CENTER_FREQUENCY
-        time = np.arange(4 * self.NUMBER_OF_IQ_SAMPLES) / sampling_frequency
+    def _baseband_samples(self, periods_per_pair: int, **pulse) -> np.ndarray:
+        """Sample RF at four times the center frequency and keep the first two samples of
+        every ``4 * periods_per_pair``, as BS100BW (1) and BS50BW (2) do."""
+        samples_per_pair = 4 * periods_per_pair
+        time = np.arange(samples_per_pair * self.NUMBER_OF_IQ_SAMPLES) / (4 * self.CENTER_FREQUENCY)
         carrier = np.exp(2j * np.pi * self.CENTER_FREQUENCY * time)
-        return np.real(self._true_baseband(time) * carrier)
+        rf = np.real(self._true_baseband(time, periods_per_pair, **pulse) * carrier)
+        return rf.reshape(self.NUMBER_OF_IQ_SAMPLES, samples_per_pair)[:, :2].reshape(-1)
 
-    def _bs100bw_samples(self) -> np.ndarray:
-        """Keep the first two of every four RF samples, as BS100BW does."""
-        rf = self._nyquist_sampled_rf()
-        return rf.reshape(self.NUMBER_OF_IQ_SAMPLES, 4)[:, :2].reshape(-1)
-
-    def _true_baseband_at_iq_times(self) -> np.ndarray:
-        iq_times = np.arange(self.NUMBER_OF_IQ_SAMPLES) / self.CENTER_FREQUENCY
-        return self._true_baseband(iq_times)
+    def _true_baseband_at_iq_times(self, periods_per_pair: int, **pulse) -> np.ndarray:
+        iq_times = np.arange(self.NUMBER_OF_IQ_SAMPLES) * periods_per_pair / self.CENTER_FREQUENCY
+        return self._true_baseband(iq_times, periods_per_pair, **pulse)
 
     @staticmethod
     def _relative_error(estimate: np.ndarray, reference: np.ndarray) -> float:
         return np.linalg.norm(estimate - reference) / np.linalg.norm(reference)
 
-    def test_bs100bw_matches_true_baseband(self):
-        interleaved = self._bs100bw_samples()
-        iq = bs100bw_to_iq(interleaved[None, None, :, None, None])[0, 0, :, 0]
-        estimated_baseband = iq[:, 0] + 1j * iq[:, 1]
-        error = self._relative_error(estimated_baseband, self._true_baseband_at_iq_times())
-        assert error < 1e-3
+    NARROWBAND_PULSE = {"pulse_width_periods": 3, "frequency_offset_fraction": 0.2}
+    WIDEBAND_PULSE = {"pulse_width_periods": 1, "frequency_offset_fraction": 0.0}
 
-    def test_unaligned_bs100bw_differs_from_true_baseband(self):
-        interleaved = self._bs100bw_samples()
+    @pytest.mark.parametrize(
+        "periods_per_pair, pulse, tolerance",
+        [
+            (1, NARROWBAND_PULSE, 1e-3),
+            (2, NARROWBAND_PULSE, 1e-3),
+            (1, WIDEBAND_PULSE, 1e-2),
+            (2, WIDEBAND_PULSE, 1e-2),
+        ],
+        ids=["bs100bw-narrowband", "bs50bw-narrowband", "bs100bw-wideband", "bs50bw-wideband"],
+    )
+    def test_matches_true_baseband(self, periods_per_pair, pulse, tolerance):
+        interleaved = self._baseband_samples(periods_per_pair, **pulse)
+        iq = bs100bw_to_iq(
+            interleaved[None, None, :, None, None], carrier_periods_per_pair=periods_per_pair
+        )[0, 0, :, 0]
+        estimated_baseband = iq[:, 0] + 1j * iq[:, 1]
+        reference = self._true_baseband_at_iq_times(periods_per_pair, **pulse)
+        assert self._relative_error(estimated_baseband, reference) < tolerance
+
+    @pytest.mark.parametrize("periods_per_pair", [1, 2], ids=["bs100bw", "bs50bw"])
+    def test_unaligned_differs_from_true_baseband(self, periods_per_pair):
+        interleaved = self._baseband_samples(periods_per_pair, **self.NARROWBAND_PULSE)
         unaligned_baseband = interleaved[0::2] - 1j * interleaved[1::2]
-        error = self._relative_error(unaligned_baseband, self._true_baseband_at_iq_times())
-        assert error > 1e-2
+        reference = self._true_baseband_at_iq_times(periods_per_pair, **self.NARROWBAND_PULSE)
+        assert self._relative_error(unaligned_baseband, reference) > 1e-2
+
+    def test_bs50bw_needs_its_own_delay(self):
+        # Aligning BS50BW with the BS100BW delay must not reach the BS50BW accuracy.
+        interleaved = self._baseband_samples(2, **self.NARROWBAND_PULSE)
+        iq = bs100bw_to_iq(interleaved[None, None, :, None, None])[0, 0, :, 0]
+        reference = self._true_baseband_at_iq_times(2, **self.NARROWBAND_PULSE)
+        assert self._relative_error(iq[:, 0] + 1j * iq[:, 1], reference) > 1e-2
 
     def test_int16_saturation_no_overflow(self):
         data = np.full((1, 1, 2, 1, 1), -32768, dtype=np.int16)
