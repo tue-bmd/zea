@@ -328,8 +328,9 @@ def aliasing_limits(
         sound_speed: Speed of sound in m/s.
         center_frequency: Transmit center frequency in Hz, scalar or per transmit.
         f_number: Receive f-number; ``0`` means the full aperture.
-        focus_distances, probe_geometry, tx_apodizations, polar_angles,
-            transmit_origins, azimuth_angles: Transmit geometry, see
+        focus_distances, probe_geometry, tx_apodizations, polar_angles: Transmit
+            geometry, see :func:`transmit_direction_bounds`.
+        transmit_origins, azimuth_angles: Transmit geometry, see
             :func:`transmit_direction_bounds`.
         demodulation_frequency: Demodulation frequency in Hz. ``None`` or ``0``
             falls back to ``center_frequency``.
@@ -461,17 +462,14 @@ def check_for_aliasing(
 ) -> list:
     """Warn if the grid's pixel pitch exceeds :func:`aliasing_limits`.
 
-    Only valid for regular cartesian grids (2D or 3D).
+    Only valid for regular cartesian grids (2D or 3D). Arguments not listed below
+    are forwarded to :func:`aliasing_limits`.
 
     Args:
         xlims, zlims: Lateral and axial extent ``(min, max)`` of the grid in metres.
         grid_size_x, grid_size_z: Number of pixels along x and z, with pixels on
             both limits as in :func:`cartesian_pixel_grid`. An axis with a single
             pixel is not checked.
-        sound_speed, center_frequency, f_number, focus_distances, probe_geometry,
-            tx_apodizations, polar_angles, transmit_origins, demodulation_frequency,
-            demodulated, bandwidth, azimuth_angles, element_width, element_height:
-            Forwarded to :func:`aliasing_limits`.
         ylims, grid_size_y: Elevational extent and number of pixels. The default
             is a 2D grid.
 
