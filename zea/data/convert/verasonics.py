@@ -187,9 +187,11 @@ def estimate_lens_probe_params(
 def bs100bw_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> np.ndarray:
     """Convert BS100BW/BS50BW interleaved data to IQ format.
 
-    Both Verasonics baseband modes (BS100BW and BS50BW) interleave I and Q
-    samples along the axial axis: even samples are I, odd samples are Q
-    (negated).
+    Both Verasonics baseband modes (BS100BW and BS50BW) store pairs of samples taken a
+    quarter carrier period apart: even samples are I, odd samples are Q (negated). One
+    pair is taken every carrier period (BS100BW) or every two carrier periods (BS50BW).
+    Because Q is sampled a quarter carrier period after I, Q is shifted back to the I
+    sample times with :func:`align_bs100bw_quadrature`.
 
     Args:
         data: Input array of shape ``(n_frames, n_tx, n_ax_raw, n_el, 1)``.
@@ -216,10 +218,12 @@ def bs100bw_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> np.nda
 
 
 def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.25) -> np.ndarray:
-    """Remove the quarter-sample delay of Q in IQ data built from BS100BW pairs.
+    """Shift Q back to the I sample times in IQ data built from BS100BW/BS50BW pairs.
 
-    BS100BW data captures I(t) and Q(t+1/4Ts). This function shifts Q back to the I
-    sample times.
+    The baseband sample modes capture I at time ``t`` and Q a quarter carrier period
+    later. With ``Ts`` the IQ sample period, that is ``Q(t + Ts/4)`` for BS100BW and
+    ``Q(t + Ts/8)`` for BS50BW. This function applies a band-limited fractional delay
+    of ``q_delay`` samples to Q so that it is evaluated at the I sample times.
 
     Args:
         iq: IQ data with I and Q on the last axis.
@@ -232,7 +236,7 @@ def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.2
     """
     q_data = np.moveaxis(iq[..., 1], axis, -1)
     n_ax = q_data.shape[-1]
-    # Zero-pad so the fractional shift does not wrap the end of the record to the start.
+    # Mirror the record so the circular FFT shift sees no jump between its end and start.
     n_fft = 2 * n_ax
     q_data_extended = np.concatenate([q_data, q_data[..., ::-1]], axis=-1)
     spectrum = np.fft.rfft(q_data_extended, n=n_fft, axis=-1)
