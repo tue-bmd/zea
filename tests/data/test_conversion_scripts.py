@@ -29,7 +29,7 @@ from zea.data.convert.utils import (
 )
 from zea.data.convert.verasonics import (
     VerasonicsFile,
-    bs100bw_to_iq,
+    baseband_mode_to_iq,
     convert_verasonics,
     estimate_lens_probe_params,
 )
@@ -1808,44 +1808,44 @@ class TestEstimateLensProbeParams:
             estimate_lens_probe_params(float("inf"), 7e6)
 
 
-class TestBs100bwToIq:
+class TestBasebandModeToIq:
     def _make_data(self, n_frames=2, n_tx=3, n_ax=8, n_el=4):
         return np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
 
     def test_output_shape(self):
         data = self._make_data()
-        out = bs100bw_to_iq(data)
+        out = baseband_mode_to_iq(data)
         assert out.shape == (2, 3, 4, 4, 2)
 
     def test_i_samples_are_even_rows(self):
         data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
         data[0, 0, 0, 0, 0] = 5.0  # even index → I
         data[0, 0, 2, 0, 0] = 7.0  # even index → I
-        out = bs100bw_to_iq(data)
+        out = baseband_mode_to_iq(data)
         np.testing.assert_array_equal(out[0, 0, :, 0, 0], [5.0, 7.0])  # I channel
 
     def test_wrong_ndim_raises(self):
         with pytest.raises(ValueError, match="Expected shape"):
-            bs100bw_to_iq(np.zeros((2, 3, 8, 4)))
+            baseband_mode_to_iq(np.zeros((2, 3, 8, 4)))
 
     def test_wrong_last_dim_raises(self):
         with pytest.raises(ValueError, match="Expected shape"):
-            bs100bw_to_iq(np.zeros((2, 3, 8, 4, 2)))
+            baseband_mode_to_iq(np.zeros((2, 3, 8, 4, 2)))
 
     def test_odd_axial_dim_raises(self):
         with pytest.raises(ValueError, match="Axial dimension must be even"):
-            bs100bw_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
+            baseband_mode_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
 
     def test_q_samples_are_negated_odd_rows(self):
         # A constant Q is unchanged by the fractional delay, so only the negation remains.
         data = np.zeros((1, 1, 8, 1, 1), dtype=np.float32)
         data[0, 0, 1::2, 0, 0] = 3.0  # odd index → Q (negated)
-        out = bs100bw_to_iq(data)
+        out = baseband_mode_to_iq(data)
         np.testing.assert_allclose(out[0, 0, :, 0, 1], -3.0, rtol=1e-5)
 
     def test_invalid_carrier_periods_per_pair_raises(self):
         with pytest.raises(ValueError, match="carrier_periods_per_pair"):
-            bs100bw_to_iq(self._make_data(), carrier_periods_per_pair=3)
+            baseband_mode_to_iq(self._make_data(), carrier_periods_per_pair=3)
 
     CENTER_FREQUENCY = 5e6
     NUMBER_OF_IQ_SAMPLES = 256
@@ -1902,7 +1902,7 @@ class TestBs100bwToIq:
     )
     def test_matches_true_baseband(self, periods_per_pair, pulse, tolerance):
         interleaved = self._baseband_samples(periods_per_pair, **pulse)
-        iq = bs100bw_to_iq(
+        iq = baseband_mode_to_iq(
             interleaved[None, None, :, None, None], carrier_periods_per_pair=periods_per_pair
         )[0, 0, :, 0]
         estimated_baseband = iq[:, 0] + 1j * iq[:, 1]
@@ -1919,13 +1919,13 @@ class TestBs100bwToIq:
     def test_bs50bw_needs_its_own_delay(self):
         # Aligning BS50BW with the BS100BW delay must not reach the BS50BW accuracy.
         interleaved = self._baseband_samples(2, **self.NARROWBAND_PULSE)
-        iq = bs100bw_to_iq(interleaved[None, None, :, None, None])[0, 0, :, 0]
+        iq = baseband_mode_to_iq(interleaved[None, None, :, None, None])[0, 0, :, 0]
         reference = self._true_baseband_at_iq_times(2, **self.NARROWBAND_PULSE)
         assert self._relative_error(iq[:, 0] + 1j * iq[:, 1], reference) > 1e-2
 
     def test_int16_saturation_no_overflow(self):
         data = np.full((1, 1, 2, 1, 1), -32768, dtype=np.int16)
-        out = bs100bw_to_iq(data)
+        out = baseband_mode_to_iq(data)
         # Q channel negation of -32768 would overflow in int16; must be 32768.0
         assert out[0, 0, 0, 0, 1] == 32768.0
         assert out.dtype == np.float32

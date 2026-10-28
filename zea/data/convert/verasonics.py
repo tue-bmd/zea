@@ -185,14 +185,14 @@ def estimate_lens_probe_params(
     }
 
 
-def bs100bw_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> np.ndarray:
+def baseband_mode_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> np.ndarray:
     """Convert BS100BW/BS50BW interleaved data to IQ format.
 
     Both Verasonics baseband modes (BS100BW and BS50BW) store pairs of samples taken a
     quarter carrier period apart: even samples are I, odd samples are Q (negated). One
     pair is taken every carrier period (BS100BW) or every two carrier periods (BS50BW).
     Because Q is sampled a quarter carrier period after I, Q is shifted back to the I
-    sample times with :func:`align_bs100bw_quadrature`.
+    sample times with :func:`align_baseband_quadrature`.
 
     Args:
         data: Input array of shape ``(n_frames, n_tx, n_ax_raw, n_el, 1)``.
@@ -215,10 +215,10 @@ def bs100bw_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> np.nda
     iq_data = np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
     # Q lags I by a quarter carrier period, expressed here in IQ samples.
     q_delay = 0.25 / carrier_periods_per_pair
-    return align_bs100bw_quadrature(iq_data, axis=2, q_delay=q_delay)
+    return align_baseband_quadrature(iq_data, axis=2, q_delay=q_delay)
 
 
-def align_bs100bw_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.25) -> np.ndarray:
+def align_baseband_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.25) -> np.ndarray:
     """Shift Q back to the I sample times in IQ data built from BS100BW/BS50BW pairs.
 
     The baseband sample modes capture I at time ``t`` and Q a quarter carrier period
@@ -797,7 +797,9 @@ class VerasonicsFile(h5py.File):
 
         if self.is_baseband_mode:
             # BS100BW takes a sample pair every carrier period, BS50BW every two.
-            raw_data = bs100bw_to_iq(raw_data, carrier_periods_per_pair=100 // self.sample_mode)
+            raw_data = baseband_mode_to_iq(
+                raw_data, carrier_periods_per_pair=100 // self.sample_mode
+            )
 
         return raw_data
 
