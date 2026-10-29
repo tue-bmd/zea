@@ -484,7 +484,7 @@ class Parameters(BaseParameters):
         It is derived, not set: the grid fans out from where the transmits fan out from.
         In order of precedence:
 
-        1. Steered transmit axes that meet in one point: that point. This is the middle
+        1. Steered focused transmit axes that meet in one point: that point. This is the middle
            of the array for transmits launched from there, a virtual apex behind a flat
            array whose transmits are spread over it, and the centre of curvature for
            transmits along a curved array's normals.
@@ -1122,12 +1122,15 @@ class Parameters(BaseParameters):
         """The angles [rad] of the first and last column of a polar grid.
 
         If not explicitly provided, the range of the transmit angles (:attr:`polar_angles`),
-        widened on each side to cover what the transmits insonify at the deepest pixel,
+        widened on each side to cover what the transmits insonify down to the deepest pixel,
         ``zlims[1]``, as seen from :attr:`grid_apex`. Each transmit's region is bounded by
         two edge rays (see :func:`~zea.beamform.geometry.insonified_edge_rays`): a focused
         transmit adds no margin, a plane wave adds the spread from the ends of the array,
         and a diverging wave the spread from its virtual source through the ends of the
-        array. Set :attr:`polar_margin` to widen by a fixed angle instead.
+        array. On a flat array whose transmits define no apex (plane or diverging waves),
+        the apex is where the outermost edge ray, traced back from its array end, crosses
+        the central axis, so the sector covers each region from the array down.
+        Set :attr:`polar_margin` to widen by a fixed angle instead.
 
         With ``enable_scanline=True`` this is exactly the range of the transmit angles,
         since the columns are the transmits; an explicit value is ignored there.
@@ -1158,8 +1161,6 @@ class Parameters(BaseParameters):
         if probe_geometry is None or depth is None:
             return (low, high)
 
-        # Seen from the apex the transmits define (or the array middle when they don't)
-        apex = self._transmit_or_probe_apex() or 0.0
         points, directions = insonified_edge_rays(
             probe_geometry,
             self._transmit_origins_or_zeros(),
@@ -1167,7 +1168,19 @@ class Parameters(BaseParameters):
             self.focus_distances,
             element_normals=self._element_normals(),
         )
+        # Seen from the apex the transmits define or, on a flat array, from the virtual apex
+        # whose sector edge runs along the outermost edge ray through the array end (where
+        # grid_apex places it). Without either, from the array middle.
+        apex = self._transmit_or_probe_apex()
+        if apex is None:
+            max_angle = float(np.max(np.abs(np.arctan2(directions[:, 0], directions[:, 1]))))
+            half_aperture = float(np.ptp(probe_geometry[:, 0])) / 2
+            apex = half_aperture / np.tan(max_angle) if 0 < max_angle < np.pi / 2 else 0.0
         reached = rays_at_depth(points, directions, depth)
+        if apex > 0:
+            # The start points bound the near field; from the array middle itself they
+            # would lie at +-90 degrees.
+            reached = np.concatenate([points, reached])
         edge_angles = np.arctan2(reached[:, 0], reached[:, 1] + apex)
         edge_angles = edge_angles[np.isfinite(edge_angles)]
         return (

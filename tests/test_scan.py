@@ -1030,13 +1030,25 @@ def test_polar_limits_of_focused_lines_is_their_angle_range():
     np.testing.assert_allclose(_phased().polar_limits, np.radians([-45, 45]), rtol=1e-6)
 
 
-def test_polar_limits_widen_to_what_plane_waves_insonify():
-    """Seen from the apex at the array middle, the strip a plane wave insonifies reaches
-    past its steering angle; at the deepest pixel its edge leaves the array end."""
+def test_sector_of_plane_waves_runs_along_their_outer_edges():
+    """Steered plane waves do not fan out from their origin, so they define no apex: the
+    sector edges run from the array ends along the outermost steering angle, which covers
+    every strip they insonify from the array down."""
     parameters = _phased(n_tx=21, span_deg=20.0, focus=np.inf)
-    depth, angle = max(parameters.zlims), np.radians(20)
-    expected = np.arctan((HALF_APERTURE + depth * np.tan(angle)) / depth)
-    np.testing.assert_allclose(parameters.polar_limits, (-expected, expected), rtol=1e-5)
+    angle = np.radians(20)
+    np.testing.assert_allclose(parameters.polar_limits, (-angle, angle), rtol=1e-5)
+    np.testing.assert_allclose(
+        parameters.grid_apex, (0.0, 0.0, -HALF_APERTURE / np.tan(angle)), rtol=1e-5
+    )
+
+
+def test_steered_diverging_waves_from_the_middle_define_no_apex():
+    """Diverging waves fan out from their virtual sources, not from the array middle."""
+    parameters = _phased(n_tx=11, span_deg=30.0, focus=-0.02)
+    assert parameters.grid_apex[2] < 0
+    # Every edge ray from an array end lies inside the sector at the array.
+    half_angle = np.arctan(HALF_APERTURE / -parameters.grid_apex[2])
+    assert max(np.abs(parameters.polar_limits)) == pytest.approx(half_angle, rel=1e-5)
 
 
 def test_polar_margin_replaces_the_automatic_margin():

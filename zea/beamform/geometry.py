@@ -48,10 +48,12 @@ def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol)
 
     Two transmit schemes define such a point:
 
-    - **Steered transmits** whose axes (from ``transmit_origins`` along ``polar_angles``)
-      cross ``x = 0`` in one point. That is the array middle for transmits launched
-      from there, a virtual apex behind the array for transmits spread over a flat
-      array, and the centre of curvature for transmits along a curved array's normals.
+    - **Steered focused transmits** whose axes (from ``transmit_origins`` along
+      ``polar_angles``) cross ``x = 0`` in one point. That is the array middle for
+      transmits launched from there, a virtual apex behind the array for transmits spread
+      over a flat array, and the centre of curvature for transmits along a curved array's
+      normals. Steered plane and diverging waves do not fan out from their origin (it
+      only references their delays), so their axes define no point.
     - **Unsteered diverging waves** that share one virtual source
       (``transmit_origins + focus_distances`` along ``+z``) on the central axis.
 
@@ -74,8 +76,11 @@ def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol)
 
     steered = np.abs(angles) > STEERING_TOLERANCE
     if np.any(steered):
-        # Where each steered axis crosses x = 0, as a distance behind the array
-        crossings = origins[steered, 0] / np.tan(angles[steered]) - origins[steered, 2]
+        lines = steered & np.isfinite(focus) & (focus > 0)
+        if not np.any(lines):
+            return None
+        # Where each steered focused axis crosses x = 0, as a distance behind the array
+        crossings = origins[lines, 0] / np.tan(angles[lines]) - origins[lines, 2]
         middle = float(np.median(crossings))
         if np.ptp(crossings) <= tol and middle >= -tol:
             return max(middle, 0.0)
