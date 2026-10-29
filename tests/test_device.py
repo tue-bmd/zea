@@ -30,26 +30,10 @@ from zea.ops import Pipeline
 from zea.ops.keras_ops import Abs
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
+from .helpers import is_on_gpu
 
 _DEVICES = ["cpu", "gpu:0", "cuda:0", "auto:-1", "auto:1"]
 _BACKENDS = ["tensorflow", "torch", "jax", "auto", "numpy"]
-
-
-def _tensor_device_name(tensor) -> str:
-    """Return a lowercase device string for a tensor (e.g. ``'cpu'``, ``'cuda:0'``)."""
-    backend = keras.backend.backend()
-    if backend == "torch":
-        import torch
-
-        if isinstance(tensor, torch.Tensor):
-            return str(tensor.device)
-    if backend == "jax":
-        import jax
-
-        return str(jax.device_put(tensor).devices().pop()).lower()
-    if backend == "tensorflow":
-        return tensor.device.lower()
-    return "unknown"
 
 
 class TestCudaVisibleDevicesDisablesGpus:
@@ -370,7 +354,7 @@ class TestOnDevice:
         """Tensors created inside ``device('gpu:0')`` reside on the GPU."""
         with zea.device("gpu:0"):
             x = keras.ops.ones((4,))
-        assert "cpu" not in _tensor_device_name(x)
+        assert is_on_gpu(x)
 
     @pytest.mark.gpu
     def test_gpu_correct_result(self):  # pragma: no cover
@@ -446,7 +430,7 @@ class TestPipelineDevice:
         out = self._pipe(device="gpu:0")(
             data=keras.ops.convert_to_tensor(np.array([-1.0, 2.0], dtype=np.float32))
         )["data"]
-        assert "cpu" not in _tensor_device_name(out)
+        assert is_on_gpu(out)
 
     @pytest.mark.gpu
     def test_gpu_correct_result(self):  # pragma: no cover

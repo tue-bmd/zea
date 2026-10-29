@@ -290,6 +290,22 @@ def test_scan_dimension_count_consistency():
         ScanSpec(**scan)
 
 
+@pytest.mark.parametrize(
+    "field, match",
+    [
+        ("t0_delays", "Transmit delays must be finite"),
+        ("tx_apodizations", "Transmit apodizations must be finite"),
+    ],
+)
+def test_scan_rejects_non_finite_transmit_parameters(field, match):
+    """NaN transmit delays or apodizations are rejected."""
+    scan = _scan_minimal()
+    scan[field][0, 0] = np.nan
+
+    with pytest.raises(ValueError, match=match):
+        ScanSpec(**scan)
+
+
 def test_inconsistent_dimension_error_groups_fields_by_size():
     """The error message groups the offending fields by their observed size."""
     scan = _scan_minimal(n_tx=2)

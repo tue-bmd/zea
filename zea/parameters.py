@@ -1152,12 +1152,12 @@ class Parameters(BaseParameters):
         "sound_speed",
         "center_frequency",
         "probe_bandwidth_percent",
-        "n_el",
         "probe_geometry",
         "tx_apodizations",
         "grid",
         "t0_delays",
         "pfield_kwargs",
+        optional=("element_width",),
     )
     def pfield(self) -> np.ndarray:
         """Compute or return the pressure field (pfield) for weighting
@@ -1168,12 +1168,12 @@ class Parameters(BaseParameters):
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
             center_frequency=self.center_frequency,
-            n_el=self.n_el,
             probe_geometry=self.probe_geometry,
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
             probe_bandwidth_percent=self.probe_bandwidth_percent,
+            element_width=self._params.get("element_width"),
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)
