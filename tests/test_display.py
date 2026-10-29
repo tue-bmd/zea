@@ -94,9 +94,9 @@ def test_scan_convert_in_process_smoke():
     )
     assert np.asarray(out2d_novec).ndim == 2
 
-    # distance_to_apex only relabels z_lim, but keep the branch covered in-process too.
+    # grid_apex only relabels z_lim, but keep the branch covered in-process too.
     _, params_apex = display.scan_convert_2d(
-        img2d, rho_range=(0.5, 1), theta_range=(-0.5, 0.5), distance_to_apex=0.25
+        img2d, rho_range=(0.5, 1), theta_range=(-0.5, 0.5), grid_apex=(0.0, 0.0, -0.25)
     )
     assert isinstance(params_apex, dict)
 
@@ -764,9 +764,9 @@ def test_histogram_match_invalid_arguments():
 
 
 @backend_equality_check(decimal=6)
-def test_scan_convert_2d_distance_to_apex_only_relabels_z_lim():
-    """``distance_to_apex`` reports z as a depth below the transducer rather than from
-    the apex rho is measured from. It must not touch the image itself."""
+def test_scan_convert_2d_grid_apex_only_relabels_z_lim():
+    """``grid_apex`` reports z as a depth below the transducer rather than from the apex
+    rho is measured from. It must not touch the image itself."""
     from keras import ops
 
     from zea import display
@@ -778,7 +778,7 @@ def test_scan_convert_2d_distance_to_apex_only_relabels_z_lim():
 
     apex, params_apex = display.scan_convert_2d(img, rho_range, theta_range)
     shifted, params_shifted = display.scan_convert_2d(
-        img, rho_range, theta_range, distance_to_apex=distance_to_apex
+        img, rho_range, theta_range, grid_apex=(0.0, 0.0, -distance_to_apex)
     )
 
     np.testing.assert_array_equal(ops.convert_to_numpy(apex), ops.convert_to_numpy(shifted))
@@ -809,7 +809,7 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
     scan-convert to the physical position ``Parameters.grid[i, j]`` reports for it, read
     back through ``Parameters.extent_imshow``.
 
-    This ties the three places ``distance_to_apex`` is applied — the polar grid, the
+    This ties the three places ``grid_apex`` is applied — the polar grid, the
     scan-conversion rho range, and the reported extent — to a single observable, so any
     one of them drifting into the wrong frame fails here. The deepest indices also pin
     the radial endpoint: ``rho_range`` must describe the radius of the *last* sample, not
@@ -832,7 +832,7 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
         sampling_frequency=20e6,
         n_ax=4096,
     )
-    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
+    assert parameters.grid_apex[2] == pytest.approx(-radius, rel=1e-5)
 
     polar_image = np.zeros((256, 128), dtype=np.float32)
     polar_image[i, j] = 1.0
@@ -855,3 +855,66 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
 
     # Every backend must place the sample in the same output pixel.
     return np.array([x_found, z_found])
+
+
+@pytest.mark.parametrize("i, j", [(255, 0), (200, 64), (128, 127)])
+@backend_equality_check(decimal=3)
+def test_flat_array_scan_conversion_fills_the_extent(i, j):
+    """A flat phased array whose transmits meet at a virtual apex behind it: scan
+    conversion fills exactly ``Parameters.extent``, which starts at ``zlims[0]`` and so
+    crops the rows the apex places behind the array, and samples still land where the
+    grid has them."""
+    from keras import ops
+
+    from zea import Parameters, display
+    from zea.probes import create_probe_geometry
+
+    n_tx, span = 65, np.radians(45)
+    probe_geometry = create_probe_geometry(n_el=64, pitch=0.3e-3)
+    angles = np.linspace(-span, span, n_tx)
+    origins = np.zeros((n_tx, 3))
+    origins[:, 0] = np.ptp(probe_geometry[:, 0]) / 2 / np.tan(span) * np.tan(angles)
+    parameters = Parameters(
+        probe_geometry=probe_geometry,
+        n_el=64,
+        n_tx=n_tx,
+        grid_type="polar",
+        polar_angles=angles,
+        transmit_origins=origins,
+        focus_distances=np.full(n_tx, 0.06),
+        zlims=(0.0, 0.08),
+        grid_size_z=256,
+        grid_size_x=128,
+        center_frequency=2.5e6,
+        sampling_frequency=10e6,
+        n_ax=2048,
+    )
+    assert parameters.grid[..., 2].min() < 0  # the first rows reach behind the array
+
+    polar_image = np.zeros((256, 128), dtype=np.float32)
+    polar_image[i, j] = 1.0
+    converted, params = display.scan_convert_2d(
+        polar_image,
+        rho_range=parameters.rho_range,
+        theta_range=parameters.theta_range,
+        grid_apex=parameters.grid_apex,
+        extent=parameters.extent,
+    )
+    converted = ops.convert_to_numpy(converted)
+    resolution = ops.convert_to_numpy(params["resolution"])
+
+    # The output covers the extent, which starts at zlims[0] on a flat array
+    np.testing.assert_allclose(
+        [ops.convert_to_numpy(v) for v in (*params["x_lim"], *params["z_lim"])],
+        parameters.extent[[0, 1, 4, 5]],
+        atol=1e-6,
+    )
+    assert parameters.extent[4] == pytest.approx(0.0)
+
+    row, col = np.unravel_index(np.argmax(converted), converted.shape)
+    x_found = params["x_lim"][0] + col * resolution
+    z_found = params["z_lim"][0] + row * resolution
+    expected = parameters.grid[i, j]
+    assert abs(float(x_found) - expected[0]) < resolution
+    assert abs(float(z_found) - expected[2]) < resolution
+    return np.array([float(x_found), float(z_found)])

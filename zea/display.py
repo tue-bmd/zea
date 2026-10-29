@@ -8,6 +8,7 @@ import scipy
 from keras import ops
 from PIL import Image
 
+from zea import log
 from zea.func.tensor import translate
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
@@ -417,25 +418,65 @@ def _polar_sampling_coordinates(x_vec, z_vec, rho, theta):
     return ops.stack([rho_idx, theta_idx], axis=0)
 
 
+def _deprecated_distance_to_apex(distance_to_apex, grid_apex, caller):
+    """Map the deprecated ``distance_to_apex`` argument onto ``grid_apex``."""
+    if distance_to_apex is None:
+        return grid_apex
+    log.deprecated(f"{caller}(distance_to_apex=d) is deprecated, use grid_apex=(0, 0, -d).")
+    return (0.0, 0.0, -distance_to_apex)
+
+
 def compute_scan_convert_2d_coordinates(
     image_shape,
     rho_range: Tuple[float, float],
     theta_range: Tuple[float, float],
     resolution: Union[float, None] = None,
     dtype: str = "float32",
-    distance_to_apex: float = 0.0,
+    grid_apex=None,
+    extent=None,
+    distance_to_apex=None,
 ):
     """Precompute coordinates for 2d scan conversion from polar coordinates.
 
-    ``rho`` is measured from the apex of the polar grid. ``distance_to_apex`` says how far
-    the transducer sits in front of that apex, and is used only to report ``z_lim`` as a
-    depth below the transducer (matching :attr:`~zea.Parameters.extent`). It must not
-    enter the sampling grid: the returned coordinates index the polar image, so they stay
-    in the apex frame.
+    ``rho`` is measured from ``grid_apex``, the point the polar grid fans out from (see
+    :attr:`zea.Parameters.grid_apex`). The returned coordinates index the polar image, so
+    they live in that apex frame; ``grid_apex`` only moves the output window into the
+    transducer frame, where the reported ``x_lim`` and ``z_lim`` are given (matching
+    :attr:`zea.Parameters.extent`).
+
+    Args:
+        image_shape (tuple): Shape of the polar image, ``(..., n_rho, n_theta)``.
+        rho_range (tuple): Radius of the first and last row, measured from ``grid_apex``.
+        theta_range (tuple): Angle of the first and last column [rad].
+        resolution (float, optional): Output pixel size. Derived from the polar image
+            when not given.
+        dtype (str, optional): Dtype of the coordinates. Defaults to ``"float32"``.
+        grid_apex (array-like, optional): The apex ``(x, y, z)`` in the transducer frame.
+            Defaults to the origin, which makes the two frames coincide.
+        extent (array-like, optional): The output window in the transducer frame, as
+            :attr:`zea.Parameters.extent` gives it: ``(xmin, xmax, ..., zmin, zmax)``.
+            Pixels outside the polar image are filled. Defaults to the bounding box of
+            the polar image.
+        distance_to_apex (float, optional): Deprecated, use
+            ``grid_apex=(0, 0, -distance_to_apex)``.
+
+    Returns:
+        tuple: The sampling coordinates and a dict with ``resolution``, ``x_lim``,
+        ``z_lim``, ``rho_range``, ``theta_range``, ``d_rho`` and ``d_theta``.
     """
     assert len(rho_range) == 2, "rho_range should be a tuple of length 2"
     assert len(theta_range) == 2, "theta_range should be a tuple of length 2"
     assert rho_range[0] < rho_range[1], "min_rho should be less than max_rho"
+    grid_apex = _deprecated_distance_to_apex(
+        distance_to_apex, grid_apex, "compute_scan_convert_2d_coordinates"
+    )
+    if grid_apex is None:
+        apex_x = apex_z = 0.0
+    else:
+        grid_apex = ops.cast(ops.convert_to_tensor(grid_apex), dtype)
+        apex_x, apex_z = grid_apex[0], grid_apex[2]
+    if extent is not None:
+        extent = ops.cast(ops.convert_to_tensor(extent), dtype)
 
     rho = ops.linspace(rho_range[0], rho_range[1], image_shape[-2], dtype=dtype)
     theta = ops.linspace(theta_range[0], theta_range[1], image_shape[-1], dtype=dtype)
@@ -444,8 +485,13 @@ def compute_scan_convert_2d_coordinates(
 
     x_grid, z_grid = frustum_convert_rt2xz(rho_grid, theta_grid)
 
-    x_lim = [ops.min(x_grid), ops.max(x_grid)]
-    z_lim = [ops.min(z_grid), ops.max(z_grid)]
+    # Output window in the apex frame
+    if extent is None:
+        x_lim = [ops.min(x_grid), ops.max(x_grid)]
+        z_lim = [ops.min(z_grid), ops.max(z_grid)]
+    else:
+        x_lim = [extent[0] - apex_x, extent[1] - apex_x]
+        z_lim = [extent[-2] - apex_z, extent[-1] - apex_z]
 
     d_rho = rho[1] - rho[0]
     d_theta = theta[1] - theta[0]
@@ -462,8 +508,8 @@ def compute_scan_convert_2d_coordinates(
     coordinates = _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
     parameters = {
         "resolution": resolution,
-        "x_lim": x_lim,
-        "z_lim": [z_lim[0] - distance_to_apex, z_lim[1] - distance_to_apex],
+        "x_lim": [x_lim[0] + apex_x, x_lim[1] + apex_x],
+        "z_lim": [z_lim[0] + apex_z, z_lim[1] + apex_z],
         "rho_range": rho_range,
         "theta_range": theta_range,
         "d_rho": d_rho,
@@ -480,7 +526,9 @@ def scan_convert_2d(
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
     order: int = 1,
-    distance_to_apex: float = 0.0,
+    grid_apex=None,
+    extent=None,
+    distance_to_apex=None,
     **kwargs,
 ):
     """
@@ -503,10 +551,15 @@ def scan_convert_2d(
             outside the input image ranges. Defaults to 0.0. When set to NaN,
             no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
-        distance_to_apex (float, optional): Distance from the apex ``rho`` is measured
-            from to the transducer surface. Only shifts the reported ``z_lim`` so it
-            reads as a depth below the transducer; the image itself is unchanged.
-            Defaults to 0.0.
+        grid_apex (array-like, optional): The point ``(x, y, z)`` that ``rho`` is
+            measured from, in the transducer frame (see
+            :attr:`zea.Parameters.grid_apex`). Moves the reported ``x_lim`` and ``z_lim``
+            into the transducer frame. Defaults to the origin.
+        extent (array-like, optional): Output window in the transducer frame,
+            ``(xmin, xmax, ..., zmin, zmax)`` as :attr:`zea.Parameters.extent` gives it.
+            Defaults to the bounding box of the polar image.
+        distance_to_apex (float, optional): Deprecated, use
+            ``grid_apex=(0, 0, -distance_to_apex)``.
 
     Returns:
         ndarray: The scan-converted 2D ultrasound image in Cartesian coordinates.
@@ -535,7 +588,8 @@ def scan_convert_2d(
             theta_range,
             resolution,
             dtype=image.dtype,
-            distance_to_apex=distance_to_apex,
+            grid_apex=_deprecated_distance_to_apex(distance_to_apex, grid_apex, "scan_convert_2d"),
+            extent=extent,
         )
 
     scan_converted = _interpolate_batch(image, coordinates, fill_value, order=order, **kwargs)
@@ -703,9 +757,14 @@ def scan_convert(
     fill_value: float = 0.0,
     order: int = 1,
     with_batch_dim: bool = False,
-    distance_to_apex: float = 0.0,
+    grid_apex=None,
+    extent=None,
+    distance_to_apex=None,
 ):
-    """Scan convert image based on number of dimensions."""
+    """Scan convert image based on number of dimensions.
+
+    ``grid_apex`` and ``extent`` apply to 2D images only, see :func:`scan_convert_2d`.
+    """
     if len(image.shape) == 2 + int(with_batch_dim):
         return scan_convert_2d(
             image,
@@ -715,7 +774,8 @@ def scan_convert(
             coordinates,
             fill_value,
             order,
-            distance_to_apex=distance_to_apex,
+            grid_apex=_deprecated_distance_to_apex(distance_to_apex, grid_apex, "scan_convert"),
+            extent=extent,
         )
     elif len(image.shape) == 3 + int(with_batch_dim):
         return scan_convert_3d(

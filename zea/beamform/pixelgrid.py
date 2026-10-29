@@ -165,7 +165,9 @@ def polar_pixel_grid(
     zlims,
     num_radial_pixels: int,
     num_polar_pixels: int,
-    distance_to_apex: float = 0.0,
+    grid_apex=(0.0, 0.0, 0.0),
+    polar_angles=None,
+    distance_to_apex=None,
 ):
     """Generate a polar grid.
 
@@ -178,25 +180,40 @@ def polar_pixel_grid(
             transducer surface (``z = 0``) just like for a Cartesian grid.
         num_radial_pixels (int, optional): Number of depth pixels.
         num_polar_pixels (int, optional): Number of polar pixels.
-        distance_to_apex (float, optional): Distance from the transducer surface to the
-            apex of the pixel grid, the point the rays fan out from. For a curved probe
-            that point is the centre of curvature, so this equals the probe's radius of
-            curvature (see :func:`~zea.probes.fit_curved_probe_radius`).
+        grid_apex (array-like, optional): The point ``(x, y, z)`` [m] the rays fan out
+            from, on the central axis at or behind the array (see
+            :attr:`zea.Parameters.grid_apex`). Radii are measured from it, so the rows
+            sit at ``zlims - grid_apex[2]``. Defaults to the middle of the array.
+        polar_angles (array-like, optional): Explicit angle of each column [rad], for
+            example one per transmit for a scanline grid. Overrides ``polar_limits`` and
+            ``num_polar_pixels`` when given.
+        distance_to_apex (float, optional): Deprecated, use
+            ``grid_apex=(0, 0, -distance_to_apex)``.
 
     Returns:
         grid (np.ndarray): Pixel grid of size (num_radial_pixels, num_polar_pixels, 3)
         in Cartesian coordinates (x, y, z)
     """
-    assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
     assert len(zlims) == 2, "zlims must be a tuple of length 2."
+    if distance_to_apex is not None:
+        log.deprecated(
+            "polar_pixel_grid(distance_to_apex=d) is deprecated, use grid_apex=(0, 0, -d)."
+        )
+        grid_apex = (0.0, 0.0, -distance_to_apex)
+
+    if polar_angles is None:
+        assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
+        dirs_az = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
+    else:
+        dirs_az = np.asarray(polar_angles, dtype=np.float64)
+        num_polar_pixels = len(dirs_az)
 
     # Radii are measured from the apex, depths from the transducer surface.
-    rlims = (zlims[0] + distance_to_apex, zlims[1] + distance_to_apex)
+    apex = np.asarray(grid_apex, dtype=np.float64)
+    rlims = (zlims[0] - apex[2], zlims[1] - apex[2])
     dr = (rlims[1] - rlims[0]) / max(num_radial_pixels - 1, 1)
 
-    oris = np.array([0, 0, -distance_to_apex])
-    oris = np.tile(oris, (num_polar_pixels, 1))
-    dirs_az = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
+    oris = np.tile(apex, (num_polar_pixels, 1))
 
     dirs_el = np.zeros(num_polar_pixels)
     dirs = np.vstack((dirs_az, dirs_el)).T
@@ -224,6 +241,14 @@ def scanline_pixel_grid(
     pipeline. Pair with :func:`scanline_aligned_apodization` (fed to
     :class:`~zea.ops.AlignedApodization`) to zero out every transmit except
     the one whose column each pixel belongs to.
+
+    .. note::
+        :class:`zea.Parameters` uses this only for cartesian scanline grids. Its polar
+        scanline grid is :func:`polar_pixel_grid` with one column per transmit angle,
+        fanning out from :attr:`zea.Parameters.grid_apex`, so that every row sits at one
+        radius and scan conversion places it correctly. Here, polar columns start at
+        their own transmit origin instead, which staggers the rows whenever the origins
+        lie at different distances from the apex.
 
     Args:
         transmit_origins (np.ndarray): Beam origins ``(n_tx, 3)`` in meters.

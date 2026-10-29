@@ -104,7 +104,14 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.geometry import compute_element_normals
+from zea.beamform.geometry import (
+    STEERING_TOLERANCE,
+    element_acceptance_angle,
+    element_pitch,
+    insonified_edge_rays,
+    rays_at_depth,
+    transmit_apex_distance,
+)
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -204,7 +211,8 @@ class Parameters(BaseParameters):
     grid_type: str
     """Beamforming grid type, ``"cartesian"`` or ``"polar"``. Defaults to
     ``"cartesian"``. Combine with ``enable_scanline=True`` for line-by-line
-    (scanline) imaging instead of a shared compounded grid."""
+    (scanline) imaging instead of a shared compounded grid. A polar grid fans out from
+    :attr:`grid_apex`."""
 
     dynamic_range: np.ndarray
     """Dynamic range for image display in dB, shape (2,) as (min_dB, max_dB)."""
@@ -212,8 +220,10 @@ class Parameters(BaseParameters):
     resolution: float | None
     """Resolution for scan conversion [mm/pixel]. If None, computed from the image."""
 
-    f_number: float
-    """F-number of the transducer. Defaults to 1.0."""
+    polar_margin: float | None
+    """Fixed angle [rad] to widen the default :attr:`polar_limits` by on each side,
+    replacing the automatic margin derived from the transmits. Defaults to ``None``
+    (automatic)."""
 
     fill_value: float
     """Value used for out-of-bounds pixels during scan conversion."""
@@ -251,13 +261,22 @@ class Parameters(BaseParameters):
 
     enable_scanline: bool
     """Whether to beamform in scanline (line-by-line) mode: one pixel column
-    per transmit (see :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`)
-    instead of a shared compounded ``grid_type`` grid, paired with
+    per transmit instead of a shared compounded ``grid_type`` grid, paired with
     ``flat_aligned_apodization`` (fed to :class:`~zea.ops.AlignedApodization`).
-    Combine with ``grid_type="cartesian"`` for vertical focused columns
-    (linear-scan geometry) or ``grid_type="polar"`` for steered rays from
-    each transmit's own origin (sector / phased-array geometry). Defaults to
-    ``False``.
+    Defaults to ``False``.
+
+    Scanline imaging needs focused transmits (every focus distance > 0), and the grid
+    type must match how the lines run:
+
+    - ``grid_type="polar"`` for steered lines whose axes meet in one point (sector /
+      phased-array or curved-array geometry): the polar grid with one column per
+      transmit angle, fanning out from :attr:`grid_apex`. :attr:`polar_limits` is the
+      range of the transmit angles.
+    - ``grid_type="cartesian"`` for unsteered, parallel lines (linear-scan geometry):
+      a vertical column under each transmit (see
+      :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`).
+
+    Any other combination raises a ``ValueError`` when the grid is built.
 
     .. note::
         This only builds the scanline *grid*. For true classical scanline
@@ -319,14 +338,25 @@ class Parameters(BaseParameters):
         "n_ax": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
-        "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
+        # native dtype on purpose; None derives it from the probe (see the f_number property)
+        "f_number": {"dtype": (float, type(None)), "default": None},
+        "polar_margin": {"dtype": (np.float32, type(None)), "default": None},
         "t_peak": {"dtype": np.float32},
         "theta_range": {"dtype": np.float32, "shape": (2,)},
         "phi_range": {"dtype": np.float32, "shape": (2,)},
         "rho_range": {"dtype": np.float32, "shape": (2,)},
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
-        "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
+    }
+
+    # Former parameters that are now derived. Without this they would be accepted as
+    # custom (passthrough) parameters and silently ignored.
+    _REMOVED_PARAMS: ClassVar[dict[str, str]] = {
+        "distance_to_apex": (
+            "`distance_to_apex` is no longer a parameter: the point the polar grid fans out "
+            "from is derived from the transmits and the probe. Read `grid_apex` instead "
+            "(the old distance_to_apex is -grid_apex[2])."
+        ),
     }
 
     # Add some defaults that are not stored in a file
@@ -351,26 +381,113 @@ class Parameters(BaseParameters):
             return np.array([aperture_width, aperture_height, aperture_depth])
         return None
 
-    @cache_with_dependencies("probe_geometry")
-    def distance_to_apex(self):
-        """The distance from the transducer surface to the apex of the polar pixel grid.
+    def __getattr__(self, item):
+        if item in Parameters._REMOVED_PARAMS:
+            raise AttributeError(Parameters._REMOVED_PARAMS[item])
+        return super().__getattr__(item)
 
-        The apex is the point the beams fan out from. For a curved array it is the centre
-        of curvature, so this is the probe's radius of curvature, fitted from
-        :attr:`probe_geometry`. A flat array has no centre of curvature and its beams
-        originate at the array itself, giving 0. Set it explicitly to override the fit.
+    def update(self, params=None, *, force=False, **kwargs):
+        """Update parameters from a mapping and/or keyword arguments.
+
+        See :meth:`zea.internal.parameters.BaseParameters.update`.
         """
-        value = self._params.get("distance_to_apex")
-        if value is not None:
-            return value
+        for key in {**(dict(params) if params else {}), **kwargs}:
+            if key in self._REMOVED_PARAMS:
+                raise ValueError(self._REMOVED_PARAMS[key])
+        super().update(params, force=force, **kwargs)
 
+    @cache_with_dependencies(optional=("probe_geometry",))
+    def radius_of_curvature(self):
+        """The probe's radius of curvature [m], fitted from :attr:`probe_geometry`.
+
+        ``inf`` for a flat array, or when there is no probe geometry. This is a property
+        of the probe; for a curved array it is also the default distance from the array
+        to :attr:`grid_apex`, the centre of curvature.
+        """
         probe_geometry = self._params.get("probe_geometry")
         if probe_geometry is None:
-            return np.float32(0.0)
+            return np.float32(np.inf)
         try:
             return np.float32(fit_curved_probe_radius(probe_geometry))
         except ValueError:  # not a curved array
-            return np.float32(0.0)
+            return np.float32(np.inf)
+
+    def _transmit_origins_or_zeros(self):
+        """Transmit origins for the geometry defaults. Zeros when the file has none, as the
+        beamformer assumes, without repeating its missing-value warning."""
+        if self._params.get("transmit_origins") is None:
+            return np.zeros((self.n_tx, 3))
+        return self.transmit_origins
+
+    def _transmit_or_probe_apex(self):
+        """Distance [m] behind the middle of the array of the point the transmits fan out
+        from or, when they define none, of a curved array's centre of curvature.
+
+        ``None`` when neither defines one. See
+        :func:`~zea.beamform.geometry.transmit_apex_distance`.
+        """
+        angles = self.polar_angles
+        probe_geometry = self._params.get("probe_geometry")
+        if angles is not None and probe_geometry is not None:
+            distance = transmit_apex_distance(
+                self._transmit_origins_or_zeros(),
+                angles,
+                self.focus_distances,
+                tol=0.5 * element_pitch(probe_geometry),
+            )
+            if distance is not None:
+                return distance
+        if np.isfinite(self.radius_of_curvature):
+            return float(self.radius_of_curvature)
+        return None
+
+    def _element_normals(self):
+        """Exact element normals for a curved array, pointing away from its centre of
+        curvature; ``None`` (estimate them) otherwise."""
+        radius = float(self.radius_of_curvature)
+        if not np.isfinite(radius):
+            return None
+        centre = np.array([0.0, 0.0, -radius])
+        return (np.asarray(self.probe_geometry, dtype=np.float64) - centre) / radius
+
+    @cache_with_dependencies(
+        "polar_limits",
+        "radius_of_curvature",
+        optional=("probe_geometry", "polar_angles", "focus_distances", "transmit_origins"),
+    )
+    def grid_apex(self):
+        """The point ``(x, y, z)`` [m] a polar grid fans out from, of shape (3,).
+
+        It lies on the central axis, at or behind the array: ``(0, 0, -d)`` with
+        ``d >= 0``. Radii are measured from it, so ``rho_range = zlims - grid_apex[2]``.
+        It is derived, not set: the grid fans out from where the transmits fan out from.
+        In order of precedence:
+
+        1. Steered transmit axes that meet in one point: that point. This is the middle
+           of the array for transmits launched from there, a virtual apex behind a flat
+           array whose transmits are spread over it, and the centre of curvature for
+           transmits along a curved array's normals.
+        2. Unsteered diverging waves that share one virtual source: that source.
+        3. A curved array: its centre of curvature (see :attr:`radius_of_curvature`).
+        4. A flat array with a sector (non-zero :attr:`polar_limits`): the virtual apex
+           whose sector edges pass through the ends of the array,
+           ``d = (aperture / 2) / tan(max |polar_limits|)``.
+        5. Otherwise the middle of the array.
+
+        Missing ``transmit_origins`` count as zeros, as in the beamformer.
+        """
+        distance = self._transmit_or_probe_apex()
+        if distance is None:
+            limits = self.polar_limits
+            max_angle = 0.0 if limits is None else float(np.max(np.abs(limits)))
+            probe_geometry = self._params.get("probe_geometry")
+            if probe_geometry is not None and 0 < max_angle < np.pi / 2:
+                half_aperture = float(np.ptp(probe_geometry[:, 0])) / 2
+                distance = half_aperture / np.tan(max_angle)
+            else:
+                distance = 0.0
+        # Adding 0.0 turns -0.0 (from negating a zero distance) into 0.0
+        return np.array([0.0, 0.0, -distance], dtype=np.float32) + np.float32(0.0)
 
     @cache_with_dependencies(
         "xlims",
@@ -382,7 +499,7 @@ class Parameters(BaseParameters):
         "grid_type",
         "is_3d",
         "polar_limits",
-        "distance_to_apex",
+        "grid_apex",
         "transmit_origins",
         "focus_distances",
         "polar_angles",
@@ -394,15 +511,18 @@ class Parameters(BaseParameters):
         if self.enable_scanline:
             # One pixel column per transmit: scanline imaging is the special case
             # of pixel-based DAS where each pixel belongs to exactly one transmit.
-            # Reuses the same `grid_type` (cartesian/polar) that also picks the
-            # geometry of the regular (non-scanline) grid below.
-            polar_angles = self.polar_angles
-            if polar_angles is None:
-                log.warning_once(
-                    "No ``polar_angles`` provided, using zeros",
-                    key=(id(self), "polar_angles"),
+            polar_angles = self._scanline_polar_angles()
+            if self.grid_type == "polar":
+                # The polar grid at the transmit angles. Its rows sit at one radius from
+                # grid_apex, where the transmit axes meet, so scan conversion places them.
+                return polar_pixel_grid(
+                    self.polar_limits,
+                    self.zlims,
+                    self.grid_size_z,
+                    self.n_tx,
+                    grid_apex=self.grid_apex,
+                    polar_angles=polar_angles,
                 )
-                polar_angles = np.zeros(self.n_tx)
             return scanline_pixel_grid(
                 self.transmit_origins,
                 self.focus_distances,
@@ -410,7 +530,7 @@ class Parameters(BaseParameters):
                 self.zlims,
                 self.grid_size_z,
                 azimuth_angles=self.azimuth_angles,
-                grid_type=self.grid_type,
+                grid_type="cartesian",
             )
         elif self.grid_type == "polar":
             if self.is_3d:
@@ -423,7 +543,7 @@ class Parameters(BaseParameters):
                 self.zlims,
                 self.grid_size_z,
                 self.grid_size_x,
-                self.distance_to_apex,
+                grid_apex=self.grid_apex,
             )
         elif self.grid_type == "cartesian":
             grid = cartesian_pixel_grid(
@@ -445,6 +565,55 @@ class Parameters(BaseParameters):
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
+
+    def _scanline_polar_angles(self):
+        """The transmit angles the columns of a scanline grid follow, after checking that
+        the transmits suit scanline imaging (see :attr:`enable_scanline`)."""
+        if self.grid_type not in ("cartesian", "polar"):
+            raise ValueError(
+                f"Unsupported grid type: {self.grid_type}. Supported types are "
+                "'cartesian' and 'polar'."
+            )
+        focus = np.asarray(self.focus_distances, dtype=np.float64)
+        if not np.all(np.isfinite(focus) & (focus > 0)):
+            raise ValueError(
+                "enable_scanline=True needs focused transmits (every focus distance > 0), "
+                f"got focus_distances from {focus.min():.4g} to {focus.max():.4g} m. Plane "
+                "and diverging waves insonify more than one line; image them with a regular "
+                "grid (enable_scanline=False)."
+            )
+        polar_angles = self.polar_angles
+        if polar_angles is None:
+            log.warning_once(
+                "No ``polar_angles`` provided, using zeros",
+                key=(id(self), "polar_angles"),
+            )
+            polar_angles = np.zeros(self.n_tx)
+        steered = bool(np.any(np.abs(polar_angles) > STEERING_TOLERANCE))
+        if self.grid_type == "cartesian" and steered:
+            raise ValueError(
+                "A cartesian scanline grid needs unsteered, parallel transmits, but these "
+                "are steered. Use grid_type='polar' for steered lines that meet in one point."
+            )
+        if self.grid_type == "polar":
+            if not steered:
+                raise ValueError(
+                    "A polar scanline grid needs steered transmits whose axes meet in one "
+                    "point, but these are unsteered and parallel. Use grid_type='cartesian'."
+                )
+            apex = transmit_apex_distance(
+                self.transmit_origins,
+                polar_angles,
+                focus,
+                tol=0.5 * element_pitch(self.probe_geometry),
+            )
+            if apex is None:
+                raise ValueError(
+                    "A polar scanline grid needs transmit axes that meet in one point (the "
+                    "grid apex), but these do not. Use a regular grid "
+                    "(enable_scanline=False)."
+                )
+        return polar_angles
 
     @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
     def flat_aligned_apodization(self):
@@ -487,13 +656,22 @@ class Parameters(BaseParameters):
         return scanline_aligned_apodization(self.n_tx, self.grid_size_z)
 
     @cache_with_dependencies(
-        "xlims", "wavelength", "pixels_per_wavelength", "enable_scanline", "n_tx"
+        "xlims",
+        "wavelength",
+        "pixels_per_wavelength",
+        "enable_scanline",
+        "n_tx",
+        "grid_type",
+        optional=("polar_limits", "grid_apex", "zlims"),
     )
     def grid_size_x(self):
-        """Grid width in pixels. For a cartesian grid, this is the lateral (x) pixels in the grid,
-        set to prevent aliasing if not provided. For a polar grid, this can be thought of as
-        the number for rays in the polar direction. When ``enable_scanline`` is ``True``, this is
-        fixed to ``n_tx`` (one column per transmit).
+        """Grid width in pixels, set to prevent aliasing if not provided.
+
+        For a cartesian grid, the number of lateral (x) pixels across :attr:`xlims`. For a
+        polar grid, the number of rays, sized by the outer arc length
+        ``(zlims[1] - grid_apex[2]) * (polar_limits[1] - polar_limits[0])``. When
+        ``enable_scanline`` is ``True``, this is fixed to ``n_tx`` (one column per
+        transmit).
         """
         if self.enable_scanline:
             return self.n_tx
@@ -502,9 +680,14 @@ class Parameters(BaseParameters):
         if grid_size_x is not None:
             return grid_size_x
 
-        width = self.xlims[1] - self.xlims[0]
-        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
-        return max(min_grid_size_x, 1)
+        pixel = self.wavelength / self.pixels_per_wavelength
+        limits = self.polar_limits if self.grid_type == "polar" else None
+        if limits is not None:
+            outer_radius = float(np.max(self.zlims)) - float(self.grid_apex[2])
+            width = outer_radius * abs(float(limits[1]) - float(limits[0]))
+        else:
+            width = self.xlims[1] - self.xlims[0]
+        return max(int(np.ceil(width / pixel)), 1)
 
     @cache_with_dependencies(
         "ylims",
@@ -547,68 +730,103 @@ class Parameters(BaseParameters):
         return self.sound_speed / self.center_frequency
 
     @cache_with_dependencies(
+        optional=("probe_geometry", "element_width", "center_frequency", "sound_speed")
+    )
+    def f_number(self):
+        """Receive f-number: the acceptance cone of each element in the built-in receive
+        mask (:func:`~zea.beamform.beamformer.fnumber_mask`). ``0`` disables the mask.
+
+        If not explicitly provided, it follows from the probe: ``1 / (2 tan(alpha))``, with
+        ``alpha`` the angle at which an element's directivity drops to -6 dB (see
+        :func:`~zea.beamform.geometry.element_acceptance_angle`), at the center frequency.
+        The element width falls back to 90 % of the pitch. Elements narrower than about
+        0.6 wavelength receive over the whole half-space, which gives 0 (typical for
+        phased arrays). Without a probe geometry or center frequency it is 1.0.
+
+        This sets which pixels each element contributes to; it does not change the grid.
+        """
+        value = self._params.get("f_number")
+        if value is not None:
+            return value
+
+        probe_geometry = self._params.get("probe_geometry")
+        center_frequency = self._params.get("center_frequency")
+        if probe_geometry is None or center_frequency is None or len(probe_geometry) < 2:
+            return 1.0
+        element_width = self._params.get("element_width")
+        if element_width is None:
+            element_width = 0.9 * element_pitch(probe_geometry)
+        wavelength = float(self.sound_speed) / float(np.mean(center_frequency))
+        angle = element_acceptance_angle(float(element_width), wavelength)
+        if angle >= np.pi / 2:
+            return 0.0
+        return float(1 / (2 * np.tan(angle)))
+
+    @cache_with_dependencies(
         "zlims",
         "probe_geometry",
-        "distance_to_apex",
-        "focus_distances",
-        "polar_angles",
-        "f_number",
-        "sound_speed",
-        "sampling_frequency",
-        "n_ax",
+        "grid_type",
+        "enable_scanline",
+        optional=(
+            "polar_limits",
+            "grid_apex",
+            "polar_angles",
+            "focus_distances",
+            "transmit_origins",
+        ),
     )
     def xlims(self):
-        """The lateral (x) limits of the beamforming grid in meters.
+        """The lateral (x) limits of the grid in meters.
 
-        If not explicitly provided, the limits are derived from the probe geometry, the transmits
-        and the receive :attr:`f_number`:. If f_number is 0, a 45 degree cone is used instead.
-        The limits never come out narrower than the probe width.
+        If not explicitly provided, the limits describe the grid:
 
-        Unsteered focused or plane wave transmits on a flat array (e.g. walking aperture scans)
-        image the strip in front of the array, so the limits hug the probe width. Otherwise the
-        field of view follows the receive cone for the edge elements.
+        - **Polar grid** (including scanline): the width of the sector, from
+          :attr:`grid_apex`, :attr:`zlims` and :attr:`polar_limits`. An explicit value sets
+          the width of the scan-converted image instead (crop or pad, see
+          :attr:`extent`); it does not change the sector.
+        - **Cartesian scanline grid**: the lateral extent of its columns.
+        - **Cartesian grid**: what the transmits insonify down to the deepest pixel, and
+          at least the probe width. Each transmit's region is bounded by the same edge
+          rays that set the default :attr:`polar_limits` (see
+          :func:`~zea.beamform.geometry.insonified_edge_rays`).
         """
         xlims = self._params.get("xlims")
         if xlims is not None:
             return xlims
 
-        aperture_x = self.probe_geometry[:, 0]
-        left, right = int(np.argmin(aperture_x)), int(np.argmax(aperture_x))
-        xmin, xmax = float(aperture_x[left]), float(aperture_x[right])
+        probe_x = self.probe_geometry[:, 0]
+        if self.grid_type == "polar":
+            limits = self.polar_limits
+            if limits is None:
+                return (float(np.min(probe_x)), float(np.max(probe_x)))
+            apex = self.grid_apex
+            radii = [float(z) - float(apex[2]) for z in self.zlims]
+            x = [float(apex[0]) + r * np.sin(float(t)) for r in radii for t in limits]
+            return (min(x), max(x))
 
         focus_distances = self.focus_distances
         polar_angles = self.polar_angles
         if polar_angles is None:
             polar_angles = np.zeros_like(focus_distances)
+        origins = self._transmit_origins_or_zeros()
 
-        # Tolerance: converted data stores a nominally unsteered scan as float noise.
-        unsteered = np.allclose(polar_angles, 0.0, atol=1e-6) and np.all(
-            (focus_distances >= 0) | np.isinf(focus_distances)
+        if self.enable_scanline:
+            focus = np.where(np.isfinite(focus_distances), focus_distances, 0.0)
+            columns = origins[:, 0] + focus * np.sin(polar_angles)
+            return (float(np.min(columns)), float(np.max(columns)))
+
+        points, directions = insonified_edge_rays(
+            self.probe_geometry,
+            origins,
+            polar_angles,
+            focus_distances,
+            element_normals=self._element_normals(),
         )
-        if unsteered and self.distance_to_apex == 0:
-            return (xmin, xmax)
+        edges_x = rays_at_depth(points, directions, float(np.max(self.zlims)))[:, 0]
+        x = np.concatenate([probe_x, edges_x[np.isfinite(edges_x)]])
+        return (float(np.min(x)), float(np.max(x)))
 
-        f_number = float(self.f_number)
-        half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
-        normals = ops.convert_to_numpy(
-            compute_element_normals(ops.convert_to_tensor(self.probe_geometry))
-        )
-        tilt = np.arctan2(normals[:, 0], normals[:, 2])
-
-        # Outermost accepted ray of each edge element.
-        angle = tilt[[left, right]] + [-half_angle, half_angle]
-        depth = max(self.zlims) - self.probe_geometry[[left, right], 2]
-
-        # Stop at the deepest pixel or at the end of the record, whichever is first.
-        reach = depth * np.tan(np.abs(angle))
-        max_range = self.sound_speed * float(self.n_ax) / self.sampling_frequency / 2
-        reach = np.minimum(reach, max_range * np.sin(np.abs(angle)))
-        reach = np.sign(angle) * reach
-        return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
-
-    @cache_with_dependencies(
-        "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
-    )
+    @cache_with_dependencies("zlims", "grid_type", "azimuth_limits", "probe_geometry", "grid_apex")
     def ylims(self):
         """The y-limits of the beamforming grid [m]. If not explicitly set, it is computed based
         on the azimuth limits and probe geometry.
@@ -618,7 +836,7 @@ class Parameters(BaseParameters):
             return ylims
 
         # If ylims not set, compute based on azimuth limits and probe geometry
-        radius = max(self.zlims) + self.distance_to_apex
+        radius = max(self.zlims) - float(self.grid_apex[2])
         ylims_azimuth = (
             (0.0, 0.0)  # avoid numerical imprecision with np.cos(np.pi/2)
             if self.azimuth_limits is None or self.azimuth_limits[0] == self.azimuth_limits[1]
@@ -642,27 +860,34 @@ class Parameters(BaseParameters):
             return [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
         return zlims
 
-    @cache_with_dependencies("grid")
+    @cache_with_dependencies(
+        "grid", "grid_type", optional=("xlims", "zlims", "radius_of_curvature")
+    )
     def extent(self):
-        """
-        The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+        """The extent of the image in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
+
+        For a cartesian grid, the extent of the grid itself. For a polar grid, the window
+        the scan-converted image fills, which :class:`~zea.ops.ScanConvert` takes from here:
+
+        - ``x`` spans :attr:`xlims`, which defaults to the width of the sector; an explicit
+          value crops or pads the image.
+        - ``z`` spans the grid, except that on a flat array it starts at ``zlims[0]``. That
+          crops the pixels a virtual apex places behind the array. A curved array needs no
+          crop, since its sector follows the array.
         """
         # self.grid holds transducer-frame coordinates for every grid type (polar grids
-        # place their ray origins at -distance_to_apex), so this needs no correction.
-        xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
-        ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
-        zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
+        # fan out from grid_apex), so this needs no correction.
+        grid = self.grid
+        xmin, xmax = grid[..., 0].min(), grid[..., 0].max()
+        ymin, ymax = grid[..., 1].min(), grid[..., 1].max()
+        zmin, zmax = grid[..., 2].min(), grid[..., 2].max()
 
-        return np.array(
-            [
-                xlims[0],
-                xlims[1],
-                ylims[0],
-                ylims[1],
-                zlims[0],
-                zlims[1],
-            ]
-        )
+        if self.grid_type == "polar" and grid.ndim == 3:
+            xmin, xmax = self.xlims
+            if not np.isfinite(self.radius_of_curvature):
+                zmin = max(zmin, min(self.zlims))
+
+        return np.array([xmin, xmax, ymin, ymax, zmin, zmax])
 
     @cache_with_dependencies("extent")
     def extent_imshow(self):
@@ -860,16 +1085,74 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("polar_angles")
+    @cache_with_dependencies(
+        "polar_angles",
+        "enable_scanline",
+        optional=(
+            "polar_margin",
+            "probe_geometry",
+            "zlims",
+            "focus_distances",
+            "transmit_origins",
+            "radius_of_curvature",
+        ),
+    )
     def polar_limits(self):
-        """The limits of the polar angles, used for polar grids."""
+        """The angles [rad] of the first and last column of a polar grid.
+
+        If not explicitly provided, the range of the transmit angles (:attr:`polar_angles`),
+        widened on each side to cover what the transmits insonify at the deepest pixel,
+        ``zlims[1]``, as seen from :attr:`grid_apex`. Each transmit's region is bounded by
+        two edge rays (see :func:`~zea.beamform.geometry.insonified_edge_rays`): a focused
+        transmit adds no margin, a plane wave adds the spread from the ends of the array,
+        and a diverging wave the spread from its virtual source through the ends of the
+        array. Set :attr:`polar_margin` to widen by a fixed angle instead.
+
+        With ``enable_scanline=True`` this is exactly the range of the transmit angles,
+        since the columns are the transmits; an explicit value is ignored there.
+        """
         value = self._params.get("polar_limits")
-        if value is None and self.polar_angles is not None:
-            value = self.polar_angles.min(), self.polar_angles.max()
-            diff = value[1] - value[0]
-            # add 15% margin to the limits
-            value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
-        return value
+        angles = self.polar_angles
+        if self.enable_scanline and angles is not None:
+            if value is not None:
+                log.warning_once(
+                    "``polar_limits`` is ignored with enable_scanline=True: the columns of a "
+                    "scanline grid follow the transmit angles.",
+                    key=(id(self), "polar_limits_scanline"),
+                )
+            return (float(np.min(angles)), float(np.max(angles)))
+        if value is not None or angles is None:
+            return value
+
+        low, high = float(np.min(angles)), float(np.max(angles))
+        margin = self._params.get("polar_margin")
+        if margin is not None:
+            return (low - float(margin), high + float(margin))
+
+        probe_geometry = self._params.get("probe_geometry")
+        try:
+            depth = float(np.max(self.zlims))
+        except MissingDependencyError:
+            depth = None
+        if probe_geometry is None or depth is None:
+            return (low, high)
+
+        # Seen from the apex the transmits define (or the array middle when they don't)
+        apex = self._transmit_or_probe_apex() or 0.0
+        points, directions = insonified_edge_rays(
+            probe_geometry,
+            self._transmit_origins_or_zeros(),
+            angles,
+            self.focus_distances,
+            element_normals=self._element_normals(),
+        )
+        reached = rays_at_depth(points, directions, depth)
+        edge_angles = np.arctan2(reached[:, 0], reached[:, 1] + apex)
+        edge_angles = edge_angles[np.isfinite(edge_angles)]
+        return (
+            float(np.min(edge_angles, initial=low)),
+            float(np.max(edge_angles, initial=high)),
+        )
 
     @cache_with_dependencies("selected_transmits", "n_tx")
     def azimuth_angles(self):
@@ -1103,19 +1386,17 @@ class Parameters(BaseParameters):
         """Flattened pfield for weighting of shape (n_pix, n_tx)."""
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
-    @cache_with_dependencies("zlims", "distance_to_apex")
+    @cache_with_dependencies("zlims", "grid_apex")
     def rho_range(self):
-        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in meters.
-        Used for scan conversion. Rho is measured from the apex of the polar grid, so
-        :attr:`zlims` (depths below the transducer) are shifted by
-        :attr:`distance_to_apex`, matching the ``rlims`` of
-        :func:`~zea.beamform.pixelgrid.polar_pixel_grid`."""
+        """Range of radial distances ``(min_rho, max_rho)`` in meters, used for scan conversion.
+
+        Rho is measured from :attr:`grid_apex`, so it is
+        ``zlims - grid_apex[2]`` (:attr:`zlims` are depths below the transducer), matching
+        the rows of :func:`~zea.beamform.pixelgrid.polar_pixel_grid`."""
         value = self._params.get("rho_range")
         if value is None:
-            return (
-                self.zlims[0] + self.distance_to_apex,
-                self.zlims[1] + self.distance_to_apex,
-            )
+            apex_z = float(self.grid_apex[2])
+            return (float(self.zlims[0]) - apex_z, float(self.zlims[1]) - apex_z)
         return value
 
     @cache_with_dependencies("polar_limits")
@@ -1133,18 +1414,29 @@ class Parameters(BaseParameters):
         "resolution",
         "grid_size_z",
         "grid_size_x",
+        optional=("grid_apex", "extent"),
     )
     def coordinates_2d(self):
         """The coordinates for scan conversion.
 
-        These index the polar image, so they live in the apex frame and need no
-        ``distance_to_apex`` correction; :attr:`rho_range` already carries it.
+        These index the polar image, so they live in the frame of :attr:`grid_apex`;
+        :attr:`rho_range` already carries the offset. The output covers :attr:`extent`.
+        When ``rho_range`` or ``theta_range`` is set explicitly, it describes a polar image
+        of its own rather than this grid, so the output covers its bounding box instead.
         """
+        grid_apex = extent = None
+        if self._params.get("rho_range") is None and self._params.get("theta_range") is None:
+            try:
+                grid_apex, extent = self.grid_apex, self.extent
+            except MissingDependencyError:
+                pass
         coords, _ = compute_scan_convert_2d_coordinates(
             (self.grid_size_z, self.grid_size_x),
             self.rho_range,
             self.theta_range,
             self.resolution,
+            grid_apex=grid_apex,
+            extent=extent,
         )
         return coords
 
@@ -1250,6 +1542,8 @@ class Parameters(BaseParameters):
         }
 
     def __setattr__(self, name: str, value):
+        if name in self._REMOVED_PARAMS:
+            raise ValueError(self._REMOVED_PARAMS[name])
         if name == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)

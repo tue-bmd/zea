@@ -385,8 +385,8 @@ def test_3d_grid_various_sizes(grid_size_x, grid_size_y, grid_size_z):
 # --- Polar Grid Tests ---
 
 
-@pytest.mark.parametrize("distance_to_apex", [0.0, 0.05])
-def test_polar_grid_zlims_are_depths_below_the_transducer(distance_to_apex):
+@pytest.mark.parametrize("apex_depth", [0.0, 0.05])
+def test_polar_grid_zlims_are_depths_below_the_transducer(apex_depth):
     """``zlims`` means the same thing for a polar grid as for a Cartesian one: a depth
     below the transducer surface, regardless of where the apex sits."""
     zlims = (0.005, 0.07)
@@ -395,7 +395,7 @@ def test_polar_grid_zlims_are_depths_below_the_transducer(distance_to_apex):
         zlims=zlims,
         num_radial_pixels=256,
         num_polar_pixels=128,
-        distance_to_apex=distance_to_apex,
+        grid_apex=(0.0, 0.0, -apex_depth),
     )
 
     # The centre ray runs straight down, from zlims[0] to zlims[1] below the transducer.
@@ -405,18 +405,34 @@ def test_polar_grid_zlims_are_depths_below_the_transducer(distance_to_apex):
 
 
 def test_polar_grid_rays_fan_out_from_the_apex():
-    """Every pixel sits at its own radius from the apex at ``(0, 0, -distance_to_apex)``,
-    spanning ``zlims`` shifted by that distance."""
-    distance_to_apex = 0.05
+    """Every pixel sits at its own radius from ``grid_apex``, spanning ``zlims`` shifted by
+    the apex depth."""
+    apex_depth = 0.05
     zlims = (0.005, 0.07)
     grid = polar_pixel_grid(
         polar_limits=(-0.3, 0.3),
         zlims=zlims,
         num_radial_pixels=256,
         num_polar_pixels=128,
-        distance_to_apex=distance_to_apex,
+        grid_apex=(0.0, 0.0, -apex_depth),
     )
 
-    radii = np.hypot(grid[..., 0], grid[..., 2] + distance_to_apex)
-    assert radii.min() == pytest.approx(zlims[0] + distance_to_apex, abs=1e-6)
-    assert radii.max() == pytest.approx(zlims[1] + distance_to_apex, abs=1e-3)
+    radii = np.hypot(grid[..., 0], grid[..., 2] + apex_depth)
+    assert radii.min() == pytest.approx(zlims[0] + apex_depth, abs=1e-6)
+    assert radii.max() == pytest.approx(zlims[1] + apex_depth, abs=1e-3)
+
+
+def test_polar_grid_explicit_angles_set_the_columns():
+    """Explicit column angles (one per transmit for a scanline grid) replace the evenly
+    spaced ``polar_limits``."""
+    angles = np.array([-0.3, -0.1, 0.25])
+    grid = polar_pixel_grid(None, (0.0, 0.05), 16, 999, polar_angles=angles)
+    assert grid.shape == (16, 3, 3)
+    np.testing.assert_allclose(np.arctan2(grid[-1, :, 0], grid[-1, :, 2]), angles, atol=1e-9)
+
+
+def test_polar_grid_distance_to_apex_is_deprecated():
+    """The old keyword still works, as ``grid_apex=(0, 0, -distance_to_apex)``."""
+    new = polar_pixel_grid((-0.3, 0.3), (0.0, 0.05), 8, 8, grid_apex=(0.0, 0.0, -0.02))
+    old = polar_pixel_grid((-0.3, 0.3), (0.0, 0.05), 8, 8, distance_to_apex=0.02)
+    np.testing.assert_array_equal(old, new)

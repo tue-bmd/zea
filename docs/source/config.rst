@@ -154,29 +154,78 @@ are accepted and passed through unchanged.
 Defining a beamforming grid
 ----------------------------
 
-The extent of the final produced image is defined by :attr:`~zea.Parameters.xlims` and :attr:`~zea.Parameters.zlims`. For a cartesian beamforming grid (``grid_type="cartesian"``) this is also the extent of the beamforming grid. For a polar grid (``grid_type="polar"``) the rays fan out from an apex a distance :attr:`~zea.Parameters.distance_to_apex` *behind* the transducer surface. The ``rlims`` (radii from the apex) are then derived from :attr:`~zea.Parameters.zlims` and the ``distance_to_apex`` offset. The final image after scan conversion is then defined by :attr:`~zea.Parameters.xlims` and :attr:`~zea.Parameters.zlims` again.
+A :class:`zea.Parameters` object builds a default beamforming grid from what a file
+records: the probe geometry, the transmits (``polar_angles``, ``transmit_origins`` and
+``focus_distances``) and the record length. You choose the grid type with ``grid_type``
+and ``enable_scanline``, and can tune the result with a few overrides. Positions are in
+the transducer frame: ``z = 0`` at the middle of the array, ``+z`` into the medium, and
+angles measured from ``+z``, positive toward ``+x``.
+
+:attr:`~zea.Parameters.zlims`
+   Depths below the transducer. Defaults to the end of the record,
+   ``sound_speed * n_ax / sampling_frequency / 2``.
+
+:attr:`~zea.Parameters.xlims`
+   The lateral extent of the grid. For a cartesian grid it covers what the transmits
+   insonify down to ``zlims[1]``, and at least the probe width. For a polar grid it is the
+   width of the sector; an explicit value sets the width of the scan-converted image
+   instead (crop or pad).
+
+:attr:`~zea.Parameters.grid_apex`
+   The point a polar grid fans out from, ``(0, 0, -d)`` on the central axis at or behind
+   the array. It is derived from where the transmits fan out from: the point where steered
+   transmit axes meet (the middle of the array, a virtual apex behind a flat array whose
+   transmits are spread over it, or a curved array's centre of curvature), the virtual
+   source of unsteered diverging waves, or else a curved array's centre of curvature.
+
+:attr:`~zea.Parameters.polar_limits`
+   The angles of the first and last column of a polar grid: the range of the transmit
+   angles, widened to cover what the transmits insonify at ``zlims[1]``. A focused
+   transmit adds no margin; plane and diverging waves widen it. Set
+   :attr:`~zea.Parameters.polar_margin` to widen by a fixed angle instead.
+
+:attr:`~zea.Parameters.rho_range`
+   Radii from the apex, ``zlims - grid_apex[2]``, used by scan conversion.
+
+:attr:`~zea.Parameters.extent`
+   For a polar grid, the window the scan-converted image fills: ``xlims`` wide, and on a
+   flat array starting at ``zlims[0]``, which crops what a virtual apex places behind the
+   array.
+
+:attr:`~zea.Parameters.enable_scanline`
+   One column per focused transmit: a polar grid at the transmit angles when their axes
+   meet in one point, or a vertical column under each transmit when they are parallel.
+
+:attr:`~zea.Parameters.f_number`
+   The receive cone of each element. Defaults to the element's -6 dB acceptance angle, so
+   0 (no cone) for most phased arrays. It masks pixels but does not change the grid.
 
 .. raw:: html
 
-   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
-     <!-- Dark mode image -->
-     <img
-       src="_static/pixelgrid-Dark.svg"
-       alt="Polar pixel grid geometry: xlims, zlims, rlims and distance_to_apex"
-       style="display: none; width: 85%; padding-bottom: 1em;"
-       class="only-dark"
-     />
-     <!-- Light mode image -->
-     <img
-       src="_static/pixelgrid-Light.svg"
-       alt="Polar pixel grid geometry: xlims, zlims, rlims and distance_to_apex"
-       style="display: none; width: 85%; padding-bottom: 1em;"
-       class="only-light"
-     />
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
+     <img src="_static/pixelgrid-Dark.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+          style="display: none; width: 85%; padding-bottom: 1em;" class="only-dark" />
+     <img src="_static/pixelgrid-Light.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+          style="display: none; width: 85%; padding-bottom: 1em;" class="only-light" />
      <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
-        The pixel grid of a polar <code>zea.Parameters</code> object on a curved probe.
+        A polar grid on a curved array fans out from its centre of curvature.
      </div>
    </div>
+
+.. raw:: html
+
+   <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
+     <img src="_static/pixelgrid-phased-array-Dark.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+          style="display: none; width: 85%; padding-bottom: 1em;" class="only-dark" />
+     <img src="_static/pixelgrid-phased-array-Light.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+          style="display: none; width: 85%; padding-bottom: 1em;" class="only-light" />
+     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
+        Focused lines from the middle of a phased array: the grid fans out from there, and the image starts at <code>zlims[0]</code>.
+     </div>
+   </div>
+
+.. raw:: html
+
    <style>
      @media (prefers-color-scheme: dark) {
        .only-dark { display: block !important; }
@@ -186,6 +235,16 @@ The extent of the final produced image is defined by :attr:`~zea.Parameters.xlim
      }
    </style>
 
+The explorer below runs the same rules for any probe and transmit scheme, with the
+values and consistency checks alongside. It is a JavaScript port of the code, checked
+against reference values computed by zea (``docs/explorer``).
+`Open it in its own tab <_static/pixel-grid-explorer.html>`_.
+
+.. raw:: html
+
+   <iframe src="_static/pixel-grid-explorer.html" title="Pixel grid explorer"
+           style="width: 100%; height: 1400px; border: 1px solid var(--color-background-border, #ddd); border-radius: 8px; margin: 1em 0 2em;"
+           loading="lazy"></iframe>
 
 
 ----------------------------

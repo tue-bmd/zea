@@ -210,9 +210,8 @@ def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
 
     Inverse of :func:`create_curved_probe_geometry`, for curved probes whose radius is
     only known through ``probe_geometry`` (e.g. read from a converted file) rather than
-    built from an explicit radius. For such a probe the radius is also the polar grid's
-    :attr:`~zea.Parameters.distance_to_apex`, because the centre of curvature is exactly
-    the apex the beams fan out from.
+    built from an explicit radius. :attr:`zea.Parameters.radius_of_curvature` uses it, and
+    the centre of curvature is the default :attr:`zea.Parameters.grid_apex` of such a probe.
 
     Elements are assumed to lie on an arc of radius ``R`` centred at ``(0, 0, -R)``, so
     ``x^2 + (z + R)^2 = R^2``  =>  ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares
@@ -220,9 +219,8 @@ def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
     elements nearest the middle of the array (``z -> 0``).
 
     .. note::
-        The apex is the centre of curvature, at ``(0, 0, -R)``. It is not the middle of
-        the array, which sits at the origin, hence ``distance_to_apex`` for a curved
-        probe is its radius of curvature rather than zero.
+        The centre of curvature sits at ``(0, 0, -R)``, not at the middle of the array,
+        which is the origin.
 
     Args:
         probe_geometry (np.ndarray): Element positions in metres, shape (n_el, 3), in

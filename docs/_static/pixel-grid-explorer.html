@@ -1,0 +1,1505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>[hidden]{display:none!important}body{margin:0}</style>
+</head>
+<body>
+<title>Pixel Grid Explorer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  /* Layout: controls rail on the left, the geometry drawing as the hero, and the
+     numbers (values + consistency checks) under it. Monochrome ink for geometry, like
+     the docs figures; one cyan accent for transmits and controls; semantic colours only
+     for check results. */
+  :root {
+    --bg: #f5f6f4;
+    --panel: #ffffff;
+    --ink: #16191d;
+    --muted: #5b646d;
+    --line: #d7dbdf;
+    --accent: #0e6f8c;
+    --accent-soft: #e2f0f4;
+    --ok: #2c7a4b;
+    --warn: #9a5b06;
+    --bad: #b42318;
+    --bad-soft: rgba(180, 35, 24, 0.14);
+    --grid-fill: rgba(22, 25, 29, 0.05);
+    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-code: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-fig: "Source Serif 4", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #131416; --panel: #1a1c1f; --ink: #e9ebed; --muted: #9aa3ab; --line: #2d3237;
+      --accent: #56b6d2; --accent-soft: #15303a; --ok: #5cc68a; --warn: #f0b04c; --bad: #f97066;
+      --bad-soft: rgba(249, 112, 102, 0.2); --grid-fill: rgba(233, 235, 237, 0.06);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #131416; --panel: #1a1c1f; --ink: #e9ebed; --muted: #9aa3ab; --line: #2d3237;
+    --accent: #56b6d2; --accent-soft: #15303a; --ok: #5cc68a; --warn: #f0b04c; --bad: #f97066;
+    --bad-soft: rgba(249, 112, 102, 0.2); --grid-fill: rgba(233, 235, 237, 0.06);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 14px;
+    line-height: 1.45;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 18px 32px;
+  }
+  code, .code { font-family: var(--font-code); font-size: 0.92em; }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  header.top {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+    max-width: 1500px; margin: 0 auto 16px;
+  }
+  header.top h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  header.top .sub { color: var(--muted); font-size: 13px; }
+  .grow { flex: 1 1 auto; }
+
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .seg button {
+    border: 0; background: transparent; padding: 6px 11px; cursor: pointer; white-space: nowrap;
+    font-size: 13px;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--panel); }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 11px 4px 9px; font-size: 12.5px; background: var(--panel);
+    cursor: pointer;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+  .app {
+    display: grid; grid-template-columns: minmax(250px, 300px) minmax(0, 1fr); gap: 18px;
+    max-width: 1500px; margin: 0 auto; align-items: start;
+  }
+  @media (max-width: 920px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+  aside.controls {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 14px 14px;
+    position: sticky; top: calc(env(safe-area-inset-top, 0px) + 10px);
+    max-height: calc(100vh - 20px); overflow-y: auto;
+  }
+  @media (max-width: 920px) { aside.controls { position: static; max-height: none; } }
+  .controls h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+    margin: 14px 0 8px; font-weight: 600;
+  }
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+  .presets button {
+    border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 4px 8px;
+    font-size: 12.5px; cursor: pointer;
+  }
+  .presets button:hover { border-color: var(--accent); }
+  .ctl { display: grid; gap: 4px; margin-bottom: 10px; }
+  .ctl-head { display: flex; align-items: baseline; gap: 8px; }
+  .ctl-head .name { font-family: var(--font-code); font-size: 12.5px; }
+  .ctl-head .val { margin-left: auto; font-variant-numeric: tabular-nums; font-family: var(--font-code); font-size: 12.5px; }
+  .ctl-head label.auto { font-size: 11.5px; color: var(--muted); display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+  .ctl .hint { font-size: 11.5px; color: var(--muted); }
+  .ctl.is-auto input[type="range"] { opacity: 0.45; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+  .ctl .seg { width: 100%; }
+  .ctl .seg button { flex: 1 1 0; }
+  .controls .sub {
+    font-size: 12px; font-weight: 600; margin: 12px 0 6px; padding-top: 8px; border-top: 1px solid var(--line);
+  }
+  .controls h2 + .ctl + .sub, .controls h2 + .sub { border-top: 0; padding-top: 0; }
+  .reset-row { display: flex; align-items: center; gap: 10px; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-code); font-size: 12.5px; cursor: pointer; }
+
+  .main-col { display: grid; gap: 18px; min-width: 0; }
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px; min-width: 0; }
+  .stage-bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  .stage-bar label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .fig-wrap { overflow-x: auto; }
+  svg#fig { display: block; width: 100%; height: auto; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend svg { flex: none; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .card h3 { font-size: 13px; margin: 0 0 8px; }
+  table.vals { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.vals td { padding: 5px 6px 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  table.vals tr:first-child td { border-top: 0; }
+  table.vals td.k { font-family: var(--font-code); white-space: nowrap; }
+  table.vals td.v { font-family: var(--font-code); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.vals td.src { color: var(--muted); font-size: 12px; }
+  table.vals tr.changed td.v { color: var(--accent); }
+  .table-wrap { overflow-x: auto; }
+
+  ul.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  ul.checks li { display: grid; grid-template-columns: auto 1fr; gap: 2px 9px; align-items: baseline; }
+  ul.checks .dot { transform: translateY(1px); }
+  ul.checks .t { font-weight: 600; font-size: 13px; }
+  ul.checks .d { grid-column: 2; color: var(--muted); font-size: 12.5px; }
+  ul.checks .d code { color: var(--ink); }
+
+  .code-card pre {
+    margin: 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    font-family: var(--font-code); font-size: 12px; overflow-x: auto; line-height: 1.5;
+  }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
+  .btn:hover { border-color: var(--accent); }
+  details.notes summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  details.notes ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; display: grid; gap: 4px; }
+  #parity-details { font-size: 12px; color: var(--muted); }
+  #parity-details li { margin-bottom: 3px; }
+
+  /* SVG figure */
+  #fig text { font-family: var(--font-fig); fill: var(--ink); font-size: 13px; }
+  #fig text.code { font-family: var(--font-code); font-size: 11.5px; }
+  #fig text.halo { paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+  #fig text.faint { fill: var(--muted); font-size: 11.5px; }
+  #fig .ink { stroke: var(--ink); fill: none; }
+  #fig .faint-line { stroke: var(--muted); fill: none; opacity: 0.7; }
+  #fig .mesh { stroke: var(--ink); fill: none; opacity: 0.22; stroke-width: 0.6; }
+  #fig .grid-fill { fill: var(--grid-fill); stroke: none; }
+  #fig .outline { stroke: var(--ink); fill: none; stroke-width: 2; }
+  #fig .sc { stroke: var(--ink); fill: none; stroke-width: 1.2; stroke-dasharray: 7 4; }
+  #fig .extent { stroke: var(--accent); fill: none; stroke-width: 1; }
+  #fig .edge-ray { stroke: var(--accent); fill: none; stroke-width: 1.6; stroke-dasharray: 9 4; }
+  #fig .tx { stroke: var(--accent); fill: none; stroke-width: 0.9; opacity: 0.55; }
+  #fig .tx-dot { fill: var(--accent); }
+  #fig .normal { stroke: var(--muted); stroke-width: 0.8; }
+  #fig .ruler { stroke: var(--muted); stroke-width: 0.8; fill: none; }
+  #fig text.ruler-text { font-family: var(--font-code); font-size: 10.5px; fill: var(--muted); }
+  #fig .cone { stroke: var(--muted); stroke-width: 1.1; stroke-dasharray: 1 3; fill: none; }
+  #fig .behind { fill: var(--bad); }
+  #fig .crop-line { stroke: var(--bad); stroke-width: 1.2; fill: none; }
+  #fig .hatch-line { stroke: var(--bad); stroke-width: 1; opacity: 0.55; }
+  #fig .probe { stroke: var(--ink); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  #fig .ink-fill { fill: var(--ink); }
+  #fig .accent-text { fill: var(--accent); }
+  #fig .bad-text { fill: var(--bad); }
+  #fig marker path { fill: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<header class="top">
+  <div>
+    <h1>Pixel Grid Explorer</h1>
+    <div class="sub">The default pixel grid of <code>zea.Parameters</code>, from the probe and transmits in a file, ported line by line from <code>zea.parameters</code>.</div>
+  </div>
+  <div class="grow"></div>
+  <button type="button" class="badge" id="parity" aria-expanded="false" aria-controls="parity-panel">
+    <span class="dot" id="parity-dot"></span><span id="parity-text">Checking the zea port…</span>
+  </button>
+</header>
+
+<div class="app">
+  <aside class="controls" id="controls" aria-label="Parameters"></aside>
+
+  <div class="main-col">
+    <section class="card" id="parity-panel" hidden>
+      <h3>Parity with zea</h3>
+      <div id="parity-details"></div>
+    </section>
+
+    <section class="stage">
+      <div class="stage-bar" id="layers"></div>
+      <div class="fig-wrap"><svg id="fig" role="img" aria-label="Pixel grid geometry"></svg></div>
+      <div class="legend" id="legend"></div>
+    </section>
+
+    <div class="cards">
+      <section class="card">
+        <h3>Consistency checks</h3>
+        <ul class="checks" id="checks"></ul>
+      </section>
+      <section class="card">
+        <h3>Resolved <code>Parameters</code> values</h3>
+        <div class="table-wrap"><table class="vals" id="vals"></table></div>
+      </section>
+    </div>
+
+    <div class="cards">
+      <section class="card">
+        <details class="notes" open>
+          <summary>Definitions</summary>
+          <ul>
+            <li><b>Frame.</b> <code>z = 0</code> is the middle of the array and <code>+z</code> points into the medium. Angles are measured from <code>+z</code>, positive toward <code>+x</code>.</li>
+            <li><b><code>zlims</code></b>: depths below the transducer. The default runs to the end of the record, <code>sound_speed · n_ax / sampling_frequency / 2</code>.</li>
+            <li><b><code>xlims</code></b>: the lateral extent of the grid. Cartesian grid → what the transmits insonify at <code>zlims[1]</code> (the same edge rays as <code>polar_limits</code>), and at least the probe width. Polar grid → the sector's width, and an override sets the scan-converted image's width (crop or pad). Scanline → the extent of the columns.</li>
+            <li><b><code>f_number</code></b>: a beamforming setting, not geometry. zea's receive mask is a hard cone around each element's normal, so pixels outside every element's cone stay dark; the checks report how many.
+              Default from the probe: <code>1 / (2 tan α)</code>, with α the element's −6 dB acceptance angle under zea's directivity model, <code>sin α = 0.603 · wavelength / element_width</code> (element width 0.9 · pitch when the file has none).
+              Elements narrower than about 0.6 wavelength hear the whole half-space, giving 0 (no cone): typical for phased arrays. Linear arrays land near 0.5, curved arrays near 0.7.</li>
+            <li><b><code>grid_apex</code></b> (derived, not settable): the point <code>(x, y, z)</code> the grid fans out from, which is where the transmits fan out from. It lies on the central axis, at or behind the array: <code>(0, 0, −d)</code> with <code>d ≥ 0</code>. It replaces <code>distance_to_apex</code> (= <code>−grid_apex[2]</code>).
+              In order: steered transmit axes that meet in one point → that point (0 from the array middle, a virtual apex when spread over a flat array, the centre of curvature on a curved array);
+              unsteered diverging waves → their virtual source; curved array → its radius of curvature; flat array with overridden <code>polar_limits</code> → the virtual apex whose sector edges pass through the array ends; otherwise 0.</li>
+            <li><b><code>polar_limits</code></b>: the range of the transmit angles, widened on each side to cover what the transmits insonify at the deepest pixel <code>zlims[1]</code>.
+              Each transmit's region is bounded by two edge rays: focused → its axis (no margin); plane wave → from the array ends along its angle (along the end elements' normals on a curved array); diverging wave → from its virtual source through the array ends.
+              <code>polar_margin</code> replaces the automatic margin with a fixed angle. Scanline mode has no margin, because the columns are the transmits.</li>
+            <li><b><code>rho_range</code></b> = <code>zlims − grid_apex[2]</code>: radii from the apex, used by scan conversion.</li>
+            <li><b><code>enable_scanline</code></b>: one column per focused transmit, each beamformed with its own transmit only. Steered lines whose axes meet in one point use a polar grid: the polar grid with one column per transmit angle (<code>grid_size_x = n_tx</code>, <code>polar_limits</code> = the angle range, no override), rows at <code>rho_range</code> from <code>grid_apex</code>, so the columns lie on the transmit axes. Unsteered, parallel lines use a cartesian grid: a vertical column under each transmit. Anything else raises a <code>ValueError</code>.</li>
+            <li><b><code>grid_size_x</code></b> of a polar grid: the outer arc length, <code>(zlims[1] − grid_apex[2]) · (polar_limits[1] − polar_limits[0])</code>, divided by <code>wavelength / pixels_per_wavelength</code>.</li>
+            <li><b><code>extent</code></b> of a polar grid: the window the scan-converted image fills. <code>x</code> spans <code>xlims</code>; <code>z</code> spans the grid, but on a flat array starts at <code>zlims[0]</code>, which crops the pixels a virtual apex places behind the array. A curved array needs no crop.</li>
+            <li><b>Radius of curvature</b>: a probe property fitted from <code>probe_geometry</code> (∞ for a flat array), kept apart from the apex.</li>
+            <li><b>Missing transmits.</b> Without <code>transmit_origins</code> in the file, the origins count as zeros (the middle of the array), as in the beamformer.</li>
+          </ul>
+        </details>
+      </section>
+      <section class="card code-card">
+        <div class="row"><h3 style="margin:0">Reproduce in Python</h3><div class="grow"></div><button type="button" class="btn" id="copy">Copy</button></div>
+        <p class="hint" style="margin:0 0 8px">Builds the same <code>zea.Parameters</code>; its values match this page.</p>
+        <pre id="code"></pre>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="zea-fixtures">[{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.0707813925943916,0.0707813925943916],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.0707813925943916,0.0707813925943916,0.0,0.0,0.0,0.10009222465955338],"grid_samples":{"0,0":[0.0,0.0],"0,63":[0.0,0.0],"127,0":[-0.0707813925943916,0.07078138950043861],"127,63":[0.0707813925943916,0.07078138950043861],"64,32":[0.0006288519888647556,0.050440176206389103]},"scan_convert":{"x_lim":[-0.0707813948392868,0.0707813948392868],"z_lim":[0.0,0.10009222477674484],"resolution":0.0007060713833197951}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.8304428159053004,0.8304428159053004],"xlims":[-0.07389683981133913,0.07389683981133913],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.07389683981133913,0.07389683981133913,0.0,0.0,0.0,0.1000913068496539],"grid_samples":{"0,0":[0.0,0.0],"0,63":[0.0,0.0],"127,0":[-0.07389683981133913,0.06752234965632845],"127,63":[0.07389683981133913,0.06752234965632845],"64,32":[0.0006649162553259377,0.05043971368801456]},"scan_convert":{"x_lim":[-0.07389684021472931,0.07389684021472931],"z_lim":[0.0,0.10009130835533142],"resolution":0.0007239647093228996}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":-0.02},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-1.05474024654163,1.05474024654163],"xlims":[-0.08706418805101733,0.08706418805101733],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.08706418805101733,0.08706418805101733,0.0,0.0,0.0,0.1000859749202336],"grid_samples":{"0,0":[0.0,0.0],"0,63":[0.0,0.0],"127,0":[-0.08706418805101733,0.04939471425396938],"127,63":[0.08706418805101733,0.04939471425396938],"64,32":[0.0008444909980821989,0.05043702673145631]},"scan_convert":{"x_lim":[-0.08706419169902802,0.08706419169902802],"z_lim":[0.0,0.10008597373962402],"resolution":0.0008130598580464721}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"array","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,-0.009449999779462814],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.07746355166670436,0.07746355166670436],"zlims":[0.0,0.10010000318288803],"rho_range":[0.009449999779462814,0.10955000296235085],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.07746355166670436,0.07746355166670436,0.0,0.0,0.0,0.10009149032347485],"grid_samples":{"0,0":[-0.006682159072312761,-0.0027678409992365092],"0,63":[0.006682159072312761,-0.0027678409992365092],"127,0":[-0.07746355166670436,0.0680135485012021],"127,63":[0.07746355166670436,0.0680135485012021],"64,32":[0.000746658662320241,0.05043944187031058]},"scan_convert":{"x_lim":[-0.0774635523557663,0.0774635523557663],"z_lim":[0.0,0.10009148716926575],"resolution":0.0007649763720110059}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"array","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,-0.009449999779462814],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.07746355166670436,0.07746355166670436],"zlims":[0.0,0.10010000318288803],"rho_range":[0.009449999779462814,0.10955000296235085],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.07746355166670436,0.07746355166670436,0.0,0.0,0.0,0.10009149032347485],"grid_samples":{"0,0":[-0.006682159072312761,-0.0027678409992365092],"0,63":[0.006682159072312761,-0.0027678409992365092],"127,0":[-0.07746355166670436,0.0680135485012021],"127,63":[0.07746355166670436,0.0680135485012021],"64,32":[0.000746658662320241,0.05043944187031058]},"scan_convert":{"x_lim":[-0.0774635523557663,0.0774635523557663],"z_lim":[0.0,0.10009148716926575],"resolution":0.0007649763720110059}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"array","focus_distance":-0.02},"expected":{"grid_apex":[0.0,0.0,-0.009449999779462814],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.07746355166670436,0.07746355166670436],"zlims":[0.0,0.10010000318288803],"rho_range":[0.009449999779462814,0.10955000296235085],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.07746355166670436,0.07746355166670436,0.0,0.0,0.0,0.10009149032347485],"grid_samples":{"0,0":[-0.006682159072312761,-0.0027678409992365092],"0,63":[0.006682159072312761,-0.0027678409992365092],"127,0":[-0.07746355166670436,0.0680135485012021],"127,63":[0.07746355166670436,0.0680135485012021],"64,32":[0.000746658662320241,0.05043944187031058]},"scan_convert":{"x_lim":[-0.0774635523557663,0.0774635523557663],"z_lim":[0.0,0.10009148716926575],"resolution":0.0007649763720110059}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.1001000075583984,0.1001000075583984],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.1001000075583984,0.1001000076583984,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.1001000075583984,0.0],"0,63":[0.1001000076583984,0.0],"127,0":[-0.1001000075583984,0.10010000318288803],"127,63":[0.1001000076583984,0.10010000318288803],"64,32":[0.0015888890596571226,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.8304428159053004,0.8304428159053004],"xlims":[-0.10955000733786122,0.10955000733786122],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.10955000733786122,0.10955000743786121,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.10955000733786122,0.0],"0,63":[0.10955000743786121,0.0],"127,0":[-0.10955000733786122,0.10010000318288803],"127,63":[0.10955000743786121,0.10010000318288803],"64,32":[0.0017388890561565312,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":-0.02},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-1.05474024654163,1.05474024654163],"xlims":[-0.176438423273641,0.176438423273641],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.176438423273641,0.17643842337364102,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.176438423273641,0.0],"0,63":[0.17643842337364102,0.0],"127,0":[-0.176438423273641,0.10010000318288803],"127,63":[0.17643842337364102,0.10010000318288803],"64,32":[0.0028006099440260612,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"array","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,-0.009449999779462814],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.10955000733786122,0.10955000733786122],"zlims":[0.0,0.10010000318288803],"rho_range":[0.009449999779462814,0.10955000296235085],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.10955000733786122,0.10955000743786121,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.10955000733786122,0.0],"0,63":[0.10955000743786121,0.0],"127,0":[-0.10955000733786122,0.10010000318288803],"127,63":[0.10955000743786121,0.10010000318288803],"64,32":[0.0017388890561565312,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"array","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,-0.009449999779462814],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.10955000733786122,0.10955000733786122],"zlims":[0.0,0.10010000318288803],"rho_range":[0.009449999779462814,0.10955000296235085],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.10955000733786122,0.10955000743786121,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.10955000733786122,0.0],"0,63":[0.10955000743786121,0.0],"127,0":[-0.10955000733786122,0.10010000318288803],"127,63":[0.10955000743786121,0.10010000318288803],"64,32":[0.0017388890561565312,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"array","focus_distance":-0.02},"expected":{"grid_apex":[0.0,0.0,-0.009449999779462814],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.10955000733786122,0.10955000733786122],"zlims":[0.0,0.10010000318288803],"rho_range":[0.009449999779462814,0.10955000296235085],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.10955000733786122,0.10955000743786121,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.10955000733786122,0.0],"0,63":[0.10955000743786121,0.0],"127,0":[-0.10955000733786122,0.10010000318288803],"127,63":[0.10955000743786121,0.10010000318288803],"64,32":[0.0017388890561565312,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":null,"grid_size_z":null,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":21,"tx_span_deg":20.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.4297973828259905,0.4297973828259905],"xlims":[-0.041710332168642256,0.041710332168642256],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":559,"grid_size_z":651,"grid_shape":[651,559],"extent":[-0.041710332168642256,0.041710332168642256,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[0.0,0.0],"0,558":[0.0,0.0],"650,0":[-0.041710332168642256,0.090995927533026],"650,558":[0.041710332168642256,0.090995927533026],"325,279":[0.0,0.050050001591444016]},"scan_convert":{"x_lim":[-0.04171033203601837,0.04171033203601837],"z_lim":[0.0,0.10010000318288803],"resolution":9.627528197597712e-05}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":1,"tx_span_deg":0.0,"tx_origins":"zeros","focus_distance":-0.012},"expected":{"grid_apex":[0.0,0.0,-0.012000000104308128],"polar_limits":[-0.6670723653234663,0.6670723653234663],"xlims":[-0.0693549924770343,0.0693549924770343],"zlims":[0.0,0.10010000318288803],"rho_range":[0.012000000104308128,0.11210000328719616],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.0693549924770343,0.0693549924770343,0.0,0.0,0.0,0.10009371918005223],"grid_samples":{"0,0":[-0.007424263091469153,-0.002572364130637741],"0,63":[0.007424263091469153,-0.002572364130637741],"127,0":[-0.0693549924770343,0.0760698344334035],"127,63":[0.0693549924770343,0.0760698344334035],"64,32":[0.000661173850783113,0.05044059565624905]},"scan_convert":{"x_lim":[-0.06935499608516693,0.06935499608516693],"z_lim":[0.0,0.10009372234344482],"resolution":0.0007226014859043062}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":[-0.6,0.7],"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":1,"tx_span_deg":0.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,-0.01121943537145853],"polar_limits":[-0.6000000238418579,0.699999988079071],"xlims":[-0.06285568531276498,0.07171395023511001],"zlims":[0.0,0.10010000318288803],"rho_range":[0.01121943537145853,0.11131943855434656],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.06285568531276498,0.07171395023511001,0.0,0.0,0.0,0.10009986293100757],"grid_samples":{"0,0":[-0.006334969959006916,-0.00195963593125386],"0,63":[0.007227758604819105,-0.0026383377956936335],"127,0":[-0.06285568531276498,0.08065646040059694],"127,63":[0.07171395023511001,0.07392236835462601],"64,32":[0.003717128822079781,0.05033195832425916]},"scan_convert":{"x_lim":[-0.06285568326711655,0.07171394675970078],"z_lim":[0.0,0.10009986162185669],"resolution":0.0007101676892489195}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":0.05,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":21,"tx_span_deg":20.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.3990658409893513,0.3990658409893513],"xlims":[-0.038894632521579715,0.038894632521579715],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.038894632521579715,0.038894632521579715,0.0,0.0,0.0,0.10009799496581784],"grid_samples":{"0,0":[0.0,0.0],"0,63":[0.0,0.0],"127,0":[-0.038894632521579715,0.0922345824418665],"127,63":[0.038894632521579715,0.0922345824418665],"64,32":[0.00031952985729514995,0.050443084077262536]},"scan_convert":{"x_lim":[-0.03889463096857071,0.03889463096857071],"z_lim":[0.0,0.10009799152612686],"resolution":0.0005526120075955987}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":[0.01,0.07],"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":[-0.02,0.03],"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.019999999552965164,0.029999999329447746],"zlims":[0.009999999776482582,0.07000000029802322],"rho_range":[0.009999999776482582,0.07000000029802322],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.019999999552965164,0.029999999329447746,0.0,0.0,0.009999999776482582,0.06999456077136557],"grid_samples":{"0,0":[-0.00707106780835789,0.007071067499271694],"0,63":[0.00707106780835789,0.007071067499271694],"127,0":[-0.04949747597559427,0.04949747381199084],"127,63":[0.04949747597559427,0.04949747381199084],"64,32":[0.000501597396987426,0.04023309385470223]},"scan_convert":{"x_lim":[-0.019999999552965164,0.029999999329447746],"z_lim":[0.009999999776482582,0.06999456137418747],"resolution":0.0004855523875448853}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":[-0.02,0.025],"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.8304428159053004,0.8304428159053004],"xlims":[-0.019999999552965164,0.02500000037252903],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.019999999552965164,0.02500000037252903,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.019999999552965164,0.0],"0,63":[0.02500000037252903,0.0],"127,0":[-0.019999999552965164,0.10010000318288803],"127,63":[0.02500000037252903,0.10010000318288803],"64,32":[0.002857144922018051,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":5000000.0,"sampling_frequency":20000000.0,"sound_speed":1540.0,"f_number":1.5,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.0353906962971958,0.0353906962971958],"zlims":[0.0,0.050050001591444016],"rho_range":[0.0,0.050050001591444016],"f_number":1.5,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.0353906962971958,0.0353906962971958,0.0,0.0,0.0,0.05004611232977669],"grid_samples":{"0,0":[0.0,0.0],"0,63":[0.0,0.0],"127,0":[-0.0353906962971958,0.035390694750219304],"127,63":[0.0353906962971958,0.035390694750219304],"64,32":[0.0003144259944323778,0.025220088103194552]},"scan_convert":{"x_lim":[-0.0353906974196434,0.0353906974196434],"z_lim":[0.0,0.05004611238837242],"resolution":0.00035303569165989757}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":5000000.0,"sampling_frequency":20000000.0,"sound_speed":1540.0,"f_number":null,"element_width":0.00029,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.0353906962971958,0.0353906962971958],"zlims":[0.0,0.050050001591444016],"rho_range":[0.0,0.050050001591444016],"f_number":0.5990163797886855,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.0353906962971958,0.0353906962971958,0.0,0.0,0.0,0.05004611232977669],"grid_samples":{"0,0":[0.0,0.0],"0,63":[0.0,0.0],"127,0":[-0.0353906962971958,0.035390694750219304],"127,63":[0.0353906962971958,0.035390694750219304],"64,32":[0.0003144259944323778,0.025220088103194552]},"scan_convert":{"x_lim":[-0.0353906974196434,0.0353906974196434],"z_lim":[0.0,0.05004611238837242],"resolution":0.00035303569165989757}}},{"config":{"probe":"curved","n_el":128,"pitch":0.00032982600037688117,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1560,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":3000000.0,"sampling_frequency":12000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":1,"tx_span_deg":0.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,-0.03999999910593033],"polar_limits":[-0.5235987760198293,0.5235987760198293],"xlims":[-0.07005000119555355,0.07005000119555355],"zlims":[0.0,0.10010000318288803],"rho_range":[0.03999999910593033,0.14010000228881836],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.07005000119555355,0.07005000119555355,0.0,0.0,-0.005358983737270437,0.10009516455980158],"grid_samples":{"0,0":[-0.019999999567567407,-0.005358983737270437],"0,63":[0.019999999567567407,-0.005358983737270437],"127,0":[-0.07005000119555355,0.08133016191691617],"127,63":[0.07005000119555355,0.08133016191691617],"64,32":[0.0007516805136671223,0.050440972431351]},"scan_convert":{"x_lim":[-0.07005000114440918,0.07005000114440918],"z_lim":[-0.0053589828312397,0.10009517520666122],"resolution":0.0007682997966185212}}},{"config":{"probe":"curved","n_el":128,"pitch":0.00032982600037688117,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":[0.01,0.1],"n_ax":1560,"polar_limits":[-0.6,0.6],"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":3000000.0,"sampling_frequency":12000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":1,"tx_span_deg":0.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,-0.03999999910593033],"polar_limits":[-0.6000000238418579,0.6000000238418579],"xlims":[-0.0790499493667129,0.0790499493667129],"zlims":[0.009999999776482582,0.10000000149011612],"rho_range":[0.04999999888241291,0.14000000059604645],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.0790499493667129,0.0790499493667129,0.0,0.0,0.0012667800440628804,0.09999365233248758],"grid_samples":{"0,0":[-0.028232124022591322,0.0012667800440628804],"0,63":[0.028232124022591322,0.0012667800440628804],"127,0":[-0.0790499493667129,0.07554698558866538],"127,63":[0.0790499493667129,0.07554698558866538],"64,32":[0.0009081226980132835,0.055350006922478476]},"scan_convert":{"x_lim":[-0.07904995232820511,0.07904995232820511],"z_lim":[0.0012667812407016754,0.09999365359544754],"resolution":0.0008067119051702321}}},{"config":{"probe":"curved","n_el":128,"pitch":0.00032982600037688117,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1560,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":3000000.0,"sampling_frequency":12000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":64,"tx_span_deg":30.0,"tx_origins":"array","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,-0.03999999910593033],"polar_limits":[-0.5235987901687622,0.5235987901687622],"xlims":[-0.07005000291224583,0.07005000291224583],"zlims":[0.0,0.10010000318288803],"rho_range":[0.03999999910593033,0.14010000228881836],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.07005000291224583,0.07005000291224583,0.0,0.0,-0.005358984020249098,0.1000951645595401],"grid_samples":{"0,0":[-0.020000000057700806,-0.005358984020249098],"0,63":[0.020000000057700806,-0.005358984020249098],"127,0":[-0.07005000291224583,0.08133016092578338],"127,63":[0.07005000291224583,0.08133016092578338],"64,32":[0.0007516805339789099,0.05044097243118219]},"scan_convert":{"x_lim":[-0.07005000114440918,0.07005000114440918],"z_lim":[-0.0053589828312397,0.10009517520666122],"resolution":0.0007682997966185212}}},{"config":{"probe":"curved","n_el":128,"pitch":0.00032982600037688117,"radius":0.04,"grid_type":"polar","enable_scanline":false,"zlims":null,"n_ax":1560,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":3000000.0,"sampling_frequency":12000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":33,"tx_span_deg":30.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-1.112016551200432,1.112016551200432],"xlims":[-0.08974901687026668,0.08974901687026668],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.08974901687026668,0.08974901687026668,0.0,0.0,0.0,0.1000844100197134],"grid_samples":{"0,0":[0.0,0.0],"0,63":[0.0,0.0],"127,0":[-0.08974901687026668,0.04432972600901996],"127,63":[0.08974901687026668,0.04432972600901996],"64,32":[0.0008903453492530611,0.050436238120170535]},"scan_convert":{"x_lim":[-0.08974901586771011,0.08974901586771011],"z_lim":[0.0,0.10008440911769867],"resolution":0.0008358128252439201}}},{"config":{"probe":"curved","n_el":128,"pitch":0.00032982600037688117,"radius":0.04,"grid_type":"cartesian","enable_scanline":false,"zlims":null,"n_ax":1560,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":3000000.0,"sampling_frequency":12000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":11,"tx_span_deg":10.0,"tx_origins":"zeros","focus_distance":null},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.8256016601414613,0.8256016601414613],"xlims":[-0.10849059576652964,0.10849059576652964],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.10849059576652964,0.10849059586652963,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.10849059576652964,0.0],"0,63":[0.10849059586652963,0.0],"127,0":[-0.10849059576652964,0.10010000318288803],"127,63":[0.10849059586652963,0.10010000318288803],"64,32":[0.001722072999468735,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":true,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.0707813925943916,0.0707813925943916],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":65,"grid_size_z":128,"grid_shape":[128,65],"extent":[-0.0707813925943916,0.0707813925943916,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[0.0,0.0],"0,64":[0.0,0.0],"127,0":[-0.0707813925943916,0.07078138950043861],"127,64":[0.0707813925943916,0.07078138950043861],"64,32":[0.0,0.05044409609216405]},"scan_convert":{"x_lim":[-0.0707813948392868,0.0707813948392868],"z_lim":[0.0,0.10010000318288803],"resolution":0.0007011968409642577}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":true,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":33,"tx_span_deg":45.0,"tx_origins":"array","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,-0.009449999779462814],"polar_limits":[-0.7853981852531433,0.7853981852531433],"xlims":[-0.07746355166670436,0.07746355166670436],"zlims":[0.0,0.10010000318288803],"rho_range":[0.009449999779462814,0.10955000296235085],"f_number":0.0,"grid_size_x":33,"grid_size_z":128,"grid_shape":[128,33],"extent":[-0.07746355166670436,0.07746355166670436,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.006682159072312761,-0.0027678409992365092],"0,32":[0.006682159072312761,-0.0027678409992365092],"127,0":[-0.07746355166670436,0.0680135485012021],"127,32":[0.07746355166670436,0.0680135485012021],"64,16":[0.0,0.05044409609216405]},"scan_convert":{"x_lim":[-0.0774635523557663,0.0774635523557663],"z_lim":[0.0,0.10009999573230743],"resolution":0.0011242699110880494}}},{"config":{"probe":"curved","n_el":128,"pitch":0.00032982600037688117,"radius":0.04,"grid_type":"polar","enable_scanline":true,"zlims":null,"n_ax":1560,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":3000000.0,"sampling_frequency":12000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":64,"tx_span_deg":30.0,"tx_origins":"array","focus_distance":0.06},"expected":{"grid_apex":[0.0,0.0,-0.03999999910593033],"polar_limits":[-0.5235987901687622,0.5235987901687622],"xlims":[-0.07005000291224583,0.07005000291224583],"zlims":[0.0,0.10010000318288803],"rho_range":[0.03999999910593033,0.14010000228881836],"f_number":0.0,"grid_size_x":64,"grid_size_z":128,"grid_shape":[128,64],"extent":[-0.07005000291224583,0.07005000291224583,0.0,0.0,-0.005358984020249098,0.10009516455952289],"grid_samples":{"0,0":[-0.020000000057700806,-0.005358984020249098],"0,63":[0.020000000057700806,-0.005358984020249098],"127,0":[-0.07005000291224583,0.08133016092578338],"127,63":[0.07005000291224583,0.08133016092578338],"64,32":[0.0007516805353158944,0.05044097243117107]},"scan_convert":{"x_lim":[-0.07005000114440918,0.07005000114440918],"z_lim":[-0.0053589828312397,0.10009517520666122],"resolution":0.0007682997966185212}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":true,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":17,"tx_span_deg":0.0,"tx_origins":"array","focus_distance":0.03},"expected":{"grid_apex":[0.0,0.0,0.0],"polar_limits":[0.0,0.0],"xlims":[-0.009449999779462814,0.009449999779462814],"zlims":[0.0,0.10010000318288803],"rho_range":[0.0,0.10010000318288803],"f_number":0.0,"grid_size_x":17,"grid_size_z":128,"grid_shape":[128,17],"extent":[-0.009449999779462814,0.009449999779462814,0.0,0.0,0.0,0.10010000318288803],"grid_samples":{"0,0":[-0.009449999779462814,0.0],"0,16":[0.009449999779462814,0.0],"127,0":[-0.009449999779462814,0.10010000318288803],"127,16":[0.009449999779462814,0.10010000318288803],"64,8":[0.0,0.050444096326828]}}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":true,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":null},"expected":{"scanline_error":true}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":true,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":-0.02},"expected":{"scanline_error":true}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"cartesian","enable_scanline":true,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":65,"tx_span_deg":45.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"scanline_error":true}},{"config":{"probe":"flat","n_el":64,"pitch":0.0003,"radius":0.04,"grid_type":"polar","enable_scanline":true,"zlims":null,"n_ax":1300,"polar_limits":null,"polar_margin":null,"xlims":null,"grid_size_x":64,"grid_size_z":128,"center_frequency":2500000.0,"sampling_frequency":10000000.0,"sound_speed":1540.0,"f_number":null,"element_width":null,"pixels_per_wavelength":4,"n_tx":9,"tx_span_deg":0.0,"tx_origins":"zeros","focus_distance":0.06},"expected":{"scanline_error":true}}]</script>
+<script>
+"use strict";
+
+/* ==========================================================================
+   zea port. Every function below mirrors the zea function named in its comment
+   in zea.parameters, zea.beamform and zea.probes. Values are in SI units (m, rad, Hz). Math.fround emulates the
+   float32 storage zea uses for parameters, where it changes integer results.
+   ========================================================================== */
+
+const f32 = Math.fround;
+
+// numpy.linspace (endpoint=True)
+function linspace(a, b, n) {
+  if (n <= 0) return [];
+  if (n === 1) return [a];
+  const step = (b - a) / (n - 1);
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = a + i * step;
+  out[n - 1] = b;
+  return out;
+}
+
+function median(values) {
+  const s = [...values].sort((p, q) => p - q);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+function arrMin(a) { let m = Infinity; for (const v of a) if (v < m) m = v; return m; }
+function arrMax(a) { let m = -Infinity; for (const v of a) if (v > m) m = v; return m; }
+
+// zea.probes.create_probe_geometry -> [[x, z], ...]
+function createProbeGeometry(nEl, pitch) {
+  const aperture = (nEl - 1) * pitch;
+  return linspace(-aperture / 2, aperture / 2, nEl).map((x) => [f32(x), 0]);
+}
+
+// zea.probes.create_curved_probe_geometry
+function createCurvedProbeGeometry(nEl, pitch, radius) {
+  const angularPitch = pitch / radius;
+  const out = [];
+  for (let i = 0; i < nEl; i++) {
+    const a = (i - (nEl - 1) / 2) * angularPitch;
+    out.push([f32(radius * Math.sin(a)), f32(radius * Math.cos(a) - radius)]);
+  }
+  return out;
+}
+
+// zea.probes.fit_curved_probe_radius; returns null where zea raises ValueError
+function fitCurvedProbeRadius(pg, tol = 0.5) {
+  let num = 0, den = 0;
+  for (const [x, z] of pg) { num += z * (x * x + z * z); den += z * z; }
+  den *= 2;
+  const radius = den > 0 ? -num / den : Infinity;
+  if (Number.isFinite(radius)) {
+    let deviation = 0;
+    for (const [x, z] of pg) deviation = Math.max(deviation, Math.abs(Math.hypot(x, z + radius) - radius));
+    const steps = [];
+    for (let i = 1; i < pg.length; i++) steps.push(Math.hypot(pg[i][0] - pg[i - 1][0], pg[i][1] - pg[i - 1][1]));
+    if (deviation <= tol * median(steps)) return radius;
+  }
+  return null;
+}
+
+// zea.beamform.geometry.compute_element_normals (2D, y = 0) -> [[nx, nz], ...]
+function elementNormals(pg) {
+  const n = pg.length;
+  if (n < 2) return pg.map(() => [0, 1]);
+  const fwd = [];
+  for (let i = 0; i < n - 1; i++) fwd.push([pg[i + 1][0] - pg[i][0], pg[i + 1][1] - pg[i][1]]);
+  const tangent = [fwd[0]];
+  for (let i = 1; i < n - 1; i++) tangent.push([fwd[i][0] + fwd[i - 1][0], fwd[i][1] + fwd[i - 1][1]]);
+  tangent.push(fwd[n - 2]);
+  return tangent.map(([dx, dz]) => {
+    const k = dz / Math.max(dx * dx + dz * dz, 1e-12);
+    const rx = -k * dx, rz = 1 - k * dz;
+    const nn = Math.hypot(rx, rz);
+    return nn < 1e-6 ? [0, 1] : [rx / nn, rz / nn];
+  });
+}
+
+// The explorer's transmit set (not a zea function; mirrored in make_fixtures.py)
+function makeTransmits(s, pg) {
+  const n = s.n_tx;
+  const span = (s.tx_span_deg * Math.PI) / 180;
+  const angles = n === 1 ? [0] : linspace(-span, span, n);
+  let origins = angles.map(() => [0, 0]);
+  if (s.tx_origins === "array") {
+    if (s.probe === "curved") {
+      origins = angles.map((a) => [s.radius * Math.sin(a), s.radius * Math.cos(a) - s.radius]);
+    } else {
+      const xs = pg.map((p) => p[0]);
+      const half = (arrMax(xs) - arrMin(xs)) / 2;
+      if (n > 1 && span > 0) {
+        // Spread so the transmit axes meet behind the array (a virtual apex) and the
+        // outermost transmit leaves from an end element.
+        const virtualApex = half / Math.tan(span);
+        origins = angles.map((a) => [virtualApex * Math.tan(a), 0]);
+      } else {
+        const ox = n === 1 ? [0] : linspace(-half, half, n);
+        origins = ox.map((x) => [x, 0]);
+      }
+    }
+  }
+  const fd = s.focus_distance == null ? Infinity : s.focus_distance;
+  return {
+    angles: angles.map(f32),
+    origins: origins.map(([x, z]) => [f32(x), f32(z)]),
+    focus: angles.map(() => f32(fd)),
+  };
+}
+
+/* Resolve every geometry quantity of zea.Parameters for state `s`, as zea.parameters does.
+   A scanline request zea would reject (it raises a ValueError when building the grid) is
+   reported in `scanlineError`, and the regular grid is shown instead. */
+function resolve(s) {
+  const src = {};
+  const c = f32(s.sound_speed), fc = f32(s.center_frequency), fs = f32(s.sampling_frequency);
+  const ppw = s.pixels_per_wavelength == null ? 4 : s.pixels_per_wavelength; // VALID_PARAMS default
+
+  const pg = s.probe === "curved"
+    ? createCurvedProbeGeometry(s.n_el, s.pitch, s.radius)
+    : createProbeGeometry(s.n_el, s.pitch);
+  const xs = pg.map((p) => p[0]);
+  const apertureX = arrMax(xs) - arrMin(xs); // Parameters.aperture_size[0]
+  const tx = makeTransmits(s, pg);
+  const rFit = fitCurvedProbeRadius(pg);
+  const radius = rFit == null ? Infinity : f32(rFit); // Parameters.radius_of_curvature
+  const curved = Number.isFinite(radius);
+  const elementSteps = pg.slice(1).map((p, i) => Math.hypot(p[0] - pg[i][0], p[1] - pg[i][1]));
+  const pitch = median(elementSteps); // geometry.element_pitch
+  const tol = 0.5 * pitch;
+
+  // Parameters.zlims
+  let zlims;
+  if (s.zlims) { zlims = s.zlims.map(f32); src.zlims = "override"; }
+  else { zlims = [0, f32(f32(f32(c * s.n_ax) / fs) / 2)]; src.zlims = "default: sound_speed · n_ax / sampling_frequency / 2"; }
+
+  // Parameters.f_number: 1 / (2 tan α), α where the element directivity drops to −6 dB
+  const SINC_HALF = 0.6033545644016143; // geometry.SINC_HALF_AMPLITUDE
+  let fNumber, acceptance = null;
+  if (s.f_number != null) { fNumber = s.f_number; src.f_number = "override"; }
+  else {
+    const width = s.element_width != null ? s.element_width : 0.9 * pitch;
+    const sinA = (SINC_HALF * (c / fc)) / width;
+    acceptance = { width, angle: sinA >= 1 ? Math.PI / 2 : Math.asin(sinA) };
+    fNumber = sinA >= 1 ? 0 : 1 / (2 * Math.tan(acceptance.angle));
+    src.f_number = sinA >= 1
+      ? "default: 0, the elements hear the whole half-space (−6 dB directivity)"
+      : "default: 1 / (2 tan α), α = the element's −6 dB acceptance angle";
+  }
+
+  // geometry.transmit_apex_distance
+  const steered = tx.angles.some((a) => Math.abs(a) > 1e-6); // geometry.STEERING_TOLERANCE
+  const est = [];
+  tx.angles.forEach((a, k) => { if (Math.abs(a) > 1e-6) est.push(tx.origins[k][0] / Math.tan(a) - tx.origins[k][1]); });
+  const rayApex = est.length ? { d: median(est), spread: arrMax(est) - arrMin(est) } : null;
+  if (rayApex) rayApex.concurrent = rayApex.spread <= tol && rayApex.d >= -tol;
+  let virtualSource = null; // unsteered diverging waves that share one virtual source on the axis
+  if (!steered && tx.focus.every((f) => Number.isFinite(f) && f < 0)) {
+    const vx = tx.origins.map((o) => o[0]), vz = tx.origins.map((o, k) => o[1] + tx.focus[k]);
+    if (Math.max(...vx.map(Math.abs)) <= tol && arrMax(vz) - arrMin(vz) <= tol) virtualSource = { d: -median(vz) };
+  }
+
+  // Parameters._transmit_or_probe_apex
+  let dTx = null, dTxSrc = null;
+  if (steered && rayApex && rayApex.concurrent) { dTx = Math.max(rayApex.d, 0); dTxSrc = "where the transmit axes meet"; }
+  else if (virtualSource) { dTx = virtualSource.d; dTxSrc = "virtual source of the diverging wave"; }
+  else if (curved) { dTx = radius; dTxSrc = "radius of curvature"; }
+
+  // Parameters._scanline_polar_angles: which scanline requests zea accepts
+  const allFocused = tx.focus.every((f) => Number.isFinite(f) && f > 0);
+  const scanlineBlock = !allFocused ? "focused transmits (every focus distance > 0)"
+    : s.grid_type === "cartesian" && steered ? "unsteered (parallel) transmits on a cartesian grid; steered lines need a polar grid"
+      : s.grid_type === "polar" && !steered ? "steered transmits on a polar grid; unsteered lines need a cartesian grid"
+        : s.grid_type === "polar" && !rayApex.concurrent ? "transmit axes that meet in one point"
+          : null;
+  const scanlineError = s.enable_scanline ? scanlineBlock : null;
+  const scanline = s.enable_scanline && !scanlineError;
+
+  // geometry.insonified_edge_rays, with exact normals on a curved array (Parameters._element_normals)
+  const lo = arrMin(tx.angles), hi = arrMax(tx.angles);
+  const zDeep = Math.max(zlims[0], zlims[1]);
+  const nrm = curved ? pg.map(([x, z]) => [x / radius, (z + radius) / radius]) : elementNormals(pg);
+  let left = 0, right = 0;
+  xs.forEach((x, i) => { if (x < xs[left]) left = i; if (x > xs[right]) right = i; });
+  const ends = [left, right].map((i) => ({ p: pg[i], tilt: Math.atan2(nrm[i][0], nrm[i][1]) }));
+  const apexZ = -(dTx == null ? 0 : dTx); // seen from the array middle when no apex is defined
+  const edges = [];
+  tx.angles.forEach((a, k) => {
+    const f = tx.focus[k], o = tx.origins[k];
+    if (Number.isFinite(f) && f > 0) edges.push({ p: o, u: [Math.sin(a), Math.cos(a)], k });
+    else if (Number.isFinite(f) && f < 0) {
+      const v = [o[0] + f * Math.sin(a), o[1] + f * Math.cos(a)];
+      for (const e of ends) {
+        const dx = e.p[0] - v[0], dz = e.p[1] - v[1], n = Math.hypot(dx, dz);
+        edges.push({ p: e.p, u: [dx / n, dz / n], k, source: v });
+      }
+    } else {
+      for (const e of ends) { const t = a + e.tilt; edges.push({ p: e.p, u: [Math.sin(t), Math.cos(t)], k }); }
+    }
+  });
+  for (const r of edges) { // geometry.rays_at_depth
+    if (r.u[1] <= 1e-6) { r.angle = null; continue; }
+    const t = Math.max((zDeep - r.p[1]) / r.u[1], 0);
+    r.q = [r.p[0] + t * r.u[0], r.p[1] + t * r.u[1]];
+    r.angle = Math.atan2(r.q[0], r.q[1] - apexZ);
+  }
+  const edgeAngles = edges.filter((r) => r.angle != null).map((r) => r.angle);
+  const autoLo = Math.min(lo, ...edgeAngles), autoHi = Math.max(hi, ...edgeAngles);
+  let polarMargin = { auto: true, left: lo - autoLo, right: autoHi - hi };
+  edges.left = edges.find((r) => r.angle === autoLo) || null;
+  edges.right = edges.find((r) => r.angle === autoHi) || null;
+  const reaching = edges.filter((r) => r.q);
+  edges.xLeft = reaching.reduce((m, r) => (!m || r.q[0] < m.q[0] ? r : m), null);
+  edges.xRight = reaching.reduce((m, r) => (!m || r.q[0] > m.q[0] ? r : m), null);
+  if (s.polar_margin != null) polarMargin = { auto: false, left: s.polar_margin, right: s.polar_margin };
+
+  // Parameters.polar_limits / theta_range
+  let polarLimits;
+  if (scanline) {
+    polarLimits = [lo, hi];
+    src.polar_limits = "scanline: min / max of polar_angles, the columns' own angles";
+  } else if (s.polar_limits) { polarLimits = s.polar_limits.map(f32); src.polar_limits = "override"; }
+  else {
+    polarLimits = [lo - polarMargin.left, hi + polarMargin.right];
+    src.polar_limits = polarMargin.auto
+      ? "default: min / max of polar_angles, widened to each transmit's insonified region at zlims[1]"
+      : "default: min / max of polar_angles ± polar_margin";
+  }
+
+  // Parameters.grid_apex = (0, 0, -d)
+  let d;
+  const maxAbsAngle = Math.max(Math.abs(polarLimits[0]), Math.abs(polarLimits[1]));
+  if (dTx != null) { d = f32(dTx); src.grid_apex = dTxSrc; }
+  else if (maxAbsAngle > 0 && maxAbsAngle < Math.PI / 2) {
+    d = f32(apertureX / 2 / Math.tan(maxAbsAngle));
+    src.grid_apex = "virtual apex, sector edges through the array ends";
+  } else { d = 0; src.grid_apex = "the middle of the array (no sector)"; }
+
+  const rhoRange = [zlims[0] + d, zlims[1] + d]; // Parameters.rho_range = zlims - grid_apex[2]
+  const wavelength = f32(c / fc); // Parameters.wavelength
+
+  const kind = scanline ? (s.grid_type === "polar" ? "scanline-polar" : "scanline-cartesian") : s.grid_type;
+  const polarKind = kind === "polar" || kind === "scanline-polar";
+
+  // Parameters.xlims
+  let xlims;
+  if (s.xlims) { xlims = s.xlims.map(f32); src.xlims = "override"; }
+  else if (polarKind) {
+    const xsGrid = [];
+    for (const r of rhoRange) for (const t of polarLimits) xsGrid.push(r * Math.sin(t));
+    xlims = [arrMin(xsGrid), arrMax(xsGrid)];
+    src.xlims = "default: lateral extent of the polar grid";
+  } else if (kind === "scanline-cartesian") {
+    const colsX = tx.angles.map((a, k) => tx.origins[k][0] + (Number.isFinite(tx.focus[k]) ? tx.focus[k] : 0) * Math.sin(a));
+    xlims = [arrMin(colsX), arrMax(colsX)];
+    src.xlims = "default: lateral extent of the scanline columns";
+  } else {
+    const xsCover = [arrMin(xs), arrMax(xs)];
+    for (const r of edges) if (r.q) xsCover.push(r.q[0]);
+    xlims = [arrMin(xsCover), arrMax(xsCover)];
+    src.xlims = "default: what the transmits insonify at zlims[1], at least the probe width";
+  }
+
+  // Parameters.grid_size_x / grid_size_z
+  const pixel = wavelength / ppw;
+  let gx, gz;
+  if (scanline) { gx = s.n_tx; src.grid_size_x = "scanline: one column per transmit (n_tx)"; }
+  else if (s.grid_size_x != null) { gx = s.grid_size_x; src.grid_size_x = "override"; }
+  else if (kind === "polar") {
+    gx = Math.max(Math.ceil(((zDeep + d) * Math.abs(polarLimits[1] - polarLimits[0])) / pixel), 1);
+    src.grid_size_x = "default: outer arc length / (wavelength / pixels_per_wavelength)";
+  } else {
+    const width = s.xlims ? f32(xlims[1] - xlims[0]) : xlims[1] - xlims[0];
+    gx = Math.max(Math.ceil(width / pixel), 1);
+    src.grid_size_x = "default: xlims width / (wavelength / pixels_per_wavelength)";
+  }
+  if (s.grid_size_z != null) { gz = s.grid_size_z; src.grid_size_z = "override"; }
+  else {
+    gz = Math.max(Math.ceil(f32(zlims[1] - zlims[0]) / pixel), 1);
+    src.grid_size_z = "default: zlims depth / (wavelength / pixels_per_wavelength)";
+  }
+
+  // Parameters.grid -> point(i, j) = [x, z] for row i (depth) and column j
+  let point, theta = null;
+  if (polarKind) { // pixelgrid.polar_pixel_grid (scanline: one column per transmit angle)
+    const r0 = rhoRange[0], dr = (rhoRange[1] - r0) / Math.max(gz - 1, 1);
+    theta = kind === "polar" ? linspace(polarLimits[0], polarLimits[1], gx) : tx.angles;
+    point = (i, j) => { const r = r0 + i * dr; return [r * Math.sin(theta[j]), r * Math.cos(theta[j]) - d]; };
+  } else if (kind === "cartesian") { // pixelgrid.cartesian_pixel_grid
+    const xv = linspace(xlims[0], xlims[1] + 1e-10, gx), zv = linspace(zlims[0], zlims[1] + 1e-10, gz);
+    point = (i, j) => [xv[j], zv[i]];
+  } else { // pixelgrid.scanline_pixel_grid, cartesian
+    const depths = linspace(zlims[0], zlims[1], gz).map(f32);
+    const colX = tx.angles.map((a, j) => tx.origins[j][0] + (Number.isFinite(tx.focus[j]) ? tx.focus[j] : 0) * Math.sin(a));
+    point = (i, j) => [colX[j], depths[i]];
+  }
+
+  // Parameters.extent (every grid column is a straight segment, so its end rows bound it)
+  const gridExtent = [Infinity, -Infinity, Infinity, -Infinity]; // x0 x1 z0 z1
+  for (const i of gz > 1 ? [0, gz - 1] : [0]) {
+    for (let j = 0; j < gx; j++) {
+      const [x, z] = point(i, j);
+      gridExtent[0] = Math.min(gridExtent[0], x); gridExtent[1] = Math.max(gridExtent[1], x);
+      gridExtent[2] = Math.min(gridExtent[2], z); gridExtent[3] = Math.max(gridExtent[3], z);
+    }
+  }
+  const extent = gridExtent.slice();
+  const minDepth = polarKind && !curved ? Math.min(zlims[0], zlims[1]) : null; // flat-array crop
+  if (polarKind) {
+    extent[0] = xlims[0]; extent[1] = xlims[1];
+    if (minDepth != null) extent[2] = Math.max(extent[2], minDepth);
+  }
+
+  // display.compute_scan_convert_2d_coordinates, as Parameters.coordinates_2d calls it: the
+  // output window is the extent
+  let sc = null;
+  if (s.grid_type === "polar" && gx >= 2 && gz >= 2) {
+    const rho = linspace(rhoRange[0], rhoRange[1], gz).map(f32);
+    const th = linspace(polarLimits[0], polarLimits[1], gx).map(f32);
+    const resolution = (0.25 * (rho[0] + rho[gz - 1]) * (th[1] - th[0]) + (rho[1] - rho[0])) / 2;
+    sc = { x_lim: [extent[0], extent[1]], z_lim: [extent[2], extent[3]], resolution, rho, th };
+  }
+
+  return {
+    kind, src, pg, tx, apertureX, radius, curved, zlims, polarLimits, d, rayApex, steered,
+    virtualSource, fNumber, ppw, edges, polarMargin, acceptance, scanlineBlock, scanlineError,
+    rhoRange, wavelength, xlims, gx, gz, point, theta, gridExtent, extent, minDepth, sc,
+  };
+}
+
+/* ======================= end of the zea port ======================= */
+
+const MM = 1e3, DEG = 180 / Math.PI;
+const fmtMM = (v, p = 2) => (v == null || !Number.isFinite(v) ? String(v) : (v * MM).toFixed(p));
+const fmtDeg = (v) => (v * DEG).toFixed(1);
+const apexStr = (R) => `(0, 0, ${fmtMM(-R.d)}) mm`; // grid_apex, always on the central axis for now
+const pairMM = (a) => `(${fmtMM(a[0])}, ${fmtMM(a[1])}) mm`;
+const pairDeg = (a) => `(${fmtDeg(a[0])}°, ${fmtDeg(a[1])}°)`;
+
+/* -------------------- parity self-test against zea -------------------- */
+function runParity() {
+  let fixtures = [];
+  try { fixtures = JSON.parse(document.getElementById("zea-fixtures").textContent); } catch (e) { fixtures = []; }
+  const failures = [];
+  const near = (a, b, rtol, atol) => Math.abs(a - b) <= atol + rtol * Math.abs(b);
+  fixtures.forEach((fx, n) => {
+    const cfg = fx.config, e = fx.expected;
+    const label = `#${n + 1} ${cfg.probe} ${cfg.grid_type}${cfg.enable_scanline ? " scanline" : ""}`;
+    const bad = [];
+    let R;
+    try { R = resolve(cfg); } catch (err) { failures.push(`${label}: page threw ${err}`); return; }
+    if (e.scanline_error || R.scanlineError) {
+      if (!e.scanline_error) failures.push(`${label}: page rejects a scanline request zea accepts`);
+      else if (!R.scanlineError) failures.push(`${label}: zea rejects this scanline request, the page accepts it`);
+      return;
+    }
+    const num = (name, got, exp, rtol = 1e-4, atol = 1e-6) => {
+      if (!(Number.isFinite(got) && Number.isFinite(exp) && near(got, exp, rtol, atol))) bad.push(`${name}: page ${got} vs zea ${exp}`);
+    };
+    const int = (name, got, exp) => { if (got !== exp) bad.push(`${name}: page ${got} vs zea ${exp}`); };
+    num("grid_apex[2]", -R.d, e.grid_apex[2]);
+    num("f_number", R.fNumber, e.f_number);
+    e.xlims.forEach((v, k) => num(`xlims[${k}]`, R.xlims[k], v));
+    e.zlims.forEach((v, k) => num(`zlims[${k}]`, R.zlims[k], v));
+    e.rho_range.forEach((v, k) => num(`rho_range[${k}]`, R.rhoRange[k], v));
+    if (e.polar_limits) e.polar_limits.forEach((v, k) => num(`polar_limits[${k}]`, R.polarLimits[k], v));
+    int("grid_size_x", R.gx, e.grid_size_x);
+    int("grid_size_z", R.gz, e.grid_size_z);
+    int("grid rows", R.gz, e.grid_shape[0]);
+    int("grid columns", R.gx, e.grid_shape[1]);
+    [[0, 0], [1, 1], [2, 4], [3, 5]].forEach(([k, m]) => num(`extent[${m}]`, R.extent[k], e.extent[m]));
+    Object.entries(e.grid_samples).forEach(([key, xz]) => {
+      const [i, j] = key.split(",").map(Number);
+      const p = R.point(i, j);
+      num(`grid[${key}].x`, p[0], xz[0]);
+      num(`grid[${key}].z`, p[1], xz[1]);
+    });
+    if (e.scan_convert) {
+      if (!R.sc) bad.push("scan conversion: page computed none");
+      else {
+        e.scan_convert.x_lim.forEach((v, k) => num(`scan_convert x_lim[${k}]`, R.sc.x_lim[k], v));
+        e.scan_convert.z_lim.forEach((v, k) => num(`scan_convert z_lim[${k}]`, R.sc.z_lim[k], v));
+        num("scan_convert resolution", R.sc.resolution, e.scan_convert.resolution, 1e-3, 1e-7);
+      }
+    }
+    if (bad.length) failures.push(`${label}: ${bad.slice(0, 4).join("; ")}${bad.length > 4 ? ` (+${bad.length - 4} more)` : ""}`);
+  });
+
+  const dot = document.getElementById("parity-dot"), text = document.getElementById("parity-text");
+  const details = document.getElementById("parity-details");
+  if (!fixtures.length) {
+    dot.className = "dot warn"; text.textContent = "No zea reference values embedded";
+    details.textContent = "This copy has no reference values, so the port is unchecked.";
+    return;
+  }
+  const passed = fixtures.length - failures.length;
+  dot.className = `dot ${failures.length ? "bad" : "ok"}`;
+  text.textContent = failures.length
+    ? `${failures.length} of ${fixtures.length} zea reference cases differ`
+    : `Matches zea on ${passed} of ${fixtures.length} reference cases`;
+  details.innerHTML = "";
+  const p = document.createElement("p");
+  p.style.margin = "0 0 6px";
+  p.textContent = `On load, the page re-runs ${fixtures.length} configurations that were computed by zea itself (grid_apex, polar_limits, xlims, zlims, rho_range, f_number, grid sizes, grid points, extent, the scan-conversion window, and which scanline requests zea rejects), and compares them with its own port. Tolerance: 1 µm + 0.01 %.`;
+  details.appendChild(p);
+  if (failures.length) {
+    const ul = document.createElement("ul");
+    failures.forEach((f) => { const li = document.createElement("li"); li.textContent = f; ul.appendChild(li); });
+    details.appendChild(ul);
+  }
+}
+
+/* ----------------------------- state ----------------------------- */
+const CURVED_PITCH = (2 * 40e-3 * (30 / DEG)) / 127;
+// Overrides (zlims ... pixels_per_wavelength) are null: zea's defaults apply until you set one.
+const OVERRIDES = ["zlims", "polar_limits", "polar_margin", "xlims"];
+const BASE = {
+  probe: "flat", n_el: 64, pitch: 0.3e-3, radius: 40e-3,
+  n_tx: 1, tx_span_deg: 0, tx_kind: "plane", tx_focus: 60e-3, tx_origins: "zeros",
+  center_frequency: 2.5e6, sampling_frequency: 10e6, sound_speed: 1540, n_ax: 1300,
+  grid_type: "polar", enable_scanline: false,
+  zlims: null, polar_limits: null, polar_margin: null, xlims: null, grid_size_x: null, grid_size_z: null,
+  f_number: null, pixels_per_wavelength: null, element_width: null,
+};
+const PHASED = { probe: "flat", n_el: 64, pitch: 0.3e-3, center_frequency: 2.5e6, sampling_frequency: 10e6, n_ax: 1300, grid_type: "polar" };
+const CURVED = { probe: "curved", n_el: 128, pitch: CURVED_PITCH, radius: 40e-3, center_frequency: 3e6, sampling_frequency: 12e6, n_ax: 1560, grid_type: "polar" };
+const PRESETS = {
+  "Phased · lines from the middle": { ...PHASED, n_tx: 65, tx_span_deg: 45, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "zeros" },
+  "Phased · virtual-apex lines": { ...PHASED, n_tx: 65, tx_span_deg: 45, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "array" },
+  "Phased · virtual-apex scanlines": { ...PHASED, enable_scanline: true, n_tx: 65, tx_span_deg: 45, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "array" },
+  "Phased · plane waves": { ...PHASED, n_tx: 21, tx_span_deg: 20, tx_kind: "plane" },
+  "Phased · diverging waves": { ...PHASED, n_tx: 11, tx_span_deg: 30, tx_kind: "diverging", tx_focus: 20e-3 },
+  "Phased · one diverging wave": { ...PHASED, n_tx: 1, tx_kind: "diverging", tx_focus: 12e-3 },
+  "Curved · focused scanlines": {
+    ...CURVED, pitch: 0.508e-3, radius: 50e-3, center_frequency: 3.5e6, sampling_frequency: 14e6, n_ax: 1820,
+    enable_scanline: true, n_tx: 64, tx_span_deg: 35, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "array",
+  },
+  "Curved · docs figure": { ...CURVED, polar_limits: [-35 / DEG, 35 / DEG], zlims: [10e-3, 100e-3] },
+  "Linear · plane waves": { n_el: 128, pitch: 0.3e-3, center_frequency: 5e6, sampling_frequency: 20e6, n_ax: 1300, grid_type: "cartesian", n_tx: 11, tx_span_deg: 10 },
+};
+let state = { ...BASE, ...PRESETS["Phased · lines from the middle"] };
+const layers = { mesh: true, labels: true, transmits: true, cones: true, normals: false, extent: true, sc: true, leaders: true };
+
+function engineState(s) {
+  const focus = s.tx_kind === "plane" ? null : s.tx_kind === "diverging" ? -s.tx_focus : s.tx_focus;
+  return { ...s, focus_distance: focus };
+}
+
+/* ---------------------------- controls ---------------------------- */
+// The rail follows how a grid is made: load a file, pick a reconstruction, tune with overrides.
+const CONTROLS = [
+  { section: "1 · From the file", items: [
+    { type: "presets" },
+    { type: "sub", label: "Probe" },
+    { type: "seg", key: "probe", options: [["flat", "Flat"], ["curved", "Curved"]] },
+    { type: "range", key: "n_el", min: 8, max: 256, step: 1 },
+    { type: "range", key: "pitch", min: 0.05, max: 1, step: 0.005, unit: "mm", k: 1e-3, digits: 3 },
+    { type: "range", key: "radius", min: 10, max: 120, step: 0.5, unit: "mm", k: 1e-3, when: (s) => s.probe === "curved",
+      hint: "Builds the geometry only. zea fits the radius back from probe_geometry." },
+    { type: "sub", label: "Transmits" },
+    { type: "range", key: "n_tx", min: 1, max: 128, step: 1 },
+    { type: "range", key: "tx_span_deg", label: "polar_angles ±", min: 0, max: 80, step: 0.5, unit: "°" },
+    { type: "seg", key: "tx_kind", label: "focus_distances", options: [["plane", "plane"], ["diverging", "diverging"], ["focused", "focused"]] },
+    { type: "range", key: "tx_focus", label: "|focus_distances|", min: 1, max: 200, step: 1, unit: "mm", k: 1e-3,
+      when: (s) => s.tx_kind !== "plane" },
+    { type: "seg", key: "tx_origins", label: "transmit_origins", options: [["zeros", "array middle"], ["array", "spread over the array"]],
+      hint: "Spread: on a flat array the axes meet behind it, at a virtual apex; on a curved array the origins sit on the arc, along the element normals." },
+    { type: "sub", label: "Record length" },
+    { type: "range", key: "n_ax", min: 256, max: 8192, step: 4,
+      hint: "Sets the default depth, zlims[1] = sound_speed · n_ax / sampling_frequency / 2, and how far the default xlims may reach. sampling_frequency comes with the example file." },
+  ] },
+  { section: "2 · Reconstruction", items: [
+    { type: "seg", key: "grid_type", options: [["cartesian", "cartesian"], ["polar", "polar"]] },
+    { type: "check", key: "enable_scanline", blocked: (R) => R.scanlineBlock,
+      hint: "One column per transmit, beamformed with that transmit only." },
+    { type: "single", key: "f_number", min: 0, max: 4, step: 0.1, digits: 1, get: (R) => R.fNumber,
+      hint: "Receive cone of each element. The default comes from the element's −6 dB directivity at center_frequency. It doesn't move the grid, but pixels outside every element's cone stay dark (0 disables the cone)." },
+  ] },
+  { section: "3 · Overrides", items: [
+    { type: "reset" },
+    { type: "pair", key: "zlims", min: 0, max: 250, step: 0.5, unit: "mm", k: 1e-3, get: (R) => R.zlims },
+    { type: "pair", key: "polar_limits", min: -85, max: 85, step: 0.5, unit: "°", k: 1 / DEG, get: (R) => R.polarLimits,
+      when: (s) => s.grid_type === "polar" && !s.enable_scanline },
+    { type: "single", key: "polar_margin", min: 0, max: 45, step: 0.5, unit: "°", k: 1 / DEG,
+      get: (R) => (R.polarMargin ? Math.max(R.polarMargin.left, R.polarMargin.right) : 0),
+      when: (s) => s.grid_type === "polar" && !s.enable_scanline && s.polar_limits == null,
+      hint: "Proposal only. By default each side widens to the transmits' insonified region at zlims[1]; this sets a fixed angle instead." },
+    { type: "pair", key: "xlims", min: -200, max: 200, step: 0.5, unit: "mm", k: 1e-3, get: (R) => R.xlims },
+    { type: "note", text: "Only overrides that move the grid are listed. grid_size_x, grid_size_z and pixels_per_wavelength set the pixel density and stay at zea's defaults." },
+  ] },
+];
+
+const controlEls = []; // {item, root, sync(R)}
+
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children) if (c != null) el.append(c);
+  return el;
+}
+
+function display(item, v) {
+  if (v == null || !Number.isFinite(v)) return "—";
+  const x = v / (item.k || 1);
+  const digits = item.digits != null ? item.digits : item.step < 1 ? 1 : 0;
+  return `${x.toFixed(digits)}${item.unit ? (item.unit === "°" ? "°" : " " + item.unit) : ""}`;
+}
+
+function buildControls() {
+  const root = document.getElementById("controls");
+  for (const sec of CONTROLS) {
+    root.append(h("h2", {}, sec.section));
+    for (const item of sec.items) root.append(buildControl(item));
+  }
+}
+
+function buildControl(item) {
+  const id = `ctl-${item.key || item.type}`;
+  if (item.type === "presets") {
+    const wrap = h("div", { class: "presets", role: "group", "aria-label": "Example files" });
+    for (const name of Object.keys(PRESETS)) {
+      wrap.append(h("button", { type: "button", id: `preset-${name.replace(/\W+/g, "-")}`, onclick: () => {
+        state = { ...BASE, ...PRESETS[name] }; update();
+      } }, name));
+    }
+    return h("div", { class: "ctl" }, h("div", { class: "hint" }, "Example files: each sets the probe, transmits and acquisition, and clears overrides unless the example needs one."), wrap);
+  }
+  if (item.type === "sub") return h("div", { class: "sub" }, item.label);
+  if (item.type === "note") return h("div", { class: "ctl hint" }, item.text);
+  if (item.type === "reset") {
+    const btn = h("button", { type: "button", class: "btn", id, onclick: () => { for (const k of OVERRIDES) state[k] = null; update(); } }, "Clear all overrides");
+    const note = h("span", { class: "hint" });
+    const wrap = h("div", { class: "ctl reset-row" }, btn, note);
+    controlEls.push({ item, root: wrap, sync: () => {
+      const n = OVERRIDES.filter((k) => state[k] != null).length;
+      btn.disabled = n === 0;
+      note.textContent = n ? `${n} active` : "none active: this is zea's default grid";
+    } });
+    return wrap;
+  }
+  if (item.type === "seg") {
+    const seg = h("div", { class: "seg", role: "group", "aria-label": item.key });
+    const buttons = item.options.map(([value, label]) => {
+      const b = h("button", { type: "button", id: `${id}-${value}`, onclick: () => { state[item.key] = value; update(); } }, label);
+      seg.append(b);
+      return [value, b];
+    });
+    const wrap = h("div", { class: "ctl" }, item.label ? h("div", { class: "ctl-head" }, h("span", { class: "name" }, item.label)) : null, seg);
+    controlEls.push({ item, root: wrap, sync: () => buttons.forEach(([v, b]) => b.setAttribute("aria-pressed", String(state[item.key] === v))) });
+    return wrap;
+  }
+  if (item.type === "check") {
+    const input = h("input", { type: "checkbox", id, onchange: (e) => { state[item.key] = e.target.checked; update(); } });
+    const hint = h("div", { class: "hint" });
+    const wrap = h("div", { class: "ctl" }, h("label", { class: "check-row", for: id }, input, item.key), hint);
+    controlEls.push({ item, root: wrap, sync: (R) => {
+      input.checked = !!state[item.key];
+      const block = item.blocked ? item.blocked(R) : null;
+      input.disabled = !!block && !input.checked; // can always be switched off
+      hint.textContent = block ? `Not available: needs ${block}.` : item.hint || "";
+    } });
+    return wrap;
+  }
+  if (item.type === "range") {
+    const val = h("span", { class: "val" });
+    const input = h("input", { type: "range", id, min: item.min, max: item.max, step: item.step, oninput: (e) => {
+      state[item.key] = Number(e.target.value) * (item.k || 1); update();
+    } });
+    const wrap = h("div", { class: "ctl" },
+      h("div", { class: "ctl-head" }, h("label", { class: "name", for: id }, item.label || item.key), val),
+      input, item.hint ? h("div", { class: "hint" }, item.hint) : null);
+    controlEls.push({ item, root: wrap, sync: () => {
+      input.value = String(state[item.key] / (item.k || 1));
+      val.textContent = display(item, state[item.key]);
+    } });
+    return wrap;
+  }
+  // "single" and "pair": zea's default until overridden. Dragging a slider turns the override on.
+  const isPair = item.type === "pair";
+  const overrideBox = h("input", { type: "checkbox", id: `${id}-override` });
+  const val = h("span", { class: "val" });
+  const inputs = (isPair ? [0, 1] : [0]).map((n) => h("input", {
+    type: "range", id: `${id}-${n}`, min: item.min, max: item.max, step: item.step,
+    "aria-label": isPair ? `${item.key}[${n}]` : item.key,
+  }));
+  const wrap = h("div", { class: "ctl" },
+    h("div", { class: "ctl-head" }, h("span", { class: "name" }, item.key),
+      h("label", { class: "auto", for: `${id}-override` }, overrideBox, "override"), val),
+    ...inputs);
+  let lastR = null;
+  overrideBox.addEventListener("change", () => {
+    if (!overrideBox.checked) state[item.key] = null;
+    else {
+      const current = lastR ? item.get(lastR) : null; // start from the value zea's default gave
+      state[item.key] = isPair ? [current[0], current[1]] : current;
+    }
+    update();
+  });
+  inputs.forEach((input, n) => input.addEventListener("input", () => {
+    const v = Number(input.value) * (item.k || 1);
+    if (isPair) {
+      const cur = state[item.key] ? [...state[item.key]] : [...item.get(lastR)];
+      cur[n] = v;
+      if (cur[0] > cur[1]) cur[1 - n] = v; // keep lower <= upper
+      state[item.key] = cur;
+    } else state[item.key] = item.int ? Math.round(v) : v;
+    update();
+  }));
+  controlEls.push({ item, root: wrap, sync: (R) => {
+    lastR = R;
+    const isAuto = state[item.key] == null;
+    overrideBox.checked = !isAuto;
+    wrap.classList.toggle("is-auto", isAuto);
+    const shown = isAuto ? item.get(R) : state[item.key];
+    const arr = isPair ? shown : [shown];
+    inputs.forEach((input, n) => { input.value = String(arr[n] / (item.k || 1)); });
+    val.textContent = isPair ? `${display(item, arr[0])} … ${display(item, arr[1])}` : display(item, arr[0]);
+  } });
+  return wrap;
+}
+
+function syncControls(R) {
+  for (const c of controlEls) {
+    c.root.hidden = c.item.when ? !c.item.when(state) : false;
+    c.sync(R);
+  }
+}
+
+/* ----------------------------- checks ----------------------------- */
+function strided(n, m) {
+  if (n <= m) return Array.from({ length: n }, (_, i) => i);
+  return Array.from({ length: m }, (_, k) => Math.round((k * (n - 1)) / (m - 1)));
+}
+
+function behindArray(R, x, z) {
+  return R.curved ? Math.hypot(x, z + R.radius) < R.radius - 1e-9 : z < -1e-9;
+}
+
+function computeChecks(R) {
+  const out = [];
+  const rows = strided(R.gz, 120), cols = strided(R.gx, 120);
+  const polar = R.kind === "polar" || R.kind === "scanline-polar";
+
+  if (R.scanlineError) {
+    out.push({ s: "bad", t: "enable_scanline is not allowed here",
+      d: `Scanline imaging needs ${R.scanlineError}; zea would raise. The page shows the pixel grid instead.` });
+  }
+
+  if (polar && Math.abs(R.polarLimits[1] - R.polarLimits[0]) < 1e-6) {
+    out.push({ s: "bad", t: "The polar grid has no width",
+      d: `<code>polar_limits</code> is ${pairDeg(R.polarLimits)}: the transmits are all unsteered, so the default spans no angle. Override <code>polar_limits</code>, or use a cartesian grid.` });
+  }
+
+  if (R.sc) {
+    let err = 0;
+    for (const i of rows) for (const j of cols) {
+      const [x, z] = R.point(i, j);
+      const r = R.sc.rho[i], t = R.sc.th[j];
+      const zz = r / Math.sqrt(1 + Math.tan(t) ** 2);
+      err = Math.max(err, Math.hypot(x - zz * Math.tan(t), z - (zz - R.d)));
+    }
+    const ok = err < 0.5 * R.sc.resolution;
+    out.push({ s: ok ? "ok" : "bad", t: "Scan conversion puts pixels where the grid has them",
+      d: ok ? `Largest offset ${fmtMM(err, 3)} mm, below half an output pixel.`
+        : `Pixels land up to <code>${fmtMM(err)} mm</code> from their grid position. Scan conversion assumes every column starts at <code>grid_apex</code> and that every row sits at one radius from it (<code>rho_range</code>), which this grid does not satisfy.` });
+  }
+
+  let behind = 0, worst = 0, total = 0;
+  for (const i of rows) for (const j of cols) {
+    const [x, z] = R.point(i, j);
+    if (R.minDepth != null && z < R.minDepth - 1e-12) continue; // cropped away
+    total++;
+    if (behindArray(R, x, z)) {
+      behind++;
+      worst = Math.max(worst, R.curved ? R.radius - Math.hypot(x, z + R.radius) : -z);
+    }
+  }
+  out.push(behind
+    ? { s: "bad", t: "Pixels behind the array", d: `${((100 * behind) / Math.max(total, 1)).toFixed(1)} % of the shown grid lies behind the array surface, up to <code>${fmtMM(worst)} mm</code>.` }
+    : { s: "ok", t: "No pixels behind the array", d: "Every shown pixel is in front of the array surface." });
+
+  // Receive side: zea's f-number mask is a hard cone around each element's normal
+  if (R.fNumber > 0) {
+    const cosA = Math.cos(Math.atan(1 / (2 * R.fNumber + 1e-7)));
+    const nrm = elementNormals(R.pg);
+    const e = R.extent;
+    let dark = 0, shown = 0;
+    for (const i of strided(R.gz, 50)) for (const j of strided(R.gx, 50)) {
+      const [x, z] = R.point(i, j);
+      if (x < e[0] - 1e-9 || x > e[1] + 1e-9 || z < e[2] - 1e-9 || z > e[3] + 1e-9) continue; // not in the image
+      const onOrBehind = R.curved ? Math.hypot(x, z + R.radius) <= R.radius + 1e-9 : z <= 1e-9;
+      if (onOrBehind) continue; // reported by the "behind the array" check
+      shown++;
+      let heard = false;
+      for (let k = 0; k < R.pg.length && !heard; k++) {
+        const dx = x - R.pg[k][0], dz = z - R.pg[k][1];
+        heard = (dx * nrm[k][0] + dz * nrm[k][1]) / (Math.hypot(dx, dz) + 1e-6) >= cosA;
+      }
+      if (!heard) dark++;
+    }
+    out.push(dark
+      ? { s: "warn", t: "Every pixel is inside some element's receive cone",
+        d: `${((100 * dark) / Math.max(shown, 1)).toFixed(1)} % of the image is outside every element's cone at <code>f_number = ${R.fNumber.toFixed(1)}</code>, so it stays dark. A lower f_number (0 disables the cone) uses those pixels.` }
+      : { s: "ok", t: "Every pixel is inside some element's receive cone", d: `At f_number = ${R.fNumber.toFixed(1)}, every image pixel is heard by at least one element.` });
+  }
+
+  if (polar && R.src.xlims === "override") {
+    const wider = R.xlims[0] < R.gridExtent[0] && R.xlims[1] > R.gridExtent[1];
+    out.push({ s: "info", t: "xlims sets the image width",
+      d: `The scan-converted image spans <code>${pairMM(R.xlims)}</code>; the grid spans ${pairMM([R.gridExtent[0], R.gridExtent[1]])}, so the image is ${wider ? "padded" : "cropped"}.` });
+  } else if (polar) {
+    const dx = Math.max(Math.abs(R.xlims[0] - R.gridExtent[0]), Math.abs(R.xlims[1] - R.gridExtent[1]));
+    const okX = dx < 1e-4;
+    out.push({ s: okX ? "ok" : "warn", t: "xlims describes the polar grid",
+      d: okX ? "xlims matches the grid's lateral extent."
+        : `xlims is <code>${pairMM(R.xlims)}</code>, but the grid spans <code>${pairMM([R.gridExtent[0], R.gridExtent[1]])}</code>. A polar grid never reads xlims${R.src.grid_size_x.startsWith("default") ? ", yet its number of rays (grid_size_x) is derived from it" : ""}.` });
+  }
+
+  const top = R.sc ? R.sc.z_lim[0] : R.extent[2];
+  const dz = top - R.zlims[0];
+  out.push({ s: Math.abs(dz) < 1e-6 ? "ok" : "info", t: "Image starts at zlims[0]",
+    d: Math.abs(dz) < 1e-6 ? `The image top is at zlims[0] = ${fmtMM(R.zlims[0])} mm.`
+      : `The image top is at <code>${fmtMM(top)} mm</code>, ${fmtMM(Math.abs(dz))} mm ${dz < 0 ? "above" : "below"} zlims[0]${R.curved && polar ? ", because the sector follows the curved array" : polar ? ", because the first row is an arc around the apex" : ""}.` });
+
+  if (R.kind === "polar" && !R.curved) {
+    const [xl, zl] = R.pg[0], [xr, zr] = R.pg[R.pg.length - 1];
+    const dist = (xe, ze, t) => Math.abs(xe * Math.cos(t) - (ze + R.d) * Math.sin(t));
+    const a = dist(xl, zl, R.polarLimits[0]), b = dist(xr, zr, R.polarLimits[1]);
+    const ok = Math.max(a, b) < 0.5 * state.pitch;
+    out.push({ s: ok ? "ok" : "info", t: "Sector edges pass through the array ends",
+      d: `Edge rays miss the end elements by <code>${fmtMM(a)}</code> (left) and <code>${fmtMM(b)} mm</code> (right).` });
+  }
+
+  // Where the transmits fan out from, against where the grid fans out from. In scanline mode the
+  // columns are the transmits, so a mismatch breaks scan conversion; otherwise it is a design question.
+  if (polar) {
+    const scan = R.kind === "scanline-polar";
+    const miss = scan ? "bad" : "info";
+    if (!R.steered) {
+      if (R.virtualSource) {
+        const match = Math.abs(R.virtualSource.d - R.d) < 1e-4;
+        out.push({ s: match ? "ok" : "info", t: "Grid fans out from the diverging wave's virtual source",
+          d: match ? `Both sit ${fmtMM(R.d)} mm behind the array.`
+            : `The wave fans out from ${fmtMM(R.virtualSource.d)} mm behind the array, the grid from <code>grid_apex = ${apexStr(R)}</code>.` });
+      } else if (scan) {
+        out.push({ s: "warn", t: "Transmits have no common apex", d: "All transmits point straight down, so their axes never meet." });
+      }
+    } else if (!R.rayApex.concurrent) {
+      out.push({ s: miss, t: "Transmit axes meet in one point",
+        d: `They cross x = 0 over a ${fmtMM(R.rayApex.spread)} mm range${scan ? ", so no single apex (and no rho_range / theta_range) describes this scan" : ", so the transmits define no apex"}.` });
+    } else {
+      const match = Math.abs(Math.max(R.rayApex.d, 0) - R.d) < 1e-4;
+      out.push({ s: match ? "ok" : miss, t: "Grid fans out from where the transmits meet",
+        d: match ? `The transmit axes and the grid both meet ${fmtMM(R.d)} mm behind the array.`
+          : `The transmit axes meet ${fmtMM(R.rayApex.d)} mm behind the array, the grid fans out from <code>grid_apex = ${apexStr(R)}</code>.` });
+    }
+  }
+  return out;
+}
+
+/* ------------------------------ values ------------------------------ */
+function valueRows(R) {
+  const rows = [
+    ["aperture_size[0]", `${fmtMM(R.apertureX)} mm`, "max − min of probe_geometry x"],
+    ["radius of curvature", R.curved ? `${fmtMM(R.radius)} mm` : "∞ (flat)", "fit_curved_probe_radius(probe_geometry)"],
+    ["grid_apex", apexStr(R), R.src.grid_apex],
+    ["zlims", pairMM(R.zlims), R.src.zlims],
+    ["xlims", pairMM(R.xlims), R.src.xlims],
+    ["polar_limits", pairDeg(R.polarLimits), R.src.polar_limits],
+    ["theta_range", pairDeg(R.polarLimits), "default: polar_limits"],
+    ["rho_range", pairMM(R.rhoRange), "zlims − grid_apex[2]: radii from the apex"],
+    ["grid_size_x", String(R.gx), R.src.grid_size_x],
+    ["grid_size_z", String(R.gz), R.src.grid_size_z],
+    ["f_number", R.fNumber.toFixed(2), R.src.f_number],
+    ...(R.acceptance ? [["element acceptance", `±${fmtDeg(R.acceptance.angle)}°`,
+      `−6 dB of sinc(element_width / wavelength · sin θ); element_width = 0.9 · pitch = ${fmtMM(R.acceptance.width, 3)} mm, wavelength = ${fmtMM(R.wavelength, 3)} mm`]] : []),
+    ["pixels_per_wavelength", String(R.ppw), R.src.pixels_per_wavelength],
+    ["grid", `${R.kind} (${R.gz} × ${R.gx})`, "pixel grid used by the beamformer"],
+    ["extent (x)", pairMM([R.extent[0], R.extent[1]]), "min / max of grid x"],
+    ["extent (z)", pairMM([R.extent[2], R.extent[3]]), R.minDepth != null ? "min / max of grid z, from zlims[0] on a flat array" : "min / max of grid z"],
+  ];
+  if (R.kind === "polar" && !R.src.polar_limits.startsWith("override")) {
+    rows.push(["polar_margin", `${fmtDeg(R.polarMargin.left)}° left, ${fmtDeg(R.polarMargin.right)}° right`,
+      R.polarMargin.auto ? "auto: edges of the transmits' insonified region at zlims[1]" : "override"]);
+  }
+  if (R.kind === "polar" || R.kind === "scanline-polar") rows.push(["image starts at", R.minDepth == null ? "the top of the grid" : `zlims[0] = ${fmtMM(R.minDepth)} mm`, R.minDepth == null ? "curved array: the sector follows the array" : "flat array: crops what lies behind the array"]);
+  if (R.sc) {
+    rows.push(["scan_convert x_lim", pairMM(R.sc.x_lim), "compute_scan_convert_2d_coordinates"]);
+    rows.push(["scan_convert z_lim", pairMM(R.sc.z_lim), "depths below the transducer (apex frame + grid_apex[2])"]);
+    rows.push(["scan_convert resolution", `${fmtMM(R.sc.resolution, 3)} mm`, "mean of arc step at ¼ depth and radial step"]);
+  }
+  if (R.rayApex) rows.push(["transmit axes meet", R.rayApex.concurrent ? `${fmtMM(R.rayApex.d)} mm behind the array` : "not in one point",
+    `where each steered axis crosses x = 0; spread ${fmtMM(R.rayApex.spread)} mm`]);
+  if (R.virtualSource) rows.push(["virtual source", `${fmtMM(R.virtualSource.d)} mm behind the array`, "transmit_origins + focus_distances of the diverging waves"]);
+  return rows;
+}
+
+let previousValues = {};
+function renderValues(R) {
+  const table = document.getElementById("vals");
+  table.innerHTML = "";
+  const next = {};
+  for (const [k, v, s] of valueRows(R)) {
+    next[k] = v;
+    const tr = h("tr", { class: previousValues[k] != null && previousValues[k] !== v ? "changed" : "" },
+      h("td", { class: "k" }, k), h("td", { class: "v" }, v),
+      h("td", { class: "src" }, s));
+    table.append(tr);
+  }
+  previousValues = next;
+}
+
+function renderChecks(R) {
+  const ul = document.getElementById("checks");
+  ul.innerHTML = "";
+  for (const c of computeChecks(R)) {
+    const li = h("li", {}, h("span", { class: `dot ${c.s === "info" ? "" : c.s}` }), h("span", { class: "t" }, c.t));
+    const d = h("span", { class: "d" });
+    d.innerHTML = c.d;
+    li.append(d);
+    ul.append(li);
+  }
+}
+
+/* ------------------------------ figure ------------------------------ */
+const SVGNS = "http://www.w3.org/2000/svg";
+function s(tag, attrs, parent) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+
+function drawFigure(R) {
+  const svg = document.getElementById("fig");
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const cols = strided(R.gx, 90), rowsAll = strided(R.gz, 90);
+  const P = (i, j) => R.point(i, j);
+
+  // Bounding box in metres of everything worth keeping in view
+  const bb = [Infinity, -Infinity, Infinity, -Infinity];
+  const grow = (x, z) => { bb[0] = Math.min(bb[0], x); bb[1] = Math.max(bb[1], x); bb[2] = Math.min(bb[2], z); bb[3] = Math.max(bb[3], z); };
+  for (const j of cols) { grow(...P(0, j)); grow(...P(R.gz - 1, j)); }
+  for (const [x, z] of R.pg) grow(x, z);
+  const hasApex = R.kind === "polar" || R.kind === "scanline-polar"; // a cartesian grid has no apex
+  if (hasApex) grow(0, -R.d);
+  if (layers.transmits && R.rayApex && R.rayApex.concurrent) grow(0, -Math.max(R.rayApex.d, 0));
+  if (layers.transmits && R.virtualSource) grow(0, -R.virtualSource.d);
+  grow(0, 0);
+  if (layers.leaders) { grow(R.xlims[0], R.zlims[1]); grow(R.xlims[1], R.zlims[1]); grow(0, R.zlims[0]); }
+  if (R.sc && layers.sc) { grow(R.sc.x_lim[0], R.sc.z_lim[0]); grow(R.sc.x_lim[1], R.sc.z_lim[1]); }
+  const span = Math.max(bb[1] - bb[0], bb[3] - bb[2], 1e-3);
+  const pad = 0.03 * span;
+  bb[0] -= pad; bb[1] += pad; bb[2] -= pad + 0.04 * span; bb[3] += pad;
+
+  const W = Math.max(320, svg.parentElement.clientWidth || 800);
+  const ML = layers.leaders ? 128 : 24, MR = 60, MT = 46, MB = layers.leaders ? 46 : 20;
+  const maxH = Math.max(340, Math.min(window.innerHeight * 0.74, 920));
+  const scale = Math.min((W - ML - MR) / (bb[1] - bb[0]), (maxH - MT - MB) / (bb[3] - bb[2]));
+  const H = (bb[3] - bb[2]) * scale + MT + MB;
+  const offX = ML + ((W - ML - MR) - (bb[1] - bb[0]) * scale) / 2;
+  const X = (x) => offX + (x - bb[0]) * scale;
+  const Y = (z) => MT + (z - bb[2]) * scale;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+  svg.setAttribute("height", H);
+
+  const defs = s("defs", {}, svg);
+  const marker = s("marker", { id: "arr", viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
+  s("path", { d: "M0,1 L10,5 L0,9 z" }, marker);
+  const hatch = s("pattern", { id: "hatch", width: "6", height: "6", patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+  s("line", { x1: "0", y1: "0", x2: "0", y2: "6", class: "hatch-line" }, hatch);
+
+  const line = (x1, z1, x2, z2, cls, extra) => s("line", { x1: X(x1), y1: Y(z1), x2: X(x2), y2: Y(z2), class: cls, ...(extra || {}) }, svg);
+  const poly = (pts, cls, extra) => s("polyline", { points: pts.map(([x, z]) => `${X(x).toFixed(1)},${Y(z).toFixed(1)}`).join(" "), class: cls, ...(extra || {}) }, svg);
+  const text = (px, py, str, cls, anchor, extra) => {
+    const t = s("text", { x: px, y: py, class: `halo ${cls || ""}`, "text-anchor": anchor || "start", ...(extra || {}) }, svg);
+    t.textContent = str;
+    return t;
+  };
+
+  // Reference lines
+  line(bb[0], 0, bb[1], 0, "faint-line", { "stroke-dasharray": "5 4" });
+  line(0, bb[2], 0, bb[3], "faint-line", { "stroke-dasharray": "5 4" });
+  text(X(bb[0]) + 2, Y(0) - 5, "z = 0", "faint");
+  text(X(0) + 5, Y(bb[2]) + 12, "x = 0", "faint");
+
+  // Rulers in mm along the top (x) and right (z) edges, so the scale survives auto-fitting
+  const niceStep = (span, target) => {
+    const raw = span / target, p = 10 ** Math.floor(Math.log10(raw));
+    return [1, 2, 5, 10].map((m) => m * p).find((v) => v >= raw);
+  };
+  const ruler = (from, to, at, horizontal) => {
+    const step = niceStep((to - from) * MM, horizontal ? 8 : 6) / MM;
+    const digits = step * MM < 1 ? 1 : 0;
+    if (horizontal) s("line", { x1: X(from), y1: at, x2: X(to), y2: at, class: "ruler" }, svg);
+    else s("line", { x1: at, y1: Y(from), x2: at, y2: Y(to), class: "ruler" }, svg);
+    for (let k = Math.ceil(from / step - 1e-9); k * step <= to + 1e-12; k++) {
+      const v = k * step, label = (v * MM).toFixed(digits);
+      if (horizontal) {
+        s("line", { x1: X(v), y1: at, x2: X(v), y2: at + 5, class: "ruler" }, svg);
+        text(X(v), at - 4, label, "ruler-text", "middle");
+      } else {
+        s("line", { x1: at, y1: Y(v), x2: at - 5, y2: Y(v), class: "ruler" }, svg);
+        text(at + 5, Y(v) + 3.5, label, "ruler-text");
+      }
+    }
+  };
+  ruler(bb[0], bb[1], MT - 16, true);
+  ruler(bb[2], bb[3], X(bb[1]) + 14, false);
+  text(X(bb[1]) + 10, MT - 20, "x, mm", "ruler-text");
+  text(X(bb[1]) + 10, Y(bb[3]) + 16, "z, mm", "ruler-text");
+
+  // Scan-converted window and Parameters.extent
+  if (R.sc && layers.sc) {
+    s("rect", { x: X(R.sc.x_lim[0]), y: Y(R.sc.z_lim[0]), width: (R.sc.x_lim[1] - R.sc.x_lim[0]) * scale, height: (R.sc.z_lim[1] - R.sc.z_lim[0]) * scale, class: "sc" }, svg);
+    if (layers.labels) text(X(R.sc.x_lim[0]) + 4, Y(R.sc.z_lim[1]) - 6, "scan-converted image (x_lim × z_lim)", "faint");
+  }
+  if (layers.extent) {
+    const e = R.extent;
+    s("rect", { x: X(e[0]), y: Y(e[2]), width: (e[1] - e[0]) * scale, height: (e[3] - e[2]) * scale, class: "extent" }, svg);
+    if (layers.labels) text(X(e[1]) - 4, Y(e[3]) - 6, "Parameters.extent", "faint accent-text", "end");
+  }
+
+  // Grid: fill, mesh, outline
+  const outline = [];
+  for (const j of cols) outline.push(P(0, j));
+  for (const i of rowsAll) outline.push(P(i, R.gx - 1));
+  for (const j of [...cols].reverse()) outline.push(P(R.gz - 1, j));
+  for (const i of [...rowsAll].reverse()) outline.push(P(i, 0));
+  s("polygon", { points: outline.map(([x, z]) => `${X(x).toFixed(1)},${Y(z).toFixed(1)}`).join(" "), class: "grid-fill" }, svg);
+  if (layers.mesh) {
+    for (const i of strided(R.gz, 12)) poly(cols.map((j) => P(i, j)), "mesh");
+    for (const j of strided(R.gx, R.kind.startsWith("scanline") ? 24 : 16)) poly([P(0, j), P(R.gz - 1, j)], "mesh");
+  }
+  poly([...outline, outline[0]], "outline");
+
+  // Grid parts outside the image window (a flat array's top at zlims[0], or an xlims override) are hatched
+  const ge = R.gridExtent, ex = R.extent;
+  if (ge[0] < ex[0] - 1e-9 || ge[1] > ex[1] + 1e-9 || ge[2] < ex[2] - 1e-9 || ge[3] > ex[3] + 1e-9) {
+    const clip = s("clipPath", { id: "outside-image" }, defs);
+    s("path", { d: `M0,0 H${W} V${H} H0 Z M${X(ex[0])},${Y(ex[2])} V${Y(ex[3])} H${X(ex[1])} V${Y(ex[2])} Z`, "clip-rule": "evenodd" }, clip);
+    s("polygon", { points: outline.map(([x, z]) => `${X(x).toFixed(1)},${Y(z).toFixed(1)}`).join(" "), fill: "url(#hatch)", "clip-path": "url(#outside-image)" }, svg);
+  }
+  if (R.minDepth != null && ge[2] < R.minDepth - 1e-9) {
+    line(ge[0], R.minDepth, ge[1], R.minDepth, "crop-line");
+    if (layers.labels) text(X(ge[1]) + 6, Y(R.minDepth) + 4, "image top (zlims[0])", "code bad-text");
+  }
+
+  // Receive cones of the two end elements (zea's f-number mask)
+  if (layers.cones && R.fNumber > 0) {
+    const alpha = Math.atan(1 / (2 * R.fNumber));
+    const nrm = elementNormals(R.pg);
+    const zEnd = bb[3];
+    [[0, -1], [R.pg.length - 1, 1]].forEach(([k, sgn]) => {
+      const t = Math.atan2(nrm[k][0], nrm[k][1]) + sgn * alpha;
+      const [px, pz] = R.pg[k];
+      if (Math.cos(t) <= 1e-6) return;
+      const len = (zEnd - pz) / Math.cos(t);
+      line(px, pz, px + len * Math.sin(t), pz + len * Math.cos(t), "cone");
+      if (layers.labels && sgn > 0) text(X(px + len * Math.sin(t)) - 4, Y(zEnd) - 6, `receive cone (f_number = ${R.fNumber.toFixed(1)})`, "faint", "end");
+    });
+  }
+
+  // Pixels behind the array
+  for (const i of strided(R.gz, 60)) for (const j of strided(R.gx, 60)) {
+    const [x, z] = P(i, j);
+    if (R.minDepth != null && z < R.minDepth - 1e-12) continue;
+    if (behindArray(R, x, z)) s("circle", { cx: X(x), cy: Y(z), r: 1.6, class: "behind" }, svg);
+  }
+
+  // Edge rays back to the apex (pixel polar grids)
+  if (R.kind === "polar") {
+    line(0, -R.d, ...P(0, 0), "faint-line", { "stroke-dasharray": "4 3" });
+    line(0, -R.d, ...P(0, R.gx - 1), "faint-line", { "stroke-dasharray": "4 3" });
+  }
+
+  // Transmits
+  if (layers.transmits) {
+    const L = R.zlims[1];
+    const idx = strided(R.tx.angles.length, 40);
+    for (const k of idx) {
+      const a = R.tx.angles[k], [ox, oz] = R.tx.origins[k], f = R.tx.focus[k];
+      line(ox, oz, ox + L * Math.sin(a), oz + L * Math.cos(a), "tx");
+      // A transmit leaving off-axis: extend its axis back to where it crosses x = 0
+      const back = Math.abs(a) > 1e-6 ? ox / Math.tan(a) - oz : 0;
+      if (Math.abs(ox) > 1e-9 && back > 1e-6 && back < 2 * span) line(ox, oz, 0, -back, "tx", { "stroke-dasharray": "2 3" });
+      if (Number.isFinite(f) && f !== 0) {
+        const fx = ox + f * Math.sin(a), fz = oz + f * Math.cos(a);
+        if (f < 0) line(fx, fz, ox, oz, "tx", { "stroke-dasharray": "2 3" });
+        s("circle", { cx: X(fx), cy: Y(fz), r: 2.2, class: "tx-dot" }, svg);
+      }
+      s("circle", { cx: X(ox), cy: Y(oz), r: 1.8, class: "tx-dot" }, svg);
+    }
+  }
+
+  // Proposal: the outermost edge rays of the insonified region, which set polar_limits (polar)
+  // or xlims (cartesian). Drawn only where they widen the grid beyond the transmits / the probe.
+  if (layers.transmits && R.edges && !R.kind.startsWith("scanline")) {
+    const probeX = R.pg.map((p) => p[0]);
+    let sides = [];
+    if (R.kind === "polar" && R.polarMargin && R.polarMargin.auto && !R.src.polar_limits.startsWith("override")) {
+      sides = [[R.edges.left, R.polarMargin.left > 1e-6], [R.edges.right, R.polarMargin.right > 1e-6]];
+    } else if (R.kind === "cartesian" && R.src.xlims !== "override") {
+      sides = [[R.edges.xLeft, R.edges.xLeft && R.edges.xLeft.q[0] < arrMin(probeX) - 1e-9],
+        [R.edges.xRight, R.edges.xRight && R.edges.xRight.q[0] > arrMax(probeX) + 1e-9]];
+    }
+    sides.forEach(([r, show], n) => {
+      if (!r || !r.q || !show) return;
+      if (r.source) line(r.source[0], r.source[1], r.p[0], r.p[1], "tx", { "stroke-dasharray": "2 3" });
+      line(r.p[0], r.p[1], r.q[0], r.q[1], "edge-ray");
+      if (layers.labels && n === 1) text(X(r.q[0]) - 4, Y(r.q[1]) + 15, "edge of the insonified region", "faint accent-text", "end");
+    });
+  }
+
+  // Element normals
+  if (layers.normals) {
+    const nrm = elementNormals(R.pg);
+    const len = 0.06 * span;
+    for (const k of strided(R.pg.length, 17)) {
+      const [x, z] = R.pg[k], [nx, nz] = nrm[k];
+      line(x, z, x + len * nx, z + len * nz, "normal");
+    }
+  }
+
+  // Probe
+  poly(R.pg, "probe");
+  for (const k of strided(R.pg.length, 11)) s("circle", { cx: X(R.pg[k][0]), cy: Y(R.pg[k][1]), r: 2.3, class: "ink-fill" }, svg);
+
+  // grid_apex
+  if (hasApex) s("circle", { cx: X(0), cy: Y(-R.d), r: 3.6, class: "ink-fill" }, svg);
+  if (layers.labels) {
+    const [xe, ze] = R.pg[R.pg.length - 1];
+    s("line", { x1: X(xe) + 2, y1: Y(ze) - 2, x2: X(xe) + 18, y2: Y(ze) - 16, class: "ink", "stroke-width": 0.8 }, svg);
+    text(X(xe) + 20, Y(ze) - 18, "probe_geometry", "code");
+    if (!hasApex) {
+      // nothing to mark: a cartesian grid has no apex
+    } else if (R.d * scale > 14) {
+      const px = X(0) - 12;
+      s("line", { x1: px, y1: Y(0), x2: px, y2: Y(-R.d), class: "ink", "stroke-width": 1, "marker-start": "url(#arr)", "marker-end": "url(#arr)" }, svg);
+      s("line", { x1: X(0) - 3, y1: Y(-R.d), x2: px - 4, y2: Y(-R.d), class: "ink", "stroke-width": 0.6 }, svg);
+      text(px - 6, (Y(0) + Y(-R.d)) / 2 + 4, `${fmtMM(R.d)} mm`, "code", "end");
+      text(X(0) + 8, Y(-R.d) + 4, `grid_apex = ${apexStr(R)}`, "code");
+    } else {
+      text(X(0) - 8, Y(-R.d) - 8, `grid_apex = ${apexStr(R)}`, "code", "end");
+    }
+  }
+
+  const polarLike = R.kind === "polar";
+  if (layers.labels && polarLike) {
+    // polar_limits: signed angles from the central axis
+    const rA = 0.35 * R.rhoRange[1];
+    const arc = (t0, t1) => Array.from({ length: 41 }, (_, k) => { const t = t0 + ((t1 - t0) * k) / 40; return [rA * Math.sin(t), rA * Math.cos(t) - R.d]; });
+    R.polarLimits.forEach((t, k) => {
+      if (Math.abs(t) < 1e-4) return;
+      poly(arc(0, t), "ink", { "stroke-width": 1, "marker-end": "url(#arr)" });
+      const tm = t / 2, lx = (rA + 0.02 * span) * Math.sin(tm), lz = (rA + 0.02 * span) * Math.cos(tm) - R.d;
+      text(X(lx) + (t < 0 ? -4 : 4), Y(lz) + 14, `polar_limits[${k}] = ${fmtDeg(t)}°`, "code", t < 0 ? "end" : "start");
+    });
+
+    // rho_range: dimension lines along the wider edge ray
+    const te = Math.abs(R.polarLimits[1]) >= Math.abs(R.polarLimits[0]) ? R.polarLimits[1] : R.polarLimits[0];
+    const sgn = te >= 0 ? 1 : -1;
+    const dir = [Math.sin(te), Math.cos(te)], outw = [sgn * Math.cos(te), -sgn * Math.sin(te)];
+    let rot = Math.atan2(dir[1], dir[0]) * DEG;
+    if (rot > 90) rot -= 180;
+    if (rot < -90) rot += 180;
+    [[R.rhoRange[0], 16, 0], [R.rhoRange[1], 34, 1]].forEach(([r, offPx, k]) => {
+      const off = offPx / scale;
+      const a = [outw[0] * off, -R.d + outw[1] * off];
+      const b = [r * dir[0] + outw[0] * off, r * dir[1] - R.d + outw[1] * off];
+      line(0, -R.d, a[0], a[1], "ink", { "stroke-width": 0.5 });
+      line(r * dir[0], r * dir[1] - R.d, b[0], b[1], "ink", { "stroke-width": 0.5 });
+      if (r * scale > 12) line(a[0], a[1], b[0], b[1], "ink", { "stroke-width": 1, "marker-start": "url(#arr)", "marker-end": "url(#arr)" });
+      const mid = r * scale > 150 ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : [b[0] + dir[0] * (60 / scale), b[1] + dir[1] * (60 / scale)];
+      const t = text(X(mid[0]), Y(mid[1]), `rho_range[${k}] = ${fmtMM(r)} mm`, "code", "middle", { dy: "-4" });
+      t.setAttribute("transform", `rotate(${rot.toFixed(2)} ${X(mid[0]).toFixed(1)} ${Y(mid[1]).toFixed(1)})`);
+    });
+  }
+
+  // zlims and xlims leaders
+  if (layers.leaders) {
+    const left = X(bb[0]) - 8;
+    R.zlims.forEach((z, k) => {
+      s("line", { x1: X(0), y1: Y(z), x2: left + 4, y2: Y(z), class: "faint-line", "stroke-dasharray": "4 3" }, svg);
+      text(left, Y(z) + 4, `zlims[${k}] = ${fmtMM(z, 1)} mm`, "code", "end");
+    });
+    const bottom = Y(bb[3]) + 18;
+    R.xlims.forEach((x, k) => {
+      s("line", { x1: X(x), y1: Y(R.zlims[1]), x2: X(x), y2: bottom - 12, class: "faint-line", "stroke-dasharray": "4 3" }, svg);
+      text(X(x), bottom + 4, `xlims[${k}] = ${fmtMM(x, 1)} mm`, "code", k === 0 ? "end" : "start");
+    });
+  }
+}
+
+function buildLayerToggles() {
+  const bar = document.getElementById("layers");
+  const names = { mesh: "grid mesh", labels: "labels", leaders: "xlims / zlims", transmits: "transmits", cones: "receive cones", normals: "element normals", extent: "extent", sc: "scan-converted window" };
+  for (const [key, label] of Object.entries(names)) {
+    const id = `layer-${key}`;
+    const input = h("input", { type: "checkbox", id, onchange: (e) => { layers[key] = e.target.checked; update(); } });
+    input.checked = layers[key];
+    bar.append(h("label", { for: id }, input, label));
+  }
+  const legend = document.getElementById("legend");
+  const swatch = (draw) => { const sv = document.createElementNS(SVGNS, "svg"); sv.setAttribute("width", "26"); sv.setAttribute("height", "10"); sv.innerHTML = draw; return sv; };
+  const items = [
+    ['<line x1="1" y1="5" x2="25" y2="5" stroke="var(--ink)" stroke-width="2"/>', "pixel grid"],
+    ['<line x1="1" y1="5" x2="25" y2="5" stroke="var(--ink)" stroke-width="1.2" stroke-dasharray="7 4"/>', "scan-converted image"],
+    ['<rect x="1" y="1" width="24" height="8" fill="none" stroke="var(--accent)" stroke-width="1"/>', "Parameters.extent"],
+    ['<line x1="1" y1="5" x2="25" y2="5" stroke="var(--accent)" stroke-width="1" opacity="0.6"/><circle cx="4" cy="5" r="2" fill="var(--accent)"/>', "transmit axis (origin, focus)"],
+    ['<line x1="1" y1="5" x2="25" y2="5" stroke="var(--accent)" stroke-width="1" opacity="0.6" stroke-dasharray="2 3"/>', "transmit axis extended back to x = 0, or to a virtual source"],
+    ['<line x1="1" y1="5" x2="25" y2="5" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="9 4"/>', "edge of the insonified region (sets polar_limits / xlims)"],
+    ['<circle cx="13" cy="5" r="2" fill="var(--bad)"/>', "pixel behind the array"],
+    ['<rect x="1" y="1" width="24" height="8" fill="none" stroke="var(--bad)"/><line x1="4" y1="9" x2="10" y2="1" stroke="var(--bad)"/><line x1="12" y1="9" x2="18" y2="1" stroke="var(--bad)"/>', "cropped from the image (flat-array top or xlims)"],
+    ['<line x1="1" y1="9" x2="25" y2="1" stroke="var(--muted)" stroke-width="1" stroke-dasharray="1 3"/>', "receive cone of the end elements"],
+  ];
+  for (const [draw, label] of items) legend.append(h("span", {}, swatch(draw), label));
+}
+
+/* --------------------------- python export --------------------------- */
+function pyNum(v) {
+  if (v === Infinity) return "np.inf";
+  if (v === -Infinity) return "-np.inf";
+  if (v === 0) return "0.0";
+  const a = Math.abs(v);
+  if (a < 1e-2 || a >= 1e5) return v.toExponential(4).replace(/\.?0+e/, "e").replace("e+", "e");
+  return String(Number(v.toPrecision(6)));
+}
+function pythonCode(s) {
+  const es = engineState(s);
+  const lines = ["import numpy as np", "", "import zea"];
+  lines.push(s.probe === "curved" ? "from zea.probes import create_curved_probe_geometry" : "from zea.probes import create_probe_geometry", "");
+  lines.push(s.probe === "curved"
+    ? `probe_geometry = create_curved_probe_geometry(n_el=${s.n_el}, pitch=${pyNum(s.pitch)}, radius=${pyNum(s.radius)})`
+    : `probe_geometry = create_probe_geometry(n_el=${s.n_el}, pitch=${pyNum(s.pitch)})`);
+  lines.push(`n_tx = ${s.n_tx}`);
+  lines.push(s.n_tx === 1 ? "polar_angles = np.zeros(n_tx)" : `polar_angles = np.linspace(-np.radians(${pyNum(s.tx_span_deg)}), np.radians(${pyNum(s.tx_span_deg)}), n_tx)`);
+  lines.push("transmit_origins = np.zeros((n_tx, 3))");
+  if (s.tx_origins === "array") {
+    if (s.probe === "curved") {
+      lines.push(`transmit_origins[:, 0] = ${pyNum(s.radius)} * np.sin(polar_angles)`);
+      lines.push(`transmit_origins[:, 2] = ${pyNum(s.radius)} * np.cos(polar_angles) - ${pyNum(s.radius)}`);
+    } else if (s.n_tx > 1) {
+      lines.push("half = np.ptp(probe_geometry[:, 0]) / 2");
+      lines.push(s.tx_span_deg > 0
+        ? `transmit_origins[:, 0] = half / np.tan(np.radians(${pyNum(s.tx_span_deg)})) * np.tan(polar_angles)  # axes meet behind the array`
+        : "transmit_origins[:, 0] = np.linspace(-half, half, n_tx)");
+    }
+  }
+  lines.push(`focus_distances = np.full(n_tx, ${pyNum(es.focus_distance == null ? Infinity : es.focus_distance)})`, "");
+  const kw = [
+    ["probe_geometry", "probe_geometry"], ["grid_type", `"${s.grid_type}"`],
+    ["enable_scanline", s.enable_scanline ? "True" : "False"],
+  ];
+  const pair = (a) => `(${pyNum(a[0])}, ${pyNum(a[1])})`;
+  kw.push(["center_frequency", pyNum(s.center_frequency)], ["sampling_frequency", pyNum(s.sampling_frequency)],
+    ["sound_speed", pyNum(s.sound_speed)], ["n_el", String(s.n_el)], ["n_tx", "n_tx"],
+    ["n_ax", String(s.n_ax)], ["polar_angles", "polar_angles"], ["transmit_origins", "transmit_origins"],
+    ["focus_distances", "focus_distances"]);
+  const overrides = [];
+  if (s.zlims) overrides.push(["zlims", pair(s.zlims)]);
+  if (s.polar_limits && s.grid_type === "polar") overrides.push(["polar_limits", pair(s.polar_limits)]);
+  if (s.xlims) overrides.push(["xlims", pair(s.xlims)]);
+  if (s.grid_size_x != null && !s.enable_scanline) overrides.push(["grid_size_x", String(s.grid_size_x)]);
+  if (s.grid_size_z != null) overrides.push(["grid_size_z", String(s.grid_size_z)]);
+  if (s.f_number != null) overrides.push(["f_number", pyNum(s.f_number)]);
+  if (s.polar_margin != null) overrides.push(["polar_margin", `np.radians(${pyNum(s.polar_margin * DEG)})`]);
+  if (s.pixels_per_wavelength != null) overrides.push(["pixels_per_wavelength", String(s.pixels_per_wavelength)]);
+  lines.push("parameters = zea.Parameters(");
+  for (const [k, v] of kw) lines.push(`    ${k}=${v},`);
+  if (overrides.length) lines.push("    # overrides");
+  for (const [k, v] of overrides) lines.push(`    ${k}=${v},`);
+  lines.push(")");
+  return lines.join("\n");
+}
+
+/* ------------------------------- wiring ------------------------------- */
+function update() {
+  const R = resolve(engineState(state));
+  syncControls(R);
+  drawFigure(R);
+  renderChecks(R);
+  renderValues(R);
+  document.getElementById("code").textContent = pythonCode(state);
+}
+
+// When embedded in the furo docs (same-origin iframe), follow the docs' theme toggle.
+function followParentTheme() {
+  try {
+    const body = window.parent && window.parent !== window ? window.parent.document.body : null;
+    if (!body) return;
+    const apply = () => {
+      const t = body.dataset.theme;
+      if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+      else delete document.documentElement.dataset.theme;
+    };
+    apply();
+    new MutationObserver(apply).observe(body, { attributes: true, attributeFilter: ["data-theme"] });
+  } catch (e) { /* cross-origin parent: keep prefers-color-scheme */ }
+}
+
+followParentTheme();
+buildControls();
+buildLayerToggles();
+document.getElementById("parity").addEventListener("click", (e) => {
+  const panel = document.getElementById("parity-panel");
+  panel.hidden = !panel.hidden;
+  e.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
+});
+document.getElementById("copy").addEventListener("click", (e) => {
+  const btn = e.currentTarget, code = document.getElementById("code");
+  const done = (msg) => { btn.textContent = msg; setTimeout(() => { btn.textContent = "Copy"; }, 1500); };
+  const fallback = () => {
+    const range = document.createRange(); range.selectNodeContents(code);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    done("Selected");
+  };
+  try { navigator.clipboard.writeText(code.textContent).then(() => done("Copied"), fallback); } catch (err) { fallback(); }
+});
+let resizeTimer = null;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(update, 120); });
+update();
+runParity();
+</script>
+
+</body>
+</html>
