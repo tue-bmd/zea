@@ -202,51 +202,40 @@ angles measured from ``+z``, positive toward ``+x``.
    The receive cone of each element. Defaults to the element's -6 dB acceptance angle, so
    0 (no cone) for most phased arrays. It masks pixels but does not change the grid.
 
-.. raw:: html
-
-   <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
-     <img src="_static/pixelgrid-Dark.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
-          style="display: none; width: 85%; padding-bottom: 1em;" class="only-dark" />
-     <img src="_static/pixelgrid-Light.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
-          style="display: none; width: 85%; padding-bottom: 1em;" class="only-light" />
-     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
-        A polar grid on a curved array fans out from its centre of curvature.
-     </div>
-   </div>
+Both figures below are drawn by the pixel grid explorer, a JavaScript port of the code
+checked against reference values computed by zea (``docs/explorer``). **Open the
+explorer** on either one to change the probe, transmits and overrides; the address then
+holds every setting, so you can share a link to the exact grid.
 
 .. raw:: html
 
-   <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
-     <img src="_static/pixelgrid-phased-array-Dark.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
-          style="display: none; width: 85%; padding-bottom: 1em;" class="only-dark" />
-     <img src="_static/pixelgrid-phased-array-Light.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
-          style="display: none; width: 85%; padding-bottom: 1em;" class="only-light" />
-     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
-        Focused lines from the middle of a phased array: the grid fans out from there, and the image starts at <code>zlims[0]</code>.
-     </div>
-   </div>
-
-.. raw:: html
-
+   <script>
+     // The explorer posts its content height, so each iframe fits the compact or
+     // expanded view.
+     window.addEventListener("message", (event) => {
+       if (!event.data || event.data.type !== "zea-explorer-height") return;
+       for (const frame of document.querySelectorAll("iframe.pixel-grid-explorer")) {
+         if (frame.contentWindow === event.source) frame.style.height = `${event.data.height}px`;
+       }
+     });
+   </script>
    <style>
-     @media (prefers-color-scheme: dark) {
-       .only-dark { display: block !important; }
-     }
-     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
-       .only-light { display: block !important; }
-     }
+     iframe.pixel-grid-explorer { display: block; width: 100%; height: 520px; border: 0; }
    </style>
 
-The explorer below runs the same rules for any probe and transmit scheme, with the
-values and consistency checks alongside. It is a JavaScript port of the code, checked
-against reference values computed by zea (``docs/explorer``).
-`Open it in its own tab <_static/pixel-grid-explorer.html>`_.
+   <figure style="margin: 2em 0;">
+     <iframe class="pixel-grid-explorer" loading="lazy"
+             src="_static/pixel-grid-explorer.html?preset=curved-docs-figure&amp;view=compact"
+             title="Polar pixel grid of a curved array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"></iframe>
+     <figcaption><p>A polar grid on a curved array fans out from its centre of curvature.</p></figcaption>
+   </figure>
 
-.. raw:: html
-
-   <iframe src="_static/pixel-grid-explorer.html" title="Pixel grid explorer"
-           style="width: 100%; height: 1400px; border: 1px solid var(--color-background-border, #ddd); border-radius: 8px; margin: 1em 0 2em;"
-           loading="lazy"></iframe>
+   <figure style="margin: 2em 0;">
+     <iframe class="pixel-grid-explorer" loading="lazy"
+             src="_static/pixel-grid-explorer.html?preset=phased-docs-figure&amp;view=compact"
+             title="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"></iframe>
+     <figcaption><p>Focused lines that leave from across a phased array: their axes meet behind it in a virtual apex, and the grid fans out from there.</p></figcaption>
+   </figure>
 
 
 Angle and radius names

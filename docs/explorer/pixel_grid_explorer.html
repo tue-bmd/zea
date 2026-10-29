@@ -88,6 +88,18 @@
     max-height: calc(100vh - 20px); overflow-y: auto;
   }
   @media (max-width: 920px) { aside.controls { position: static; max-height: none; } }
+  /* Side by side, the page fills the window and does not scroll: the sidebar scrolls on its
+     own, and the figure is sized to the space left in the main column. */
+  @media (min-width: 921px) {
+    html:not(.compact) body {
+      height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column;
+      padding-block: 18px;
+    }
+    html:not(.compact) header.top, html:not(.compact) .app { width: 100%; }
+    html:not(.compact) .app { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+    html:not(.compact) aside.controls { position: static; max-height: none; }
+    html:not(.compact) .main-col { overflow-y: auto; align-content: start; }
+  }
   .controls h2 {
     font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
     margin: 14px 0 8px; font-weight: 600;
@@ -126,34 +138,10 @@
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .legend svg { flex: none; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
   .card h3 { font-size: 13px; margin: 0 0 8px; }
-  table.vals { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  table.vals td { padding: 5px 6px 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
-  table.vals tr:first-child td { border-top: 0; }
-  table.vals td.k { font-family: var(--font-code); white-space: nowrap; }
-  table.vals td.v { font-family: var(--font-code); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  table.vals td.src { color: var(--muted); font-size: 12px; }
-  table.vals tr.changed td.v { color: var(--accent); }
-  .table-wrap { overflow-x: auto; }
-
-  ul.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-  ul.checks li { display: grid; grid-template-columns: auto 1fr; gap: 2px 9px; align-items: baseline; }
-  ul.checks .dot { transform: translateY(1px); }
-  ul.checks .t { font-weight: 600; font-size: 13px; }
-  ul.checks .d { grid-column: 2; color: var(--muted); font-size: 12.5px; }
-  ul.checks .d code { color: var(--ink); }
-
-  .code-card pre {
-    margin: 0; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-    font-family: var(--font-code); font-size: 12px; overflow-x: auto; line-height: 1.5;
-  }
-  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12.5px; }
   .btn:hover { border-color: var(--accent); }
-  details.notes summary { cursor: pointer; font-weight: 600; font-size: 13px; }
-  details.notes ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; display: grid; gap: 4px; }
   #parity-details { font-size: 12px; color: var(--muted); }
   #parity-details li { margin-bottom: 3px; }
 
@@ -181,9 +169,26 @@
   #fig .hatch-line { stroke: var(--bad); stroke-width: 1; opacity: 0.55; }
   #fig .probe { stroke: var(--ink); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
   #fig .ink-fill { fill: var(--ink); }
+  #fig .backdrop { fill: var(--panel); }
   #fig .accent-text { fill: var(--accent); }
   #fig .bad-text { fill: var(--bad); }
   #fig marker path { fill: var(--ink); }
+
+  /* Compact view (?view=compact): only the drawing, as the docs embed it, with a link
+     that opens the full explorer in its own tab. */
+  #open { display: none; text-decoration: none; }
+  .compact body { padding: 0; background: transparent; }
+  .compact header.top, .compact aside.controls, .compact #parity-panel,
+  .compact .stage-bar, .compact .legend, .compact .mobile-hint { display: none !important; }
+  .compact .app { grid-template-columns: minmax(0, 1fr); }
+  .compact .stage { position: relative; }
+  .compact #open { display: inline-flex; position: absolute; bottom: 12px; left: 12px; }
+
+  .mobile-hint {
+    display: none; max-width: 1500px; margin: 0 auto 14px; padding: 8px 12px; font-size: 13px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--accent-soft);
+  }
+  @media (max-width: 700px) { .mobile-hint { display: block; } }
 
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -197,7 +202,9 @@
   <button type="button" class="badge" id="parity" aria-expanded="false" aria-controls="parity-panel">
     <span class="dot" id="parity-dot"></span><span id="parity-text">Checking the zea port…</span>
   </button>
+  <button type="button" class="btn" id="copy-link" title="The address holds every setting, so the link opens this exact view">Copy link</button>
 </header>
+<p class="mobile-hint">This explorer is made for a larger screen: open it on a computer to see the controls next to the figure.</p>
 
 <div class="app">
   <aside class="controls" id="controls" aria-label="Parameters"></aside>
@@ -209,54 +216,12 @@
     </section>
 
     <section class="stage">
+      <a class="btn" id="open" target="_blank" rel="noopener" title="Change the probe, transmits and overrides">Open the explorer ↗</a>
       <div class="stage-bar" id="layers"></div>
       <div class="fig-wrap"><svg id="fig" role="img" aria-label="Pixel grid geometry"></svg></div>
       <div class="legend" id="legend"></div>
     </section>
 
-    <div class="cards">
-      <section class="card">
-        <h3>Consistency checks</h3>
-        <ul class="checks" id="checks"></ul>
-      </section>
-      <section class="card">
-        <h3>Resolved <code>Parameters</code> values</h3>
-        <div class="table-wrap"><table class="vals" id="vals"></table></div>
-      </section>
-    </div>
-
-    <div class="cards">
-      <section class="card">
-        <details class="notes" open>
-          <summary>Definitions</summary>
-          <ul>
-            <li><b>Frame.</b> <code>z = 0</code> is the middle of the array and <code>+z</code> points into the medium. Angles are measured from <code>+z</code>, positive toward <code>+x</code>.</li>
-            <li><b><code>zlims</code></b>: depths below the transducer. The default runs to the end of the record, <code>sound_speed · n_ax / sampling_frequency / 2</code>.</li>
-            <li><b><code>xlims</code></b>: the lateral extent of the grid. Cartesian grid → what the transmits insonify at <code>zlims[1]</code> (the same edge rays as <code>polar_limits</code>), and at least the probe width. Polar grid → the sector's width, and an override sets the scan-converted image's width (crop or pad). Scanline → the extent of the columns.</li>
-            <li><b><code>f_number</code></b>: a beamforming setting, not geometry. zea's receive mask is a hard cone around each element's normal, so pixels outside every element's cone stay dark; the checks report how many.
-              Default from the probe: <code>1 / (2 tan α)</code>, with α the element's −6 dB acceptance angle under zea's directivity model, <code>sin α = 0.603 · wavelength / element_width</code> (element width 0.9 · pitch when the file has none).
-              Elements narrower than about 0.6 wavelength hear the whole half-space, giving 0 (no cone): typical for phased arrays. Linear arrays land near 0.5, curved arrays near 0.7.</li>
-            <li><b><code>grid_apex</code></b> (derived, not settable): the point <code>(x, y, z)</code> the grid fans out from, which is where the transmits fan out from. It lies on the central axis, at or behind the array: <code>(0, 0, −d)</code> with <code>d ≥ 0</code>. It replaces <code>distance_to_apex</code> (= <code>−grid_apex[2]</code>).
-              In order: steered transmit axes that meet in one point → that point (0 from the array middle, a virtual apex when spread over a flat array, the centre of curvature on a curved array);
-              unsteered diverging waves → their virtual source; curved array → its radius of curvature; flat array with overridden <code>polar_limits</code> → the virtual apex whose sector edges pass through the array ends; otherwise 0.</li>
-            <li><b><code>polar_limits</code></b>: the range of the transmit angles, widened on each side to cover what the transmits insonify at the deepest pixel <code>zlims[1]</code>.
-              Each transmit's region is bounded by two edge rays: focused → its axis (no margin); plane wave → from the array ends along its angle (along the end elements' normals on a curved array); diverging wave → from its virtual source through the array ends.
-              <code>polar_margin</code> replaces the automatic margin with a fixed angle. Scanline mode has no margin, because the columns are the transmits.</li>
-            <li><b><code>rlims</code></b> = <code>zlims − grid_apex[2]</code>: radii from the apex, used by scan conversion.</li>
-            <li><b><code>enable_scanline</code></b>: one column per focused transmit, each beamformed with its own transmit only. Steered lines whose axes meet in one point use a polar grid: the polar grid with one column per transmit angle (<code>grid_size_x = n_tx</code>, <code>polar_limits</code> = the angle range, no override), rows at <code>rlims</code> from <code>grid_apex</code>, so the columns lie on the transmit axes. Unsteered, parallel lines use a cartesian grid: a vertical column under each transmit. Anything else raises a <code>ValueError</code>.</li>
-            <li><b><code>grid_size_x</code></b> of a polar grid: the outer arc length, <code>(zlims[1] − grid_apex[2]) · (polar_limits[1] − polar_limits[0])</code>, divided by <code>wavelength / pixels_per_wavelength</code>.</li>
-            <li><b><code>extent</code></b> of a polar grid: the window the scan-converted image fills. <code>x</code> spans <code>xlims</code>; <code>z</code> spans the grid, but on a flat array starts at <code>zlims[0]</code>, which crops the pixels a virtual apex places behind the array. A curved array needs no crop.</li>
-            <li><b>Radius of curvature</b>: a probe property fitted from <code>probe_geometry</code> (∞ for a flat array), kept apart from the apex.</li>
-            <li><b>Missing transmits.</b> Without <code>transmit_origins</code> in the file, the origins count as zeros (the middle of the array), as in the beamformer.</li>
-          </ul>
-        </details>
-      </section>
-      <section class="card code-card">
-        <div class="row"><h3 style="margin:0">Reproduce in Python</h3><div class="grow"></div><button type="button" class="btn" id="copy">Copy</button></div>
-        <p class="hint" style="margin:0 0 8px">Builds the same <code>zea.Parameters</code>; its values match this page.</p>
-        <pre id="code"></pre>
-      </section>
-    </div>
   </div>
 </div>
 
@@ -416,7 +381,12 @@ function resolve(s) {
   // geometry.transmit_apex_distance
   const steered = tx.angles.some((a) => Math.abs(a) > 1e-6); // geometry.STEERING_TOLERANCE
   const est = [];
-  tx.angles.forEach((a, k) => { if (Math.abs(a) > 1e-6) est.push(tx.origins[k][0] / Math.tan(a) - tx.origins[k][1]); });
+  // Only focused axes meet where the transmits fan out from; a steered plane or diverging
+  // wave does not fan out from its origin.
+  tx.angles.forEach((a, k) => {
+    const f = tx.focus[k];
+    if (Math.abs(a) > 1e-6 && Number.isFinite(f) && f > 0) est.push(tx.origins[k][0] / Math.tan(a) - tx.origins[k][1]);
+  });
   const rayApex = est.length ? { d: median(est), spread: arrMax(est) - arrMin(est) } : null;
   if (rayApex) rayApex.concurrent = rayApex.spread <= tol && rayApex.d >= -tol;
   let virtualSource = null; // unsteered diverging waves that share one virtual source on the axis
@@ -427,7 +397,7 @@ function resolve(s) {
 
   // Parameters._transmit_or_probe_apex
   let dTx = null, dTxSrc = null;
-  if (steered && rayApex && rayApex.concurrent) { dTx = Math.max(rayApex.d, 0); dTxSrc = "where the transmit axes meet"; }
+  if (steered && rayApex && rayApex.concurrent) { dTx = Math.max(rayApex.d, 0); dTxSrc = "where the focused transmit axes meet"; }
   else if (virtualSource) { dTx = virtualSource.d; dTxSrc = "virtual source of the diverging wave"; }
   else if (curved) { dTx = radius; dTxSrc = "radius of curvature"; }
 
@@ -448,7 +418,6 @@ function resolve(s) {
   let left = 0, right = 0;
   xs.forEach((x, i) => { if (x < xs[left]) left = i; if (x > xs[right]) right = i; });
   const ends = [left, right].map((i) => ({ p: pg[i], tilt: Math.atan2(nrm[i][0], nrm[i][1]) }));
-  const apexZ = -(dTx == null ? 0 : dTx); // seen from the array middle when no apex is defined
   const edges = [];
   tx.angles.forEach((a, k) => {
     const f = tx.focus[k], o = tx.origins[k];
@@ -463,17 +432,27 @@ function resolve(s) {
       for (const e of ends) { const t = a + e.tilt; edges.push({ p: e.p, u: [Math.sin(t), Math.cos(t)], k }); }
     }
   });
+  // Seen from the transmit apex or, on a flat array, from the virtual apex whose sector edge
+  // runs along the outermost edge ray through the array end; else from the array middle.
+  let apexD = dTx;
+  if (apexD == null) {
+    const maxDir = edges.length ? Math.max(...edges.map((r) => Math.abs(Math.atan2(r.u[0], r.u[1])))) : 0;
+    apexD = maxDir > 0 && maxDir < Math.PI / 2 ? (apertureX / 2) / Math.tan(maxDir) : 0;
+  }
+  const apexZ = -apexD;
   for (const r of edges) { // geometry.rays_at_depth
+    // The start points bound the near field; from the array middle they would lie at ±90°.
+    r.startAngle = apexD > 0 ? Math.atan2(r.p[0], r.p[1] - apexZ) : null;
     if (r.u[1] <= 1e-6) { r.angle = null; continue; }
     const t = Math.max((zDeep - r.p[1]) / r.u[1], 0);
     r.q = [r.p[0] + t * r.u[0], r.p[1] + t * r.u[1]];
     r.angle = Math.atan2(r.q[0], r.q[1] - apexZ);
   }
-  const edgeAngles = edges.filter((r) => r.angle != null).map((r) => r.angle);
+  const edgeAngles = edges.flatMap((r) => [r.angle, r.startAngle]).filter((t) => t != null);
   const autoLo = Math.min(lo, ...edgeAngles), autoHi = Math.max(hi, ...edgeAngles);
   let polarMargin = { auto: true, left: lo - autoLo, right: autoHi - hi };
-  edges.left = edges.find((r) => r.angle === autoLo) || null;
-  edges.right = edges.find((r) => r.angle === autoHi) || null;
+  edges.left = edges.find((r) => r.angle === autoLo || r.startAngle === autoLo) || null;
+  edges.right = edges.find((r) => r.angle === autoHi || r.startAngle === autoHi) || null;
   const reaching = edges.filter((r) => r.q);
   edges.xLeft = reaching.reduce((m, r) => (!m || r.q[0] < m.q[0] ? r : m), null);
   edges.xRight = reaching.reduce((m, r) => (!m || r.q[0] > m.q[0] ? r : m), null);
@@ -488,7 +467,7 @@ function resolve(s) {
   else {
     polarLimits = [lo - polarMargin.left, hi + polarMargin.right];
     src.polar_limits = polarMargin.auto
-      ? "default: min / max of polar_angles, widened to each transmit's insonified region at zlims[1]"
+      ? "default: min / max of polar_angles, widened to each transmit's insonified region down to zlims[1]"
       : "default: min / max of polar_angles ± polar_margin";
   }
 
@@ -599,8 +578,6 @@ const MM = 1e3, DEG = 180 / Math.PI;
 const fmtMM = (v, p = 2) => (v == null || !Number.isFinite(v) ? String(v) : (v * MM).toFixed(p));
 const fmtDeg = (v) => (v * DEG).toFixed(1);
 const apexStr = (R) => `(0, 0, ${fmtMM(-R.d)}) mm`; // grid_apex, always on the central axis for now
-const pairMM = (a) => `(${fmtMM(a[0])}, ${fmtMM(a[1])}) mm`;
-const pairDeg = (a) => `(${fmtDeg(a[0])}°, ${fmtDeg(a[1])}°)`;
 
 /* -------------------- parity self-test against zea -------------------- */
 function runParity() {
@@ -692,18 +669,44 @@ const CURVED = { probe: "curved", n_el: 128, pitch: CURVED_PITCH, radius: 40e-3,
 const PRESETS = {
   "Phased · lines from the middle": { ...PHASED, n_tx: 65, tx_span_deg: 45, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "zeros" },
   "Phased · virtual-apex lines": { ...PHASED, n_tx: 65, tx_span_deg: 45, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "array" },
-  "Phased · virtual-apex scanlines": { ...PHASED, enable_scanline: true, n_tx: 65, tx_span_deg: 45, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "array" },
   "Phased · plane waves": { ...PHASED, n_tx: 21, tx_span_deg: 20, tx_kind: "plane" },
   "Phased · diverging waves": { ...PHASED, n_tx: 11, tx_span_deg: 30, tx_kind: "diverging", tx_focus: 20e-3 },
-  "Phased · one diverging wave": { ...PHASED, n_tx: 1, tx_kind: "diverging", tx_focus: 12e-3 },
-  "Curved · focused scanlines": {
-    ...CURVED, pitch: 0.508e-3, radius: 50e-3, center_frequency: 3.5e6, sampling_frequency: 14e6, n_ax: 1820,
-    enable_scanline: true, n_tx: 64, tx_span_deg: 35, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "array",
-  },
   "Curved · docs figure": { ...CURVED, polar_limits: [-35 / DEG, 35 / DEG], zlims: [10e-3, 100e-3] },
+  "Phased · docs figure": { ...PHASED, n_tx: 65, tx_span_deg: 45, tx_kind: "focused", tx_focus: 60e-3, tx_origins: "array" },
   "Linear · plane waves": { n_el: 128, pitch: 0.3e-3, center_frequency: 5e6, sampling_frequency: 20e6, n_ax: 1300, grid_type: "cartesian", n_tx: 11, tx_span_deg: 10 },
 };
-let state = { ...BASE, ...PRESETS["Phased · lines from the middle"] };
+// The address holds the state, so a link reopens the same view: ?preset=<slug of a name above>
+// (e.g. curved-docs-figure) picks the example to start from, and every key of BASE can follow,
+// written as its difference from BASE (lists as "a,b").
+const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const query = new URLSearchParams(window.location.search);
+
+function stateQuery(s) {
+  const q = new URLSearchParams();
+  const num = (v) => String(Number(v.toPrecision(7)));
+  for (const [k, base] of Object.entries(BASE)) {
+    const v = s[k];
+    if (v == null || JSON.stringify(v) === JSON.stringify(base)) continue;
+    q.set(k, Array.isArray(v) ? v.map(num).join(",") : typeof v === "number" ? num(v) : String(v));
+  }
+  return q.toString();
+}
+
+function stateFromQuery(q) {
+  const preset = Object.keys(PRESETS).find((name) => slug(name) === q.get("preset"));
+  const given = Object.keys(BASE).filter((k) => q.has(k));
+  const s = { ...BASE, ...PRESETS[preset || (given.length ? "" : "Phased · lines from the middle")] };
+  for (const k of given) {
+    const raw = q.get(k), base = BASE[k];
+    const nums = raw.split(",").map(Number);
+    if (typeof base === "boolean") s[k] = raw === "true";
+    else if (typeof base === "string") s[k] = raw;
+    else if (nums.every(Number.isFinite) && raw !== "") s[k] = nums.length > 1 ? nums : nums[0];
+  }
+  return s;
+}
+
+let state = stateFromQuery(query);
 const layers = { mesh: true, labels: true, transmits: true, cones: true, normals: false, extent: true, sc: true, leaders: true };
 
 function engineState(s) {
@@ -749,7 +752,7 @@ const CONTROLS = [
     { type: "single", key: "polar_margin", min: 0, max: 45, step: 0.5, unit: "°", k: 1 / DEG,
       get: (R) => (R.polarMargin ? Math.max(R.polarMargin.left, R.polarMargin.right) : 0),
       when: (s) => s.grid_type === "polar" && !s.enable_scanline && s.polar_limits == null,
-      hint: "Proposal only. By default each side widens to the transmits' insonified region at zlims[1]; this sets a fixed angle instead." },
+      hint: "Proposal only. By default each side widens to the transmits' insonified region down to zlims[1]; this sets a fixed angle instead." },
     { type: "pair", key: "xlims", min: -200, max: 200, step: 0.5, unit: "mm", k: 1e-3, get: (R) => R.xlims },
     { type: "note", text: "Only overrides that move the grid are listed. grid_size_x, grid_size_z and pixels_per_wavelength set the pixel density and stay at zea's defaults." },
   ] },
@@ -895,7 +898,7 @@ function syncControls(R) {
   }
 }
 
-/* ----------------------------- checks ----------------------------- */
+/* ----------------------------- helpers ----------------------------- */
 function strided(n, m) {
   if (n <= m) return Array.from({ length: n }, (_, i) => i);
   return Array.from({ length: m }, (_, k) => Math.round((k * (n - 1)) / (m - 1)));
@@ -905,191 +908,6 @@ function behindArray(R, x, z) {
   return R.curved ? Math.hypot(x, z + R.radius) < R.radius - 1e-9 : z < -1e-9;
 }
 
-function computeChecks(R) {
-  const out = [];
-  const rows = strided(R.gz, 120), cols = strided(R.gx, 120);
-  const polar = R.kind === "polar" || R.kind === "scanline-polar";
-
-  if (R.scanlineError) {
-    out.push({ s: "bad", t: "enable_scanline is not allowed here",
-      d: `Scanline imaging needs ${R.scanlineError}; zea would raise. The page shows the pixel grid instead.` });
-  }
-
-  if (polar && Math.abs(R.polarLimits[1] - R.polarLimits[0]) < 1e-6) {
-    out.push({ s: "bad", t: "The polar grid has no width",
-      d: `<code>polar_limits</code> is ${pairDeg(R.polarLimits)}: the transmits are all unsteered, so the default spans no angle. Override <code>polar_limits</code>, or use a cartesian grid.` });
-  }
-
-  if (R.sc) {
-    let err = 0;
-    for (const i of rows) for (const j of cols) {
-      const [x, z] = R.point(i, j);
-      const r = R.sc.rho[i], t = R.sc.th[j];
-      const zz = r / Math.sqrt(1 + Math.tan(t) ** 2);
-      err = Math.max(err, Math.hypot(x - zz * Math.tan(t), z - (zz - R.d)));
-    }
-    const ok = err < 0.5 * R.sc.resolution;
-    out.push({ s: ok ? "ok" : "bad", t: "Scan conversion puts pixels where the grid has them",
-      d: ok ? `Largest offset ${fmtMM(err, 3)} mm, below half an output pixel.`
-        : `Pixels land up to <code>${fmtMM(err)} mm</code> from their grid position. Scan conversion assumes every column starts at <code>grid_apex</code> and that every row sits at one radius from it (<code>rlims</code>), which this grid does not satisfy.` });
-  }
-
-  let behind = 0, worst = 0, total = 0;
-  for (const i of rows) for (const j of cols) {
-    const [x, z] = R.point(i, j);
-    if (R.minDepth != null && z < R.minDepth - 1e-12) continue; // cropped away
-    total++;
-    if (behindArray(R, x, z)) {
-      behind++;
-      worst = Math.max(worst, R.curved ? R.radius - Math.hypot(x, z + R.radius) : -z);
-    }
-  }
-  out.push(behind
-    ? { s: "bad", t: "Pixels behind the array", d: `${((100 * behind) / Math.max(total, 1)).toFixed(1)} % of the shown grid lies behind the array surface, up to <code>${fmtMM(worst)} mm</code>.` }
-    : { s: "ok", t: "No pixels behind the array", d: "Every shown pixel is in front of the array surface." });
-
-  // Receive side: zea's f-number mask is a hard cone around each element's normal
-  if (R.fNumber > 0) {
-    const cosA = Math.cos(Math.atan(1 / (2 * R.fNumber + 1e-7)));
-    const nrm = elementNormals(R.pg);
-    const e = R.extent;
-    let dark = 0, shown = 0;
-    for (const i of strided(R.gz, 50)) for (const j of strided(R.gx, 50)) {
-      const [x, z] = R.point(i, j);
-      if (x < e[0] - 1e-9 || x > e[1] + 1e-9 || z < e[2] - 1e-9 || z > e[3] + 1e-9) continue; // not in the image
-      const onOrBehind = R.curved ? Math.hypot(x, z + R.radius) <= R.radius + 1e-9 : z <= 1e-9;
-      if (onOrBehind) continue; // reported by the "behind the array" check
-      shown++;
-      let heard = false;
-      for (let k = 0; k < R.pg.length && !heard; k++) {
-        const dx = x - R.pg[k][0], dz = z - R.pg[k][1];
-        heard = (dx * nrm[k][0] + dz * nrm[k][1]) / (Math.hypot(dx, dz) + 1e-6) >= cosA;
-      }
-      if (!heard) dark++;
-    }
-    out.push(dark
-      ? { s: "warn", t: "Every pixel is inside some element's receive cone",
-        d: `${((100 * dark) / Math.max(shown, 1)).toFixed(1)} % of the image is outside every element's cone at <code>f_number = ${R.fNumber.toFixed(1)}</code>, so it stays dark. A lower f_number (0 disables the cone) uses those pixels.` }
-      : { s: "ok", t: "Every pixel is inside some element's receive cone", d: `At f_number = ${R.fNumber.toFixed(1)}, every image pixel is heard by at least one element.` });
-  }
-
-  if (polar && R.src.xlims === "override") {
-    const wider = R.xlims[0] < R.gridExtent[0] && R.xlims[1] > R.gridExtent[1];
-    out.push({ s: "info", t: "xlims sets the image width",
-      d: `The scan-converted image spans <code>${pairMM(R.xlims)}</code>; the grid spans ${pairMM([R.gridExtent[0], R.gridExtent[1]])}, so the image is ${wider ? "padded" : "cropped"}.` });
-  } else if (polar) {
-    const dx = Math.max(Math.abs(R.xlims[0] - R.gridExtent[0]), Math.abs(R.xlims[1] - R.gridExtent[1]));
-    const okX = dx < 1e-4;
-    out.push({ s: okX ? "ok" : "warn", t: "xlims describes the polar grid",
-      d: okX ? "xlims matches the grid's lateral extent."
-        : `xlims is <code>${pairMM(R.xlims)}</code>, but the grid spans <code>${pairMM([R.gridExtent[0], R.gridExtent[1]])}</code>. A polar grid never reads xlims${R.src.grid_size_x.startsWith("default") ? ", yet its number of rays (grid_size_x) is derived from it" : ""}.` });
-  }
-
-  const top = R.sc ? R.sc.z_lim[0] : R.extent[2];
-  const dz = top - R.zlims[0];
-  out.push({ s: Math.abs(dz) < 1e-6 ? "ok" : "info", t: "Image starts at zlims[0]",
-    d: Math.abs(dz) < 1e-6 ? `The image top is at zlims[0] = ${fmtMM(R.zlims[0])} mm.`
-      : `The image top is at <code>${fmtMM(top)} mm</code>, ${fmtMM(Math.abs(dz))} mm ${dz < 0 ? "above" : "below"} zlims[0]${R.curved && polar ? ", because the sector follows the curved array" : polar ? ", because the first row is an arc around the apex" : ""}.` });
-
-  if (R.kind === "polar" && !R.curved) {
-    const [xl, zl] = R.pg[0], [xr, zr] = R.pg[R.pg.length - 1];
-    const dist = (xe, ze, t) => Math.abs(xe * Math.cos(t) - (ze + R.d) * Math.sin(t));
-    const a = dist(xl, zl, R.polarLimits[0]), b = dist(xr, zr, R.polarLimits[1]);
-    const ok = Math.max(a, b) < 0.5 * state.pitch;
-    out.push({ s: ok ? "ok" : "info", t: "Sector edges pass through the array ends",
-      d: `Edge rays miss the end elements by <code>${fmtMM(a)}</code> (left) and <code>${fmtMM(b)} mm</code> (right).` });
-  }
-
-  // Where the transmits fan out from, against where the grid fans out from. In scanline mode the
-  // columns are the transmits, so a mismatch breaks scan conversion; otherwise it is a design question.
-  if (polar) {
-    const scan = R.kind === "scanline-polar";
-    const miss = scan ? "bad" : "info";
-    if (!R.steered) {
-      if (R.virtualSource) {
-        const match = Math.abs(R.virtualSource.d - R.d) < 1e-4;
-        out.push({ s: match ? "ok" : "info", t: "Grid fans out from the diverging wave's virtual source",
-          d: match ? `Both sit ${fmtMM(R.d)} mm behind the array.`
-            : `The wave fans out from ${fmtMM(R.virtualSource.d)} mm behind the array, the grid from <code>grid_apex = ${apexStr(R)}</code>.` });
-      } else if (scan) {
-        out.push({ s: "warn", t: "Transmits have no common apex", d: "All transmits point straight down, so their axes never meet." });
-      }
-    } else if (!R.rayApex.concurrent) {
-      out.push({ s: miss, t: "Transmit axes meet in one point",
-        d: `They cross x = 0 over a ${fmtMM(R.rayApex.spread)} mm range${scan ? ", so no single apex (and no rlims / polar_limits) describes this scan" : ", so the transmits define no apex"}.` });
-    } else {
-      const match = Math.abs(Math.max(R.rayApex.d, 0) - R.d) < 1e-4;
-      out.push({ s: match ? "ok" : miss, t: "Grid fans out from where the transmits meet",
-        d: match ? `The transmit axes and the grid both meet ${fmtMM(R.d)} mm behind the array.`
-          : `The transmit axes meet ${fmtMM(R.rayApex.d)} mm behind the array, the grid fans out from <code>grid_apex = ${apexStr(R)}</code>.` });
-    }
-  }
-  return out;
-}
-
-/* ------------------------------ values ------------------------------ */
-function valueRows(R) {
-  const rows = [
-    ["aperture_size[0]", `${fmtMM(R.apertureX)} mm`, "max − min of probe_geometry x"],
-    ["radius of curvature", R.curved ? `${fmtMM(R.radius)} mm` : "∞ (flat)", "fit_curved_probe_radius(probe_geometry)"],
-    ["grid_apex", apexStr(R), R.src.grid_apex],
-    ["zlims", pairMM(R.zlims), R.src.zlims],
-    ["xlims", pairMM(R.xlims), R.src.xlims],
-    ["polar_limits", pairDeg(R.polarLimits), R.src.polar_limits],
-    ["rlims", pairMM(R.rLims), "zlims − grid_apex[2]: radii from the apex"],
-    ["grid_size_x", String(R.gx), R.src.grid_size_x],
-    ["grid_size_z", String(R.gz), R.src.grid_size_z],
-    ["f_number", R.fNumber.toFixed(2), R.src.f_number],
-    ...(R.acceptance ? [["element acceptance", `±${fmtDeg(R.acceptance.angle)}°`,
-      `−6 dB of sinc(element_width / wavelength · sin θ); element_width = 0.9 · pitch = ${fmtMM(R.acceptance.width, 3)} mm, wavelength = ${fmtMM(R.wavelength, 3)} mm`]] : []),
-    ["pixels_per_wavelength", String(R.ppw), R.src.pixels_per_wavelength],
-    ["grid", `${R.kind} (${R.gz} × ${R.gx})`, "pixel grid used by the beamformer"],
-    ["extent (x)", pairMM([R.extent[0], R.extent[1]]), "min / max of grid x"],
-    ["extent (z)", pairMM([R.extent[2], R.extent[3]]), R.minDepth != null ? "min / max of grid z, from zlims[0] on a flat array" : "min / max of grid z"],
-  ];
-  if (R.kind === "polar" && !R.src.polar_limits.startsWith("override")) {
-    rows.push(["polar_margin", `${fmtDeg(R.polarMargin.left)}° left, ${fmtDeg(R.polarMargin.right)}° right`,
-      R.polarMargin.auto ? "auto: edges of the transmits' insonified region at zlims[1]" : "override"]);
-  }
-  if (R.kind === "polar" || R.kind === "scanline-polar") rows.push(["image starts at", R.minDepth == null ? "the top of the grid" : `zlims[0] = ${fmtMM(R.minDepth)} mm`, R.minDepth == null ? "curved array: the sector follows the array" : "flat array: crops what lies behind the array"]);
-  if (R.sc) {
-    rows.push(["scan_convert x_lim", pairMM(R.sc.x_lim), "compute_scan_convert_2d_coordinates"]);
-    rows.push(["scan_convert z_lim", pairMM(R.sc.z_lim), "depths below the transducer (apex frame + grid_apex[2])"]);
-    rows.push(["scan_convert resolution", `${fmtMM(R.sc.resolution, 3)} mm`, "mean of arc step at ¼ depth and radial step"]);
-  }
-  if (R.rayApex) rows.push(["transmit axes meet", R.rayApex.concurrent ? `${fmtMM(R.rayApex.d)} mm behind the array` : "not in one point",
-    `where each steered axis crosses x = 0; spread ${fmtMM(R.rayApex.spread)} mm`]);
-  if (R.virtualSource) rows.push(["virtual source", `${fmtMM(R.virtualSource.d)} mm behind the array`, "transmit_origins + focus_distances of the diverging waves"]);
-  return rows;
-}
-
-let previousValues = {};
-function renderValues(R) {
-  const table = document.getElementById("vals");
-  table.innerHTML = "";
-  const next = {};
-  for (const [k, v, s] of valueRows(R)) {
-    next[k] = v;
-    const tr = h("tr", { class: previousValues[k] != null && previousValues[k] !== v ? "changed" : "" },
-      h("td", { class: "k" }, k), h("td", { class: "v" }, v),
-      h("td", { class: "src" }, s));
-    table.append(tr);
-  }
-  previousValues = next;
-}
-
-function renderChecks(R) {
-  const ul = document.getElementById("checks");
-  ul.innerHTML = "";
-  for (const c of computeChecks(R)) {
-    const li = h("li", {}, h("span", { class: `dot ${c.s === "info" ? "" : c.s}` }), h("span", { class: "t" }, c.t));
-    const d = h("span", { class: "d" });
-    d.innerHTML = c.d;
-    li.append(d);
-    ul.append(li);
-  }
-}
-
 /* ------------------------------ figure ------------------------------ */
 const SVGNS = "http://www.w3.org/2000/svg";
 function s(tag, attrs, parent) {
@@ -1097,6 +915,62 @@ function s(tag, attrs, parent) {
   for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
   if (parent) parent.appendChild(el);
   return el;
+}
+
+// Label placement: labels are placed in priority order, each at the first of its candidate offsets
+// that keeps it clear of the labels placed before it, so the figure stays readable for any grid.
+// Offsets in px, nearest first: a line of text moves more easily sideways than up or down.
+const LABEL_MOVES = [];
+for (let dx = -180; dx <= 180; dx += 30) for (let dy = -60; dy <= 60; dy += 15) LABEL_MOVES.push([dx, dy]);
+LABEL_MOVES.sort((a, b) => Math.abs(a[0]) / 2 + Math.abs(a[1]) - (Math.abs(b[0]) / 2 + Math.abs(b[1])));
+function labelCorners(t, dx, dy, pad = 2) {
+  const b = t.getBBox();
+  const { rot, cx, cy } = t.rotation || { rot: 0, cx: 0, cy: 0 };
+  const c = Math.cos(rot / DEG), sn = Math.sin(rot / DEG);
+  return [[b.x - pad, b.y - pad], [b.x + b.width + pad, b.y - pad], [b.x + b.width + pad, b.y + b.height + pad], [b.x - pad, b.y + b.height + pad]]
+    .map(([x, y]) => [cx + (x - cx) * c - (y - cy) * sn + dx, cy + (x - cx) * sn + (y - cy) * c + dy]);
+}
+function quadsOverlap(p, q) { // separating axis test for two convex quads
+  for (const poly of [p, q]) for (let i = 0; i < 4; i++) {
+    const [x1, y1] = poly[i], [x2, y2] = poly[(i + 1) % 4];
+    const a = p.map(([x, y]) => x * (y2 - y1) - y * (x2 - x1)), b = q.map(([x, y]) => x * (y2 - y1) - y * (x2 - x1));
+    if (Math.max(...a) <= Math.min(...b) || Math.max(...b) <= Math.min(...a)) return false;
+  }
+  return true;
+}
+// Each label: {el, prio, moves?, leader? (a line whose x2, y2 follows the label), drop? (hide it rather than overlap)}.
+// All but the rulers (prio 0) get a backdrop.
+function placeLabels(svg, labels, width) {
+  const placed = [];
+  for (const lab of [...labels].sort((a, b) => a.prio - b.prio)) {
+    let best = null;
+    for (const [dx, dy] of lab.moves || LABEL_MOVES) {
+      const quad = labelCorners(lab.el, dx, dy);
+      const outside = quad.some(([x]) => x < 0 || x > width) ? 0.5 : 0;
+      const hits = placed.filter((q) => quadsOverlap(quad, q)).length + outside;
+      if (!best || hits < best.hits) best = { dx, dy, quad, hits };
+      if (!hits) break;
+    }
+    if (best.hits && lab.drop) {
+      lab.el.remove();
+      if (lab.leader) lab.leader.remove();
+      continue;
+    }
+    if (best.dx || best.dy) {
+      lab.el.setAttribute("transform", `translate(${best.dx} ${best.dy}) ${lab.el.getAttribute("transform") || ""}`);
+      if (lab.leader) {
+        lab.leader.setAttribute("x2", Number(lab.leader.getAttribute("x2")) + best.dx);
+        lab.leader.setAttribute("y2", Number(lab.leader.getAttribute("y2")) + best.dy);
+      }
+    }
+    if (lab.prio > 0) { // a box behind the label: a line under it would show between words past the halo
+      const b = lab.el.getBBox();
+      svg.appendChild(s("rect", { x: b.x - 2, y: b.y - 1, width: b.width + 4, height: b.height + 2, class: "backdrop", transform: lab.el.getAttribute("transform") || "" }));
+    }
+    svg.appendChild(lab.el); // on top of the geometry
+    placed.push(best.quad);
+  }
+  return placed;
 }
 
 function drawFigure(R) {
@@ -1122,8 +996,15 @@ function drawFigure(R) {
   bb[0] -= pad; bb[1] += pad; bb[2] -= pad + 0.04 * span; bb[3] += pad;
 
   const W = Math.max(320, svg.parentElement.clientWidth || 800);
-  const ML = layers.leaders ? 128 : 24, MR = 60, MT = 46, MB = layers.leaders ? 46 : 20;
-  const maxH = Math.max(340, Math.min(window.innerHeight * 0.74, 920));
+  const ML = layers.leaders ? 128 : 24, MR = 60, MT = 46, MB = layers.leaders ? 64 : 38;
+  // An iframe fits its height to the page, so the compact view sizes by width alone. Side by
+  // side, the figure takes what the main column has left after the rest of the stage.
+  const mainCol = svg.closest(".main-col"), stage = svg.closest(".stage");
+  const fitted = !compact && window.matchMedia("(min-width: 921px)").matches;
+  const room = fitted
+    ? mainCol.clientHeight - (stage.getBoundingClientRect().height - svg.getBoundingClientRect().height)
+    : window.innerHeight * 0.74;
+  const maxH = compact ? Math.min(0.8 * W, 640) : Math.max(340, Math.min(room, 920));
   const scale = Math.min((W - ML - MR) / (bb[1] - bb[0]), (maxH - MT - MB) / (bb[3] - bb[2]));
   const H = (bb[3] - bb[2]) * scale + MT + MB;
   const offX = ML + ((W - ML - MR) - (bb[1] - bb[0]) * scale) / 2;
@@ -1146,12 +1027,17 @@ function drawFigure(R) {
     t.textContent = str;
     return t;
   };
+  // Labels to place once everything is drawn. prio: 0 rulers, 1 zlims / xlims, 2 probe and apex,
+  // 3 rlims, 4 polar_limits, 5 image captions, 6+ the rest.
+  const labels = [];
+  const fit = (el, prio, opts) => { labels.push({ el, prio, ...(opts || {}) }); return el; };
+  const FIXED = [[0, 0]];
 
   // Reference lines
   line(bb[0], 0, bb[1], 0, "faint-line", { "stroke-dasharray": "5 4" });
   line(0, bb[2], 0, bb[3], "faint-line", { "stroke-dasharray": "5 4" });
-  text(X(bb[0]) + 2, Y(0) - 5, "z = 0", "faint");
-  text(X(0) + 5, Y(bb[2]) + 12, "x = 0", "faint");
+  fit(text(X(bb[0]) + 2, Y(0) - 5, "z = 0", "faint"), 9, { drop: true });
+  fit(text(X(0) + 5, Y(bb[2]) + 12, "x = 0", "faint"), 9, { drop: true });
 
   // Rulers in mm along the top (x) and right (z) edges, so the scale survives auto-fitting
   const niceStep = (span, target) => {
@@ -1167,27 +1053,31 @@ function drawFigure(R) {
       const v = k * step, label = (v * MM).toFixed(digits);
       if (horizontal) {
         s("line", { x1: X(v), y1: at, x2: X(v), y2: at + 5, class: "ruler" }, svg);
-        text(X(v), at - 4, label, "ruler-text", "middle");
+        fit(text(X(v), at - 4, label, "ruler-text", "middle"), 0, { moves: FIXED });
       } else {
         s("line", { x1: at, y1: Y(v), x2: at - 5, y2: Y(v), class: "ruler" }, svg);
-        text(at + 5, Y(v) + 3.5, label, "ruler-text");
+        fit(text(at + 5, Y(v) + 3.5, label, "ruler-text"), 0, { moves: FIXED });
       }
     }
   };
   ruler(bb[0], bb[1], MT - 16, true);
   ruler(bb[2], bb[3], X(bb[1]) + 14, false);
-  text(X(bb[1]) + 10, MT - 20, "x, mm", "ruler-text");
-  text(X(bb[1]) + 10, Y(bb[3]) + 16, "z, mm", "ruler-text");
+  fit(text(X(bb[1]) + 10, MT - 20, "x, mm", "ruler-text"), 0, { moves: FIXED });
+  fit(text(X(bb[1]) + 10, Y(bb[3]) + 16, "z, mm", "ruler-text"), 0, { moves: FIXED });
 
-  // Scan-converted window and Parameters.extent
-  if (R.sc && layers.sc) {
-    s("rect", { x: X(R.sc.x_lim[0]), y: Y(R.sc.z_lim[0]), width: (R.sc.x_lim[1] - R.sc.x_lim[0]) * scale, height: (R.sc.z_lim[1] - R.sc.z_lim[0]) * scale, class: "sc" }, svg);
-    if (layers.labels) text(X(R.sc.x_lim[0]) + 4, Y(R.sc.z_lim[1]) - 6, "scan-converted image (x_lim × z_lim)", "faint");
-  }
-  if (layers.extent) {
-    const e = R.extent;
-    s("rect", { x: X(e[0]), y: Y(e[2]), width: (e[1] - e[0]) * scale, height: (e[3] - e[2]) * scale, class: "extent" }, svg);
-    if (layers.labels) text(X(e[1]) - 4, Y(e[3]) - 6, "Parameters.extent", "faint accent-text", "end");
+  // Scan-converted window and Parameters.extent, captioned on a line under the image
+  const sc = R.sc && layers.sc ? R.sc : null, e = R.extent;
+  if (sc) s("rect", { x: X(sc.x_lim[0]), y: Y(sc.z_lim[0]), width: (sc.x_lim[1] - sc.x_lim[0]) * scale, height: (sc.z_lim[1] - sc.z_lim[0]) * scale, class: "sc" }, svg);
+  if (layers.extent) s("rect", { x: X(e[0]), y: Y(e[2]), width: (e[1] - e[0]) * scale, height: (e[3] - e[2]) * scale, class: "extent" }, svg);
+  if (layers.labels && (sc || layers.extent)) {
+    const yCap = layers.leaders ? Y(bb[3]) + 40 : Y(sc ? Math.max(sc.z_lim[1], e[3]) : e[3]) + 18;
+    const same = sc && layers.extent && Math.max(Math.abs(sc.x_lim[0] - e[0]), Math.abs(sc.x_lim[1] - e[1]),
+      Math.abs(sc.z_lim[0] - e[2]), Math.abs(sc.z_lim[1] - e[3])) < 1e-5;
+    if (same) fit(text(X(e[1]), yCap, "scan-converted image = Parameters.extent", "faint", "end"), 5);
+    else {
+      if (sc) fit(text(X(sc.x_lim[0]), yCap, "scan-converted image (x_lim × z_lim)", "faint"), 5);
+      if (layers.extent) fit(text(X(e[1]), yCap, "Parameters.extent", "faint accent-text", "end"), 5);
+    }
   }
 
   // Grid: fill, mesh, outline
@@ -1212,7 +1102,7 @@ function drawFigure(R) {
   }
   if (R.minDepth != null && ge[2] < R.minDepth - 1e-9) {
     line(ge[0], R.minDepth, ge[1], R.minDepth, "crop-line");
-    if (layers.labels) text(X(ge[1]) + 6, Y(R.minDepth) + 4, "image top (zlims[0])", "code bad-text");
+    if (layers.labels) fit(text(X(ge[1]) + 6, Y(R.minDepth) + 4, "image top (zlims[0])", "code bad-text"), 6);
   }
 
   // Receive cones of the two end elements (zea's f-number mask)
@@ -1226,7 +1116,7 @@ function drawFigure(R) {
       if (Math.cos(t) <= 1e-6) return;
       const len = (zEnd - pz) / Math.cos(t);
       line(px, pz, px + len * Math.sin(t), pz + len * Math.cos(t), "cone");
-      if (layers.labels && sgn > 0) text(X(px + len * Math.sin(t)) - 4, Y(zEnd) - 6, `receive cone (f_number = ${R.fNumber.toFixed(1)})`, "faint", "end");
+      if (layers.labels && sgn > 0) fit(text(Math.min(X(px + len * Math.sin(t)), W) - 4, Y(zEnd) - 6, `receive cone (f_number = ${R.fNumber.toFixed(1)})`, "faint", "end"), 7);
     });
   }
 
@@ -1277,7 +1167,7 @@ function drawFigure(R) {
       if (!r || !r.q || !show) return;
       if (r.source) line(r.source[0], r.source[1], r.p[0], r.p[1], "tx", { "stroke-dasharray": "2 3" });
       line(r.p[0], r.p[1], r.q[0], r.q[1], "edge-ray");
-      if (layers.labels && n === 1) text(X(r.q[0]) - 4, Y(r.q[1]) + 15, "edge of the insonified region", "faint accent-text", "end");
+      if (layers.labels && n === 1) fit(text(X(r.q[0]) - 4, Y(r.q[1]) + 15, "edge of the insonified region", "faint accent-text", "end"), 7);
     });
   }
 
@@ -1298,19 +1188,25 @@ function drawFigure(R) {
   // grid_apex
   if (hasApex) s("circle", { cx: X(0), cy: Y(-R.d), r: 3.6, class: "ink-fill" }, svg);
   if (layers.labels) {
-    const [xe, ze] = R.pg[R.pg.length - 1];
-    s("line", { x1: X(xe) + 2, y1: Y(ze) - 2, x2: X(xe) + 18, y2: Y(ze) - 16, class: "ink", "stroke-width": 0.8 }, svg);
-    text(X(xe) + 20, Y(ze) - 18, "probe_geometry", "code");
+    // probe_geometry on the left, clear of the rlims dimension lines on the right
+    const [x0, z0] = R.pg[0];
+    const px0 = X(x0) - 16, py0 = Y(Math.min(z0, 0)) - 14;
+    const probeLead = s("line", { x1: X(x0) - 2, y1: Y(z0) - 2, x2: px0 + 2, y2: py0 - 4, class: "ink", "stroke-width": 0.8 }, svg);
+    fit(text(px0, py0, "probe_geometry", "code", "end"), 2, { leader: probeLead });
     if (!hasApex) {
       // nothing to mark: a cartesian grid has no apex
     } else if (R.d * scale > 14) {
+      // Behind the array: the name above the apex, its distance on a dimension line to the left
       const px = X(0) - 12;
       s("line", { x1: px, y1: Y(0), x2: px, y2: Y(-R.d), class: "ink", "stroke-width": 1, "marker-start": "url(#arr)", "marker-end": "url(#arr)" }, svg);
       s("line", { x1: X(0) - 3, y1: Y(-R.d), x2: px - 4, y2: Y(-R.d), class: "ink", "stroke-width": 0.6 }, svg);
-      text(px - 6, (Y(0) + Y(-R.d)) / 2 + 4, `${fmtMM(R.d)} mm`, "code", "end");
-      text(X(0) + 8, Y(-R.d) + 4, `grid_apex = ${apexStr(R)}`, "code");
+      fit(text(px - 6, (Y(0) + Y(-R.d)) / 2 + 4, `${fmtMM(R.d)} mm`, "code", "end"), 2);
+      fit(text(X(0), Y(-R.d) - 10, `grid_apex = ${apexStr(R)}`, "code", "middle"), 2);
     } else {
-      text(X(0) - 8, Y(-R.d) - 8, `grid_apex = ${apexStr(R)}`, "code", "end");
+      // At the array: up and to the left, above probe_geometry
+      const ax = X(0) - 14, ay = Y(-R.d) - 34;
+      const apexLead = s("line", { x1: X(0) - 2, y1: Y(-R.d) - 3, x2: ax + 2, y2: ay - 4, class: "ink", "stroke-width": 0.8 }, svg);
+      fit(text(ax, ay, `grid_apex = ${apexStr(R)}`, "code", "end"), 2, { leader: apexLead });
     }
   }
 
@@ -1323,26 +1219,37 @@ function drawFigure(R) {
       if (Math.abs(t) < 1e-4) return;
       poly(arc(0, t), "ink", { "stroke-width": 1, "marker-end": "url(#arr)" });
       const tm = t / 2, lx = (rA + 0.02 * span) * Math.sin(tm), lz = (rA + 0.02 * span) * Math.cos(tm) - R.d;
-      text(X(lx) + (t < 0 ? -4 : 4), Y(lz) + 14, `polar_limits[${k}] = ${fmtDeg(t)}°`, "code", t < 0 ? "end" : "start");
+      fit(text(X(lx) + (t < 0 ? -4 : 4), Y(lz) + 14, `polar_limits[${k}] = ${fmtDeg(t)}°`, "code", t < 0 ? "end" : "start"), 4);
     });
 
     // rlims: dimension lines along the wider edge ray
     const te = Math.abs(R.polarLimits[1]) >= Math.abs(R.polarLimits[0]) ? R.polarLimits[1] : R.polarLimits[0];
     const sgn = te >= 0 ? 1 : -1;
     const dir = [Math.sin(te), Math.cos(te)], outw = [sgn * Math.cos(te), -sgn * Math.sin(te)];
-    let rot = Math.atan2(dir[1], dir[0]) * DEG;
-    if (rot > 90) rot -= 180;
-    if (rot < -90) rot += 180;
-    [[R.rLims[0], 16, 0], [R.rLims[1], 34, 1]].forEach(([r, offPx, k]) => {
+    const rot0 = Math.atan2(dir[1], dir[0]) * DEG;
+    const rot = rot0 > 90 ? rot0 - 180 : rot0 < -90 ? rot0 + 180 : rot0;
+    const along = [Math.cos(rot / DEG), Math.sin(rot / DEG)]; // reading direction, px
+    // Each label sits on its dimension line; a line too short to hold it has it just past the far end
+    [[R.rLims[0], 18, 0], [R.rLims[1], 42, 1]].forEach(([r, offPx, k]) => {
       const off = offPx / scale;
       const a = [outw[0] * off, -R.d + outw[1] * off];
       const b = [r * dir[0] + outw[0] * off, r * dir[1] - R.d + outw[1] * off];
       line(0, -R.d, a[0], a[1], "ink", { "stroke-width": 0.5 });
       line(r * dir[0], r * dir[1] - R.d, b[0], b[1], "ink", { "stroke-width": 0.5 });
       if (r * scale > 12) line(a[0], a[1], b[0], b[1], "ink", { "stroke-width": 1, "marker-start": "url(#arr)", "marker-end": "url(#arr)" });
-      const mid = r * scale > 150 ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : [b[0] + dir[0] * (60 / scale), b[1] + dir[1] * (60 / scale)];
-      const t = text(X(mid[0]), Y(mid[1]), `rlims[${k}] = ${fmtMM(r)} mm`, "code", "middle", { dy: "-4" });
-      t.setAttribute("transform", `rotate(${rot.toFixed(2)} ${X(mid[0]).toFixed(1)} ${Y(mid[1]).toFixed(1)})`);
+      const str = `rlims[${k}] = ${fmtMM(r)} mm`;
+      const fits = r * scale > 7.5 * str.length + 30;
+      const at = fits ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : [b[0] + dir[0] * (8 / scale), b[1] + dir[1] * (8 / scale)];
+      const anchor = fits ? "middle" : rot === rot0 ? "start" : "end";
+      const t = text(X(at[0]), Y(at[1]), str, "code", anchor, { dy: "0.35em" });
+      t.setAttribute("transform", `rotate(${rot.toFixed(2)} ${X(at[0]).toFixed(1)} ${Y(at[1]).toFixed(1)})`);
+      t.rotation = { rot, cx: X(at[0]), cy: Y(at[1]) };
+      // Slide along the line; off it only when that is not enough
+      const moves = [];
+      for (const side of [0, 1, -1, 2, -2]) for (const n of [0, 1, -1, 2, -2, 3, -3, 4, -4]) {
+        moves.push([n * 20 * along[0] - side * 16 * along[1], n * 20 * along[1] + side * 16 * along[0]]);
+      }
+      fit(t, 3, { moves });
     });
   }
 
@@ -1351,14 +1258,23 @@ function drawFigure(R) {
     const left = X(bb[0]) - 8;
     R.zlims.forEach((z, k) => {
       s("line", { x1: X(0), y1: Y(z), x2: left + 4, y2: Y(z), class: "faint-line", "stroke-dasharray": "4 3" }, svg);
-      text(left, Y(z) + 4, `zlims[${k}] = ${fmtMM(z, 1)} mm`, "code", "end");
+      fit(text(left, Y(z) + 4, `zlims[${k}] = ${fmtMM(z, 1)} mm`, "code", "end"), 1, { moves: [[0, 0], [0, -14], [0, 14]] });
     });
+    // Aligned inward, under the image rather than into the rulers
     const bottom = Y(bb[3]) + 18;
     R.xlims.forEach((x, k) => {
       s("line", { x1: X(x), y1: Y(R.zlims[1]), x2: X(x), y2: bottom - 12, class: "faint-line", "stroke-dasharray": "4 3" }, svg);
-      text(X(x), bottom + 4, `xlims[${k}] = ${fmtMM(x, 1)} mm`, "code", k === 0 ? "end" : "start");
+      fit(text(X(x), bottom + 4, `xlims[${k}] = ${fmtMM(x, 1)} mm`, "code", k === 0 ? "start" : "end"), 1, { moves: [[0, 0], [0, 15], [0, 30]] });
     });
   }
+
+  // Grow the view to whatever the placed labels reach (geometry past the edges stays clipped)
+  const pts = placeLabels(svg, labels, W).flat();
+  const vx = Math.min(0, ...pts.map((p) => p[0] - 2)), vy = Math.min(0, ...pts.map((p) => p[1] - 2));
+  const vw = Math.max(W, ...pts.map((p) => p[0] + 2)) - vx, vh = Math.max(H, ...pts.map((p) => p[1] + 2)) - vy;
+  svg.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+  svg.setAttribute("width", vw);
+  svg.setAttribute("height", vh);
 }
 
 function buildLayerToggles() {
@@ -1386,71 +1302,27 @@ function buildLayerToggles() {
   for (const [draw, label] of items) legend.append(h("span", {}, swatch(draw), label));
 }
 
-/* --------------------------- python export --------------------------- */
-function pyNum(v) {
-  if (v === Infinity) return "np.inf";
-  if (v === -Infinity) return "-np.inf";
-  if (v === 0) return "0.0";
-  const a = Math.abs(v);
-  if (a < 1e-2 || a >= 1e5) return v.toExponential(4).replace(/\.?0+e/, "e").replace("e+", "e");
-  return String(Number(v.toPrecision(6)));
-}
-function pythonCode(s) {
-  const es = engineState(s);
-  const lines = ["import numpy as np", "", "import zea"];
-  lines.push(s.probe === "curved" ? "from zea.probes import create_curved_probe_geometry" : "from zea.probes import create_probe_geometry", "");
-  lines.push(s.probe === "curved"
-    ? `probe_geometry = create_curved_probe_geometry(n_el=${s.n_el}, pitch=${pyNum(s.pitch)}, radius=${pyNum(s.radius)})`
-    : `probe_geometry = create_probe_geometry(n_el=${s.n_el}, pitch=${pyNum(s.pitch)})`);
-  lines.push(`n_tx = ${s.n_tx}`);
-  lines.push(s.n_tx === 1 ? "polar_angles = np.zeros(n_tx)" : `polar_angles = np.linspace(-np.radians(${pyNum(s.tx_span_deg)}), np.radians(${pyNum(s.tx_span_deg)}), n_tx)`);
-  lines.push("transmit_origins = np.zeros((n_tx, 3))");
-  if (s.tx_origins === "array") {
-    if (s.probe === "curved") {
-      lines.push(`transmit_origins[:, 0] = ${pyNum(s.radius)} * np.sin(polar_angles)`);
-      lines.push(`transmit_origins[:, 2] = ${pyNum(s.radius)} * np.cos(polar_angles) - ${pyNum(s.radius)}`);
-    } else if (s.n_tx > 1) {
-      lines.push("half = np.ptp(probe_geometry[:, 0]) / 2");
-      lines.push(s.tx_span_deg > 0
-        ? `transmit_origins[:, 0] = half / np.tan(np.radians(${pyNum(s.tx_span_deg)})) * np.tan(polar_angles)  # axes meet behind the array`
-        : "transmit_origins[:, 0] = np.linspace(-half, half, n_tx)");
-    }
-  }
-  lines.push(`focus_distances = np.full(n_tx, ${pyNum(es.focus_distance == null ? Infinity : es.focus_distance)})`, "");
-  const kw = [
-    ["probe_geometry", "probe_geometry"], ["grid_type", `"${s.grid_type}"`],
-    ["enable_scanline", s.enable_scanline ? "True" : "False"],
-  ];
-  const pair = (a) => `(${pyNum(a[0])}, ${pyNum(a[1])})`;
-  kw.push(["center_frequency", pyNum(s.center_frequency)], ["sampling_frequency", pyNum(s.sampling_frequency)],
-    ["sound_speed", pyNum(s.sound_speed)], ["n_el", String(s.n_el)], ["n_tx", "n_tx"],
-    ["n_ax", String(s.n_ax)], ["polar_angles", "polar_angles"], ["transmit_origins", "transmit_origins"],
-    ["focus_distances", "focus_distances"]);
-  const overrides = [];
-  if (s.zlims) overrides.push(["zlims", pair(s.zlims)]);
-  if (s.polar_limits && s.grid_type === "polar") overrides.push(["polar_limits", pair(s.polar_limits)]);
-  if (s.xlims) overrides.push(["xlims", pair(s.xlims)]);
-  if (s.grid_size_x != null && !s.enable_scanline) overrides.push(["grid_size_x", String(s.grid_size_x)]);
-  if (s.grid_size_z != null) overrides.push(["grid_size_z", String(s.grid_size_z)]);
-  if (s.f_number != null) overrides.push(["f_number", pyNum(s.f_number)]);
-  if (s.polar_margin != null) overrides.push(["polar_margin", `np.radians(${pyNum(s.polar_margin * DEG)})`]);
-  if (s.pixels_per_wavelength != null) overrides.push(["pixels_per_wavelength", String(s.pixels_per_wavelength)]);
-  lines.push("parameters = zea.Parameters(");
-  for (const [k, v] of kw) lines.push(`    ${k}=${v},`);
-  if (overrides.length) lines.push("    # overrides");
-  for (const [k, v] of overrides) lines.push(`    ${k}=${v},`);
-  lines.push(")");
-  return lines.join("\n");
+/* ------------------------------- wiring ------------------------------- */
+// ?view=compact shows only the drawing, as the docs embed it, without transmits or receive cones.
+const compact = query.get("view") === "compact";
+if (compact) {
+  document.documentElement.classList.add("compact");
+  Object.assign(layers, { transmits: false, cones: false });
 }
 
-/* ------------------------------- wiring ------------------------------- */
+let urlTimer = null;
 function update() {
   const R = resolve(engineState(state));
   syncControls(R);
   drawFigure(R);
-  renderChecks(R);
-  renderValues(R);
-  document.getElementById("code").textContent = pythonCode(state);
+  // Compact: the link opens this view in full. Full: the address follows the controls (throttled,
+  // since browsers limit how often a page may rewrite it).
+  const q = stateQuery(state);
+  if (compact) document.getElementById("open").href = `?${q}`;
+  else {
+    clearTimeout(urlTimer);
+    urlTimer = setTimeout(() => history.replaceState(null, "", q ? `?${q}` : window.location.pathname), 250);
+  }
 }
 
 // When embedded in the furo docs (same-origin iframe), follow the docs' theme toggle.
@@ -1476,18 +1348,26 @@ document.getElementById("parity").addEventListener("click", (e) => {
   panel.hidden = !panel.hidden;
   e.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
 });
-document.getElementById("copy").addEventListener("click", (e) => {
-  const btn = e.currentTarget, code = document.getElementById("code");
-  const done = (msg) => { btn.textContent = msg; setTimeout(() => { btn.textContent = "Copy"; }, 1500); };
-  const fallback = () => {
-    const range = document.createRange(); range.selectNodeContents(code);
-    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-    done("Selected");
-  };
-  try { navigator.clipboard.writeText(code.textContent).then(() => done("Copied"), fallback); } catch (err) { fallback(); }
+document.getElementById("copy-link").addEventListener("click", (e) => {
+  const btn = e.currentTarget;
+  const done = (msg) => { btn.textContent = msg; setTimeout(() => { btn.textContent = "Copy link"; }, 1500); };
+  const url = new URL(`?${stateQuery(state)}`, window.location.href).href;
+  try { navigator.clipboard.writeText(url).then(() => done("Copied"), () => done("Copy the address")); } catch (err) { done("Copy the address"); }
 });
 let resizeTimer = null;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(update, 120); });
+// Tell the embedding page how tall the content is, so its iframe fits the figure.
+if (window.parent !== window) {
+  const postHeight = () => window.parent.postMessage(
+    { type: "zea-explorer-height", height: Math.ceil(document.body.getBoundingClientRect().height) }, "*");
+  new ResizeObserver(postHeight).observe(document.body);
+}
+// Labels are placed by their measured size, so place them again once the web fonts are in
+// (fonts.ready alone can settle before the first label has asked for its font).
+if (document.fonts) {
+  document.fonts.ready.then(update);
+  document.fonts.addEventListener("loadingdone", update);
+}
 update();
 runParity();
 </script>
