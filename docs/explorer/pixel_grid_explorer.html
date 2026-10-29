@@ -242,8 +242,8 @@
             <li><b><code>polar_limits</code></b>: the range of the transmit angles, widened on each side to cover what the transmits insonify at the deepest pixel <code>zlims[1]</code>.
               Each transmit's region is bounded by two edge rays: focused → its axis (no margin); plane wave → from the array ends along its angle (along the end elements' normals on a curved array); diverging wave → from its virtual source through the array ends.
               <code>polar_margin</code> replaces the automatic margin with a fixed angle. Scanline mode has no margin, because the columns are the transmits.</li>
-            <li><b><code>rho_range</code></b> = <code>zlims − grid_apex[2]</code>: radii from the apex, used by scan conversion.</li>
-            <li><b><code>enable_scanline</code></b>: one column per focused transmit, each beamformed with its own transmit only. Steered lines whose axes meet in one point use a polar grid: the polar grid with one column per transmit angle (<code>grid_size_x = n_tx</code>, <code>polar_limits</code> = the angle range, no override), rows at <code>rho_range</code> from <code>grid_apex</code>, so the columns lie on the transmit axes. Unsteered, parallel lines use a cartesian grid: a vertical column under each transmit. Anything else raises a <code>ValueError</code>.</li>
+            <li><b><code>rlims</code></b> = <code>zlims − grid_apex[2]</code>: radii from the apex, used by scan conversion.</li>
+            <li><b><code>enable_scanline</code></b>: one column per focused transmit, each beamformed with its own transmit only. Steered lines whose axes meet in one point use a polar grid: the polar grid with one column per transmit angle (<code>grid_size_x = n_tx</code>, <code>polar_limits</code> = the angle range, no override), rows at <code>rlims</code> from <code>grid_apex</code>, so the columns lie on the transmit axes. Unsteered, parallel lines use a cartesian grid: a vertical column under each transmit. Anything else raises a <code>ValueError</code>.</li>
             <li><b><code>grid_size_x</code></b> of a polar grid: the outer arc length, <code>(zlims[1] − grid_apex[2]) · (polar_limits[1] − polar_limits[0])</code>, divided by <code>wavelength / pixels_per_wavelength</code>.</li>
             <li><b><code>extent</code></b> of a polar grid: the window the scan-converted image fills. <code>x</code> spans <code>xlims</code>; <code>z</code> spans the grid, but on a flat array starts at <code>zlims[0]</code>, which crops the pixels a virtual apex places behind the array. A curved array needs no crop.</li>
             <li><b>Radius of curvature</b>: a probe property fitted from <code>probe_geometry</code> (∞ for a flat array), kept apart from the apex.</li>
@@ -479,7 +479,7 @@ function resolve(s) {
   edges.xRight = reaching.reduce((m, r) => (!m || r.q[0] > m.q[0] ? r : m), null);
   if (s.polar_margin != null) polarMargin = { auto: false, left: s.polar_margin, right: s.polar_margin };
 
-  // Parameters.polar_limits / theta_range
+  // Parameters.polar_limits
   let polarLimits;
   if (scanline) {
     polarLimits = [lo, hi];
@@ -501,7 +501,7 @@ function resolve(s) {
     src.grid_apex = "virtual apex, sector edges through the array ends";
   } else { d = 0; src.grid_apex = "the middle of the array (no sector)"; }
 
-  const rhoRange = [zlims[0] + d, zlims[1] + d]; // Parameters.rho_range = zlims - grid_apex[2]
+  const rLims = [zlims[0] + d, zlims[1] + d]; // Parameters.rlims = zlims - grid_apex[2]
   const wavelength = f32(c / fc); // Parameters.wavelength
 
   const kind = scanline ? (s.grid_type === "polar" ? "scanline-polar" : "scanline-cartesian") : s.grid_type;
@@ -512,7 +512,7 @@ function resolve(s) {
   if (s.xlims) { xlims = s.xlims.map(f32); src.xlims = "override"; }
   else if (polarKind) {
     const xsGrid = [];
-    for (const r of rhoRange) for (const t of polarLimits) xsGrid.push(r * Math.sin(t));
+    for (const r of rLims) for (const t of polarLimits) xsGrid.push(r * Math.sin(t));
     xlims = [arrMin(xsGrid), arrMax(xsGrid)];
     src.xlims = "default: lateral extent of the polar grid";
   } else if (kind === "scanline-cartesian") {
@@ -548,7 +548,7 @@ function resolve(s) {
   // Parameters.grid -> point(i, j) = [x, z] for row i (depth) and column j
   let point, theta = null;
   if (polarKind) { // pixelgrid.polar_pixel_grid (scanline: one column per transmit angle)
-    const r0 = rhoRange[0], dr = (rhoRange[1] - r0) / Math.max(gz - 1, 1);
+    const r0 = rLims[0], dr = (rLims[1] - r0) / Math.max(gz - 1, 1);
     theta = kind === "polar" ? linspace(polarLimits[0], polarLimits[1], gx) : tx.angles;
     point = (i, j) => { const r = r0 + i * dr; return [r * Math.sin(theta[j]), r * Math.cos(theta[j]) - d]; };
   } else if (kind === "cartesian") { // pixelgrid.cartesian_pixel_grid
@@ -580,7 +580,7 @@ function resolve(s) {
   // output window is the extent
   let sc = null;
   if (s.grid_type === "polar" && gx >= 2 && gz >= 2) {
-    const rho = linspace(rhoRange[0], rhoRange[1], gz).map(f32);
+    const rho = linspace(rLims[0], rLims[1], gz).map(f32);
     const th = linspace(polarLimits[0], polarLimits[1], gx).map(f32);
     const resolution = (0.25 * (rho[0] + rho[gz - 1]) * (th[1] - th[0]) + (rho[1] - rho[0])) / 2;
     sc = { x_lim: [extent[0], extent[1]], z_lim: [extent[2], extent[3]], resolution, rho, th };
@@ -589,7 +589,7 @@ function resolve(s) {
   return {
     kind, src, pg, tx, apertureX, radius, curved, zlims, polarLimits, d, rayApex, steered,
     virtualSource, fNumber, ppw, edges, polarMargin, acceptance, scanlineBlock, scanlineError,
-    rhoRange, wavelength, xlims, gx, gz, point, theta, gridExtent, extent, minDepth, sc,
+    rLims, wavelength, xlims, gx, gz, point, theta, gridExtent, extent, minDepth, sc,
   };
 }
 
@@ -627,7 +627,7 @@ function runParity() {
     num("f_number", R.fNumber, e.f_number);
     e.xlims.forEach((v, k) => num(`xlims[${k}]`, R.xlims[k], v));
     e.zlims.forEach((v, k) => num(`zlims[${k}]`, R.zlims[k], v));
-    e.rho_range.forEach((v, k) => num(`rho_range[${k}]`, R.rhoRange[k], v));
+    e.rlims.forEach((v, k) => num(`rlims[${k}]`, R.rLims[k], v));
     if (e.polar_limits) e.polar_limits.forEach((v, k) => num(`polar_limits[${k}]`, R.polarLimits[k], v));
     int("grid_size_x", R.gx, e.grid_size_x);
     int("grid_size_z", R.gz, e.grid_size_z);
@@ -666,7 +666,7 @@ function runParity() {
   details.innerHTML = "";
   const p = document.createElement("p");
   p.style.margin = "0 0 6px";
-  p.textContent = `On load, the page re-runs ${fixtures.length} configurations that were computed by zea itself (grid_apex, polar_limits, xlims, zlims, rho_range, f_number, grid sizes, grid points, extent, the scan-conversion window, and which scanline requests zea rejects), and compares them with its own port. Tolerance: 1 µm + 0.01 %.`;
+  p.textContent = `On load, the page re-runs ${fixtures.length} configurations that were computed by zea itself (grid_apex, polar_limits, xlims, zlims, rlims, f_number, grid sizes, grid points, extent, the scan-conversion window, and which scanline requests zea rejects), and compares them with its own port. Tolerance: 1 µm + 0.01 %.`;
   details.appendChild(p);
   if (failures.length) {
     const ul = document.createElement("ul");
@@ -931,7 +931,7 @@ function computeChecks(R) {
     const ok = err < 0.5 * R.sc.resolution;
     out.push({ s: ok ? "ok" : "bad", t: "Scan conversion puts pixels where the grid has them",
       d: ok ? `Largest offset ${fmtMM(err, 3)} mm, below half an output pixel.`
-        : `Pixels land up to <code>${fmtMM(err)} mm</code> from their grid position. Scan conversion assumes every column starts at <code>grid_apex</code> and that every row sits at one radius from it (<code>rho_range</code>), which this grid does not satisfy.` });
+        : `Pixels land up to <code>${fmtMM(err)} mm</code> from their grid position. Scan conversion assumes every column starts at <code>grid_apex</code> and that every row sits at one radius from it (<code>rlims</code>), which this grid does not satisfy.` });
   }
 
   let behind = 0, worst = 0, total = 0;
@@ -1016,7 +1016,7 @@ function computeChecks(R) {
       }
     } else if (!R.rayApex.concurrent) {
       out.push({ s: miss, t: "Transmit axes meet in one point",
-        d: `They cross x = 0 over a ${fmtMM(R.rayApex.spread)} mm range${scan ? ", so no single apex (and no rho_range / theta_range) describes this scan" : ", so the transmits define no apex"}.` });
+        d: `They cross x = 0 over a ${fmtMM(R.rayApex.spread)} mm range${scan ? ", so no single apex (and no rlims / polar_limits) describes this scan" : ", so the transmits define no apex"}.` });
     } else {
       const match = Math.abs(Math.max(R.rayApex.d, 0) - R.d) < 1e-4;
       out.push({ s: match ? "ok" : miss, t: "Grid fans out from where the transmits meet",
@@ -1036,8 +1036,7 @@ function valueRows(R) {
     ["zlims", pairMM(R.zlims), R.src.zlims],
     ["xlims", pairMM(R.xlims), R.src.xlims],
     ["polar_limits", pairDeg(R.polarLimits), R.src.polar_limits],
-    ["theta_range", pairDeg(R.polarLimits), "default: polar_limits"],
-    ["rho_range", pairMM(R.rhoRange), "zlims − grid_apex[2]: radii from the apex"],
+    ["rlims", pairMM(R.rLims), "zlims − grid_apex[2]: radii from the apex"],
     ["grid_size_x", String(R.gx), R.src.grid_size_x],
     ["grid_size_z", String(R.gz), R.src.grid_size_z],
     ["f_number", R.fNumber.toFixed(2), R.src.f_number],
@@ -1318,7 +1317,7 @@ function drawFigure(R) {
   const polarLike = R.kind === "polar";
   if (layers.labels && polarLike) {
     // polar_limits: signed angles from the central axis
-    const rA = 0.35 * R.rhoRange[1];
+    const rA = 0.35 * R.rLims[1];
     const arc = (t0, t1) => Array.from({ length: 41 }, (_, k) => { const t = t0 + ((t1 - t0) * k) / 40; return [rA * Math.sin(t), rA * Math.cos(t) - R.d]; });
     R.polarLimits.forEach((t, k) => {
       if (Math.abs(t) < 1e-4) return;
@@ -1327,14 +1326,14 @@ function drawFigure(R) {
       text(X(lx) + (t < 0 ? -4 : 4), Y(lz) + 14, `polar_limits[${k}] = ${fmtDeg(t)}°`, "code", t < 0 ? "end" : "start");
     });
 
-    // rho_range: dimension lines along the wider edge ray
+    // rlims: dimension lines along the wider edge ray
     const te = Math.abs(R.polarLimits[1]) >= Math.abs(R.polarLimits[0]) ? R.polarLimits[1] : R.polarLimits[0];
     const sgn = te >= 0 ? 1 : -1;
     const dir = [Math.sin(te), Math.cos(te)], outw = [sgn * Math.cos(te), -sgn * Math.sin(te)];
     let rot = Math.atan2(dir[1], dir[0]) * DEG;
     if (rot > 90) rot -= 180;
     if (rot < -90) rot += 180;
-    [[R.rhoRange[0], 16, 0], [R.rhoRange[1], 34, 1]].forEach(([r, offPx, k]) => {
+    [[R.rLims[0], 16, 0], [R.rLims[1], 34, 1]].forEach(([r, offPx, k]) => {
       const off = offPx / scale;
       const a = [outw[0] * off, -R.d + outw[1] * off];
       const b = [r * dir[0] + outw[0] * off, r * dir[1] - R.d + outw[1] * off];
@@ -1342,7 +1341,7 @@ function drawFigure(R) {
       line(r * dir[0], r * dir[1] - R.d, b[0], b[1], "ink", { "stroke-width": 0.5 });
       if (r * scale > 12) line(a[0], a[1], b[0], b[1], "ink", { "stroke-width": 1, "marker-start": "url(#arr)", "marker-end": "url(#arr)" });
       const mid = r * scale > 150 ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : [b[0] + dir[0] * (60 / scale), b[1] + dir[1] * (60 / scale)];
-      const t = text(X(mid[0]), Y(mid[1]), `rho_range[${k}] = ${fmtMM(r)} mm`, "code", "middle", { dy: "-4" });
+      const t = text(X(mid[0]), Y(mid[1]), `rlims[${k}] = ${fmtMM(r)} mm`, "code", "middle", { dy: "-4" });
       t.setAttribute("transform", `rotate(${rot.toFixed(2)} ${X(mid[0]).toFixed(1)} ${Y(mid[1]).toFixed(1)})`);
     });
   }

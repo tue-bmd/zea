@@ -14,7 +14,7 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 from scipy.ndimage import zoom
 from skimage import measure
 
-from zea.display import frustum_convert_rtp2xyz
+from zea.display import _deprecated_alias, frustum_convert_rtp2xyz
 
 DEFAULT_STYLE: str = str(importlib.resources.files("zea") / "zea_darkmode.mplstyle")
 
@@ -433,9 +433,9 @@ def plot_biplanes(
 
 
 def plot_frustum_vertices(
-    rho_range,
-    theta_range,
-    phi_range,
+    rlims=None,
+    lateral_tilt_limits=None,
+    elevation_tilt_limits=None,
     num_points=20,
     phi_plane=None,
     theta_plane=None,
@@ -446,19 +446,26 @@ def plot_frustum_vertices(
     phi_style=None,
     theta_style=None,
     rho_style=None,
+    *,
+    rho_range=None,
+    theta_range=None,
+    phi_range=None,
 ):
     """
-    Plots the vertices of a frustum in spherical coordinates and highlights specified planes.
+    Plots the vertices of a frustum and highlights specified planes.
+
+    The frustum is spanned by radius ``rho``, lateral tilt ``theta = atan(x / z)`` and
+    elevation tilt ``phi = atan(y / z)``, as in :func:`zea.display.scan_convert_3d`.
 
     Args:
-        rho_range (tuple): Range of rho values (min, max).
-        theta_range (tuple): Range of theta values (min, max).
-        phi_range (tuple): Range of phi values (min, max).
+        rlims (tuple): Radius ``(rho_min, rho_max)``.
+        lateral_tilt_limits (tuple): Lateral tilt ``(theta_min, theta_max)`` [rad].
+        elevation_tilt_limits (tuple): Elevation tilt ``(phi_min, phi_max)`` [rad].
         num_points (int, optional): Number of points to generate along each edge.
             Defaults to 20.
-        phi_plane (float or list, optional): Value(s) of phi at which to plot plane(s).
+        phi_plane (float or list, optional): Elevation tilt(s) at which to plot plane(s).
             Defaults to None.
-        theta_plane (float or list, optional): Value(s) of theta at which to plot plane(s).
+        theta_plane (float or list, optional): Lateral tilt(s) at which to plot plane(s).
             Defaults to None.
         rho_plane (float or list, optional): Value(s) of rho at which to plot plane(s).
             Defaults to None.
@@ -478,6 +485,9 @@ def plot_frustum_vertices(
         rho_style (dict, optional): Style dictionary for rho plane(s). Can include
             'color', 'linestyle', 'linewidth', 'alpha', etc.
             Defaults to {'color': 'red', 'linestyle': '--'}.
+        rho_range (tuple, optional): Deprecated, use ``rlims``.
+        theta_range (tuple, optional): Deprecated, use ``lateral_tilt_limits``.
+        phi_range (tuple, optional): Deprecated, use ``elevation_tilt_limits``.
 
     Returns:
         tuple: A tuple containing the figure and axes objects (fig, ax).
@@ -489,13 +499,10 @@ def plot_frustum_vertices(
         .. doctest::
 
             >>> from zea.visualize import plot_frustum_vertices
-            >>> rho_range = [0.1, 10]  # in mm
-            >>> theta_range = [-0.6, 0.6]  # in rad
-            >>> phi_range = [-0.6, 0.6]  # in rad
             >>> fig, ax = plot_frustum_vertices(
-            ...     rho_range,
-            ...     theta_range=theta_range,
-            ...     phi_range=phi_range,
+            ...     rlims=[0.1e-3, 10e-3],  # in m
+            ...     lateral_tilt_limits=[-0.6, 0.6],  # in rad
+            ...     elevation_tilt_limits=[-0.6, 0.6],  # in rad
             ...     phi_plane=0,
             ...     phi_style={"color": "red", "linestyle": "--", "linewidth": 2},
             ...     theta_plane=0.2,
@@ -503,6 +510,17 @@ def plot_frustum_vertices(
             ...     frustum_style={"color": "blue", "linewidth": 1.5},
             ... )
     """
+    caller = "plot_frustum_vertices"
+    rho_lims = _deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
+    theta_lims = _deprecated_alias(
+        lateral_tilt_limits, theta_range, "theta_range", "lateral_tilt_limits", caller
+    )
+    phi_lims = _deprecated_alias(
+        elevation_tilt_limits, phi_range, "phi_range", "elevation_tilt_limits", caller
+    )
+    if rho_lims is None or theta_lims is None or phi_lims is None:
+        raise ValueError("rlims, lateral_tilt_limits and elevation_tilt_limits are required.")
+
     # Convert single values to lists
     phi_plane = [phi_plane] if isinstance(phi_plane, (int, float)) else phi_plane
     theta_plane = [theta_plane] if isinstance(theta_plane, (int, float)) else theta_plane
@@ -529,19 +547,19 @@ def plot_frustum_vertices(
     edges = []
 
     # Edges along rho (vertical edges)
-    for theta in theta_range:
-        for phi in phi_range:
-            edges.append(((rho_range[0], theta, phi), (rho_range[1], theta, phi)))
+    for theta in theta_lims:
+        for phi in phi_lims:
+            edges.append(((rho_lims[0], theta, phi), (rho_lims[1], theta, phi)))
 
     # Edges along theta (near and far planes)
-    for rho in rho_range:
-        for phi in phi_range:
-            edges.append(((rho, theta_range[0], phi), (rho, theta_range[1], phi)))
+    for rho in rho_lims:
+        for phi in phi_lims:
+            edges.append(((rho, theta_lims[0], phi), (rho, theta_lims[1], phi)))
 
     # Edges along phi (near and far planes)
-    for rho in rho_range:
-        for theta in theta_range:
-            edges.append(((rho, theta, phi_range[0]), (rho, theta, phi_range[1])))
+    for rho in rho_lims:
+        for theta in theta_lims:
+            edges.append(((rho, theta, phi_lims[0]), (rho, theta, phi_lims[1])))
 
     # Function to generate edge points
     def generate_edge_points(start, end, num_points):
@@ -583,58 +601,58 @@ def plot_frustum_vertices(
         if plane_type == "phi":
             return [
                 (
-                    (rho_range[0], theta_range[0], plane_value),
-                    (rho_range[1], theta_range[0], plane_value),
+                    (rho_lims[0], theta_lims[0], plane_value),
+                    (rho_lims[1], theta_lims[0], plane_value),
                 ),
                 (
-                    (rho_range[0], theta_range[1], plane_value),
-                    (rho_range[1], theta_range[1], plane_value),
+                    (rho_lims[0], theta_lims[1], plane_value),
+                    (rho_lims[1], theta_lims[1], plane_value),
                 ),
                 (
-                    (rho_range[0], theta_range[0], plane_value),
-                    (rho_range[0], theta_range[1], plane_value),
+                    (rho_lims[0], theta_lims[0], plane_value),
+                    (rho_lims[0], theta_lims[1], plane_value),
                 ),
                 (
-                    (rho_range[1], theta_range[0], plane_value),
-                    (rho_range[1], theta_range[1], plane_value),
+                    (rho_lims[1], theta_lims[0], plane_value),
+                    (rho_lims[1], theta_lims[1], plane_value),
                 ),
             ]
         elif plane_type == "theta":
             return [
                 (
-                    (rho_range[0], plane_value, phi_range[0]),
-                    (rho_range[1], plane_value, phi_range[0]),
+                    (rho_lims[0], plane_value, phi_lims[0]),
+                    (rho_lims[1], plane_value, phi_lims[0]),
                 ),
                 (
-                    (rho_range[0], plane_value, phi_range[1]),
-                    (rho_range[1], plane_value, phi_range[1]),
+                    (rho_lims[0], plane_value, phi_lims[1]),
+                    (rho_lims[1], plane_value, phi_lims[1]),
                 ),
                 (
-                    (rho_range[0], plane_value, phi_range[0]),
-                    (rho_range[0], plane_value, phi_range[1]),
+                    (rho_lims[0], plane_value, phi_lims[0]),
+                    (rho_lims[0], plane_value, phi_lims[1]),
                 ),
                 (
-                    (rho_range[1], plane_value, phi_range[0]),
-                    (rho_range[1], plane_value, phi_range[1]),
+                    (rho_lims[1], plane_value, phi_lims[0]),
+                    (rho_lims[1], plane_value, phi_lims[1]),
                 ),
             ]
         else:  # rho
             return [
                 (
-                    (plane_value, theta_range[0], phi_range[0]),
-                    (plane_value, theta_range[1], phi_range[0]),
+                    (plane_value, theta_lims[0], phi_lims[0]),
+                    (plane_value, theta_lims[1], phi_lims[0]),
                 ),
                 (
-                    (plane_value, theta_range[0], phi_range[1]),
-                    (plane_value, theta_range[1], phi_range[1]),
+                    (plane_value, theta_lims[0], phi_lims[1]),
+                    (plane_value, theta_lims[1], phi_lims[1]),
                 ),
                 (
-                    (plane_value, theta_range[0], phi_range[0]),
-                    (plane_value, theta_range[0], phi_range[1]),
+                    (plane_value, theta_lims[0], phi_lims[0]),
+                    (plane_value, theta_lims[0], phi_lims[1]),
                 ),
                 (
-                    (plane_value, theta_range[1], phi_range[0]),
-                    (plane_value, theta_range[1], phi_range[1]),
+                    (plane_value, theta_lims[1], phi_lims[0]),
+                    (plane_value, theta_lims[1], phi_lims[1]),
                 ),
             ]
 

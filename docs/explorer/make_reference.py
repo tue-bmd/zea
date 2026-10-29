@@ -185,7 +185,7 @@ def expected_for(case):
         "polar_limits": [float(v) for v in parameters.polar_limits],
         "xlims": [float(v) for v in parameters.xlims],
         "zlims": [float(v) for v in parameters.zlims],
-        "rho_range": [float(v) for v in parameters.rho_range],
+        "rlims": [float(v) for v in parameters.rlims],
         "f_number": float(parameters.f_number),
         "grid_size_x": int(parameters.grid_size_x),
         "grid_size_z": int(parameters.grid_size_z),
@@ -196,8 +196,8 @@ def expected_for(case):
     if case["grid_type"] == "polar":
         _, scan_convert = compute_scan_convert_2d_coordinates(
             (parameters.grid_size_z, parameters.grid_size_x),
-            parameters.rho_range,
-            parameters.theta_range,
+            parameters.rlims,
+            parameters.polar_limits,
             grid_apex=parameters.grid_apex,
             extent=parameters.extent,
         )

@@ -29,26 +29,24 @@ def test_scan_conversion(size, resolution, order):
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.standard_normal(size).astype(np.float32)
 
-    rho_range = (0, 100)
-    theta_range = (-45, 45)
-    theta_range = np.deg2rad(theta_range)
+    rlims = (0, 100)
+    theta_limits = np.deg2rad((-45, 45))
 
     if len(size) == 3:
-        phi_range = (-20, 20)
-        phi_range = np.deg2rad(phi_range)
+        phi_limits = np.deg2rad((-20, 20))
         out, params = display.scan_convert_3d(
             data,
-            rho_range,
-            theta_range,
-            phi_range,
+            rlims,
+            theta_limits,
+            phi_limits,
             resolution=resolution,
             order=order,
         )
     else:
         out, params = display.scan_convert_2d(
             data,
-            rho_range,
-            theta_range,
+            rlims,
+            theta_limits,
             resolution=resolution,
             order=order,
         )
@@ -79,33 +77,55 @@ def test_scan_convert_in_process_smoke():
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
 
     img2d = rng.standard_normal((32, 16)).astype(np.float32)
-    out2d, params2d = display.scan_convert_2d(img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5))
+    out2d, params2d = display.scan_convert_2d(img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5))
     assert isinstance(params2d, dict)
     assert np.asarray(out2d).ndim == 2
 
     # Exercise the alternative interpolation branches: order > 1 (scipy/CPU path)
     # and vectorize=False (ops.map path), in addition to the default vectorized path.
     out2d_order2, _ = display.scan_convert_2d(
-        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), order=2
+        img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5), order=2
     )
     assert np.asarray(out2d_order2).ndim == 2
     out2d_novec, _ = display.scan_convert_2d(
-        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), vectorize=False
+        img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5), vectorize=False
     )
     assert np.asarray(out2d_novec).ndim == 2
 
     # grid_apex only relabels z_lim, but keep the branch covered in-process too.
     _, params_apex = display.scan_convert_2d(
-        img2d, rho_range=(0.5, 1), theta_range=(-0.5, 0.5), grid_apex=(0.0, 0.0, -0.25)
+        img2d, rlims=(0.5, 1), polar_limits=(-0.5, 0.5), grid_apex=(0.0, 0.0, -0.25)
     )
     assert isinstance(params_apex, dict)
 
     vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
     out3d, params3d = display.scan_convert_3d(
-        vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.4, 0.4)
+        vol3d, rlims=(0, 1), lateral_tilt_limits=(-0.4, 0.4), elevation_tilt_limits=(-0.4, 0.4)
     )
     assert isinstance(params3d, dict)
     assert np.asarray(out3d).ndim == 3
+
+
+def test_scan_convert_deprecated_range_names():
+    """``rho_range``, ``theta_range`` and ``phi_range`` still work as aliases."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    img2d = rng.standard_normal((32, 16)).astype(np.float32)
+    new, _ = display.scan_convert_2d(img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5))
+    old, _ = display.scan_convert_2d(img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+
+    vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
+    new, _ = display.scan_convert_3d(
+        vol3d, rlims=(0, 1), lateral_tilt_limits=(-0.4, 0.4), elevation_tilt_limits=(-0.3, 0.3)
+    )
+    old, _ = display.scan_convert(
+        vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.3, 0.3)
+    )
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+
+    with pytest.raises(TypeError, match="deprecated alias 'rho_range'"):
+        display.scan_convert_2d(img2d, rlims=(0, 1), rho_range=(0, 1), polar_limits=(-0.5, 0.5))
 
 
 def create_radial_pattern(size):
@@ -155,12 +175,12 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error, angle
     else:
         raise ValueError("Unknown pattern creator")
 
-    rho_range = (0, 100)
+    rlims = (0, 100)
 
     theta_range = np.deg2rad((-45, 45))
 
     # Scan convert
-    cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, theta_range)
 
     # Inverse scan convert
     cartesian_data_inv = display.inverse_scan_convert_2d(
@@ -205,10 +225,10 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     else:
         raise ValueError("Unknown pattern creator")
 
-    rho_range = (0, 100)
+    rlims = (0, 100)
     theta_range = np.deg2rad((-45, 45))
 
-    cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, theta_range)
     cartesian_data = ops.convert_to_numpy(cartesian_data)
 
     # now pad the cartesian image and test with find_scan_cone=True
@@ -773,12 +793,12 @@ def test_scan_convert_2d_grid_apex_only_relabels_z_lim():
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     img = rng.standard_normal((64, 32)).astype(np.float32)
-    rho_range, theta_range = (0.055, 0.14), (-0.4, 0.4)
+    rlims, polar_limits = (0.055, 0.14), (-0.4, 0.4)
     distance_to_apex = 0.05
 
-    apex, params_apex = display.scan_convert_2d(img, rho_range, theta_range)
+    apex, params_apex = display.scan_convert_2d(img, rlims, polar_limits)
     shifted, params_shifted = display.scan_convert_2d(
-        img, rho_range, theta_range, grid_apex=(0.0, 0.0, -distance_to_apex)
+        img, rlims, polar_limits, grid_apex=(0.0, 0.0, -distance_to_apex)
     )
 
     np.testing.assert_array_equal(ops.convert_to_numpy(apex), ops.convert_to_numpy(shifted))
@@ -812,7 +832,7 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
     This ties the three places ``grid_apex`` is applied — the polar grid, the
     scan-conversion rho range, and the reported extent — to a single observable, so any
     one of them drifting into the wrong frame fails here. The deepest indices also pin
-    the radial endpoint: ``rho_range`` must describe the radius of the *last* sample, not
+    the radial endpoint: ``rlims`` must describe the radius of the *last* sample, not
     one sample past it, or the sector stretches with depth.
     """
     from keras import ops
@@ -839,7 +859,7 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
     expected = parameters.grid[i, j]
 
     converted, params = display.scan_convert_2d(
-        polar_image, rho_range=parameters.rho_range, theta_range=parameters.theta_range
+        polar_image, rlims=parameters.rlims, polar_limits=parameters.polar_limits
     )
     converted = ops.convert_to_numpy(converted)
     row, col = np.unravel_index(np.argmax(converted), converted.shape)
@@ -895,8 +915,8 @@ def test_flat_array_scan_conversion_fills_the_extent(i, j):
     polar_image[i, j] = 1.0
     converted, params = display.scan_convert_2d(
         polar_image,
-        rho_range=parameters.rho_range,
-        theta_range=parameters.theta_range,
+        rlims=parameters.rlims,
+        polar_limits=parameters.polar_limits,
         grid_apex=parameters.grid_apex,
         extent=parameters.extent,
     )

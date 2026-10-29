@@ -149,7 +149,7 @@ def radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels=None):
     if num_radial_pixels is None:
         num_radial_pixels = int(np.floor((rlims[1] - rlims[0]) / dr + 1e-9)) + 1
     r = rlims[0] + np.arange(num_radial_pixels) * dr  # Depth rho
-    t = dirs[:, 0]  # Use azimuthal angle theta (ignore elevation angle)
+    t = dirs[:, 0]  # Polar angle theta in the x-z plane (ignore elevation)
     tt, rr = np.meshgrid(t, r, indexing="ij")
 
     # Convert the focusing grid to Cartesian coordinates

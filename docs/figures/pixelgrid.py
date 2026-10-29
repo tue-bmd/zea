@@ -1,6 +1,6 @@
 """Diagrams of the polar pixel grid of a `zea.Parameters` object.
 
-Shows how ``zlims``, ``xlims``, ``rho_range``, ``polar_limits``, ``grid_apex``,
+Shows how ``zlims``, ``xlims``, ``rlims``, ``polar_limits``, ``grid_apex``,
 ``extent`` and ``probe_geometry`` relate, for a curved array and for a flat phased array.
 Every quantity is read back from a `zea.Parameters` object rather than drawn by hand,
 so the figures keep showing what the code does. The interactive explorer
@@ -103,7 +103,7 @@ def draw(parameters, theme, path):
     xlims = np.asarray(parameters.xlims) * MM
     polar_limits = np.asarray(parameters.polar_limits)
     apex = np.asarray(parameters.grid_apex)[[0, 2]] * MM
-    rho_range = np.asarray(parameters.rho_range) * MM
+    rlims = np.asarray(parameters.rlims) * MM
     extent = np.asarray(parameters.extent)[[0, 1, 4, 5]] * MM  # x0, x1, z0, z1
     probe = np.asarray(parameters.probe_geometry)[:, [0, 2]] * MM
 
@@ -175,7 +175,7 @@ def draw(parameters, theme, path):
     )
 
     # polar_limits: signed angles from the central axis, positive toward +x
-    arc_radius = 0.4 * rho_range[1]
+    arc_radius = 0.4 * rlims[1]
     for theta, name in zip(polar_limits, ("polar_limits[0]", "polar_limits[1]")):
         start, end = sorted([90.0, 90.0 - np.degrees(theta)])  # matplotlib: CCW from +x
         ax.add_patch(
@@ -196,13 +196,13 @@ def draw(parameters, theme, path):
             bbox=backdrop,
         )
 
-    # rho_range: radii from the apex, as dimension lines alongside the right edge ray
+    # rlims: radii from the apex, as dimension lines alongside the right edge ray
     theta = polar_limits[1]
     direction = ray(theta)
     outward = np.array([np.cos(theta), -np.sin(theta)])
     rotation = np.degrees(np.arctan2(-direction[1], direction[0])) % 180
     rotation = rotation - 180 if rotation > 90 else rotation
-    for r, offset, name in [(rho_range[0], 8, "rho_range[0]"), (rho_range[1], 15, "rho_range[1]")]:
+    for r, offset, name in [(rlims[0], 8, "rlims[0]"), (rlims[1], 15, "rlims[1]")]:
         start = apex + offset * unit * outward
         end = apex + r * direction + offset * unit * outward
         ax.annotate("", xy=end, xytext=start, arrowprops=dict(arrowstyle="<->", color=ink, lw=0.9))
@@ -225,7 +225,7 @@ def draw(parameters, theme, path):
     ax.plot(probe[:, 0], probe[:, 1], color=ink, lw=1.6, solid_capstyle="round")
     step = max(len(probe) // 9, 1)
     ax.plot(probe[::step, 0], probe[::step, 1], "o", color=ink, ms=2.2)
-    # Labels on the left, clear of the rho_range dimension lines on the right
+    # Labels on the left, clear of the rlims dimension lines on the right
     ax.annotate(
         "probe_geometry",
         xy=probe[0],
@@ -305,7 +305,7 @@ def draw(parameters, theme, path):
     ax.text(
         extent[0],
         below + 6 * unit,
-        "rho_range = zlims - grid_apex[2]",
+        "rlims = zlims - grid_apex[2]",
         color=ink,
         fontsize=8,
         family=TT,

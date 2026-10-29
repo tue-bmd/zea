@@ -118,9 +118,9 @@ def test_plot_quadrants_variants(coord, cmap, kwargs):
 
 
 _frustum_args = dict(
-    rho_range=[0.1, 10],
-    theta_range=[-0.6, 0.6],
-    phi_range=[-0.6, 0.6],
+    rlims=[0.1, 10],
+    lateral_tilt_limits=[-0.6, 0.6],
+    elevation_tilt_limits=[-0.6, 0.6],
 )
 
 

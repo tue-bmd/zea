@@ -44,7 +44,7 @@ function compare(reference) {
     e.polar_limits.forEach((v, k) => num(`polar_limits[${k}]`, R.polarLimits[k], v));
     e.xlims.forEach((v, k) => num(`xlims[${k}]`, R.xlims[k], v));
     e.zlims.forEach((v, k) => num(`zlims[${k}]`, R.zlims[k], v));
-    e.rho_range.forEach((v, k) => num(`rho_range[${k}]`, R.rhoRange[k], v));
+    e.rlims.forEach((v, k) => num(`rlims[${k}]`, R.rLims[k], v));
     int("grid_size_x", R.gx, e.grid_size_x);
     int("grid_size_z", R.gz, e.grid_size_z);
     [[0, 0], [1, 1], [2, 4], [3, 5]].forEach(([k, m]) => {

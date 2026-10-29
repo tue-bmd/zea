@@ -184,8 +184,10 @@ angles measured from ``+z``, positive toward ``+x``.
    transmit adds no margin; plane and diverging waves widen it. Set
    :attr:`~zea.Parameters.polar_margin` to widen by a fixed angle instead.
 
-:attr:`~zea.Parameters.rho_range`
-   Radii from the apex, ``zlims - grid_apex[2]``, used by scan conversion.
+:attr:`~zea.Parameters.rlims`
+   The radii of the first and last row of a polar grid, measured from the apex:
+   ``zlims - grid_apex[2]``. Scan conversion reads the polar image through ``rlims`` and
+   ``polar_limits``.
 
 :attr:`~zea.Parameters.extent`
    For a polar grid, the window the scan-converted image fills: ``xlims`` wide, and on a
@@ -203,9 +205,9 @@ angles measured from ``+z``, positive toward ``+x``.
 .. raw:: html
 
    <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
-     <img src="_static/pixelgrid-Dark.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+     <img src="_static/pixelgrid-Dark.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
           style="display: none; width: 85%; padding-bottom: 1em;" class="only-dark" />
-     <img src="_static/pixelgrid-Light.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+     <img src="_static/pixelgrid-Light.svg" alt="Polar pixel grid of a curved array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
           style="display: none; width: 85%; padding-bottom: 1em;" class="only-light" />
      <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
         A polar grid on a curved array fans out from its centre of curvature.
@@ -215,9 +217,9 @@ angles measured from ``+z``, positive toward ``+x``.
 .. raw:: html
 
    <div style="display: flex; flex-direction: column; align-items: center; margin: 2em 0;">
-     <img src="_static/pixelgrid-phased-array-Dark.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+     <img src="_static/pixelgrid-phased-array-Dark.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
           style="display: none; width: 85%; padding-bottom: 1em;" class="only-dark" />
-     <img src="_static/pixelgrid-phased-array-Light.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rho_range, polar_limits, zlims, xlims and extent"
+     <img src="_static/pixelgrid-phased-array-Light.svg" alt="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"
           style="display: none; width: 85%; padding-bottom: 1em;" class="only-light" />
      <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
         Focused lines from the middle of a phased array: the grid fans out from there, and the image starts at <code>zlims[0]</code>.
@@ -245,6 +247,41 @@ against reference values computed by zea (``docs/explorer``).
    <iframe src="_static/pixel-grid-explorer.html" title="Pixel grid explorer"
            style="width: 100%; height: 1400px; border: 1px solid var(--color-background-border, #ddd); border-radius: 8px; margin: 1em 0 2em;"
            loading="lazy"></iframe>
+
+
+Angle and radius names
+~~~~~~~~~~~~~~~~~~~~~~
+
+zea follows the physics convention for spherical coordinates, with angles in radians.
+The names stay the same from the beamforming grid through to scan conversion.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 30 56
+
+   * - Symbol
+     - Name
+     - Meaning
+   * - :math:`r`, :math:`\rho`
+     - ``rlims``
+     - Radius from :attr:`~zea.Parameters.grid_apex`, of the first and last row [m].
+   * - :math:`\theta`
+     - ``polar_angles``, ``polar_limits``
+     - Polar angle, from ``+z``. In 2D (the x-z plane) it is signed, positive toward
+       ``+x``: the steering angle of each transmit, and the angle of the first and last
+       column of a polar grid.
+   * - :math:`\phi`
+     - ``azimuth_angles``
+     - Azimuth angle of a transmit, around ``z`` from ``+x``. Zero for 2D imaging.
+
+3D scan conversion (:func:`zea.display.scan_convert_3d`) uses a frustum instead of
+spherical coordinates: ``lateral_tilt_limits`` for :math:`\operatorname{atan}(x/z)` and
+``elevation_tilt_limits`` for :math:`\operatorname{atan}(y/z)`. These are two independent
+tilts, not a polar and an azimuth angle. In the x-z plane the lateral tilt equals the 2D
+polar angle, so a frustum extends a 2D sector in elevation.
+
+The former names ``rho_range``, ``theta_range`` and ``phi_range`` still work, with a
+deprecation warning.
 
 
 ----------------------------

@@ -268,8 +268,8 @@ def create_echonetlvh_test_data(src):
     extra_args.extend(["--rejection_path", str(rejection_path)])
 
     # Common parameters for scan conversion
-    rho_range = (0.0, 60.0)  # mm
-    theta_range = (-np.pi / 4, np.pi / 4)  # radians
+    rlims = (0.0, 60.0)  # mm
+    polar_limits = (-np.pi / 4, np.pi / 4)  # radians
 
     # Padding to add around scan cone (should be cropped by conversion)
     pad_top = 10
@@ -308,8 +308,8 @@ def create_echonetlvh_test_data(src):
             ref_polar = np.ones(polar_shape, dtype=np.float32)
             ref_cartesian, _ = scan_convert_2d(
                 ref_polar,
-                rho_range=rho_range,
-                theta_range=theta_range,
+                rlims=rlims,
+                polar_limits=polar_limits,
                 resolution=1.0,
             )
             ref_cartesian = np.array(ref_cartesian)
@@ -361,9 +361,7 @@ def create_echonetlvh_test_data(src):
             polar_img = np.clip(polar_img, 0, 1).astype(np.float32)
 
             # Scan convert to create Cartesian image with scan cone
-            cartesian_img, _ = scan_convert_2d(
-                polar_img, rho_range=rho_range, theta_range=theta_range
-            )
+            cartesian_img, _ = scan_convert_2d(polar_img, rlims=rlims, polar_limits=polar_limits)
             cartesian_img = np.array(cartesian_img)
 
             # Add padding around the scan cone

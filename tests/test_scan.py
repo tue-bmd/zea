@@ -989,6 +989,22 @@ def test_distance_to_apex_is_no_longer_a_parameter():
         _ = parameters.distance_to_apex
 
 
+def test_renamed_scan_conversion_parameters():
+    """The former scan-conversion names map onto rlims, polar_limits and
+    elevation_tilt_limits."""
+    parameters = Parameters(rho_range=(0.0, 0.1), theta_range=(-0.5, 0.5))
+    np.testing.assert_allclose(parameters.rlims, (0.0, 0.1))
+    np.testing.assert_allclose(parameters.polar_limits, (-0.5, 0.5))
+    np.testing.assert_allclose(parameters.rho_range, parameters.rlims)
+    np.testing.assert_allclose(parameters.theta_range, parameters.polar_limits)
+
+    parameters.update(phi_range=(-0.2, 0.2))
+    np.testing.assert_allclose(parameters.elevation_tilt_limits, (-0.2, 0.2))
+    parameters.phi_range = (-0.3, 0.3)
+    np.testing.assert_allclose(parameters.elevation_tilt_limits, (-0.3, 0.3))
+    assert "phi_range" not in parameters._custom_params
+
+
 def test_polar_grid_uses_the_fitted_apex():
     """The fitted apex reaches the grid: rays start one zlims[0] below the transducer."""
     radius = 49.57e-3
@@ -1004,7 +1020,7 @@ def test_polar_grid_uses_the_fitted_apex():
         n_ax=4096,
     )
     assert parameters.grid_apex[2] == pytest.approx(-radius, rel=1e-5)
-    assert parameters.rho_range[0] == pytest.approx(0.005 + radius, rel=1e-5)
+    assert parameters.rlims[0] == pytest.approx(0.005 + radius, rel=1e-5)
     # Centre ray starts at zlims[0] below the transducer, not at the apex.
     assert parameters.grid[0, 64, 2] == pytest.approx(0.005, abs=1e-6)
 
@@ -1077,7 +1093,7 @@ def test_xlims_override_sets_the_width_of_a_polar_image():
 
 
 def test_polar_scanline_grid_is_the_polar_grid_at_the_transmit_angles():
-    """Lines from the array middle: one column per transmit angle, rows at rho_range."""
+    """Lines from the array middle: one column per transmit angle, rows at rlims."""
     from zea.beamform.pixelgrid import polar_pixel_grid
 
     parameters = _phased(n_tx=9, enable_scanline=True, grid_size_z=32)
@@ -1093,8 +1109,8 @@ def test_polar_scanline_rows_sit_at_one_radius_from_the_apex():
     grid = parameters.grid
     apex = parameters.grid_apex
     radii = np.hypot(grid[..., 0] - apex[0], grid[..., 2] - apex[2])
-    np.testing.assert_allclose(radii[0], parameters.rho_range[0], rtol=1e-5)
-    np.testing.assert_allclose(radii[-1], parameters.rho_range[1], rtol=1e-5)
+    np.testing.assert_allclose(radii[0], parameters.rlims[0], rtol=1e-5)
+    np.testing.assert_allclose(radii[-1], parameters.rlims[1], rtol=1e-5)
     # Columns follow the transmit axes through their origins
     angles = np.arctan2(grid[..., 0] - apex[0], grid[..., 2] - apex[2])
     np.testing.assert_allclose(angles[-1], parameters.polar_angles, atol=1e-6)

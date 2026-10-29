@@ -250,8 +250,10 @@ class Parameters(BaseParameters):
     lens_sound_speed: float
     """Speed of sound in the lens material [m/s]."""
 
-    phi_range: tuple | np.ndarray
-    """Range of phi angles for 3D imaging [rad], shape (2,)."""
+    elevation_tilt_limits: tuple | np.ndarray
+    """Elevation tilt ``atan(y / z)`` [rad] of the first and last sample of a 3D frustum,
+    shape (2,). Used to scan convert 3D volumes, together with :attr:`rlims` and
+    :attr:`polar_limits` (the lateral tilt); see :func:`zea.display.scan_convert_3d`."""
 
     pfield_kwargs: dict
     """Extra keyword arguments for the pressure-field computation.
@@ -342,9 +344,8 @@ class Parameters(BaseParameters):
         "f_number": {"dtype": (float, type(None)), "default": None},
         "polar_margin": {"dtype": (np.float32, type(None)), "default": None},
         "t_peak": {"dtype": np.float32},
-        "theta_range": {"dtype": np.float32, "shape": (2,)},
-        "phi_range": {"dtype": np.float32, "shape": (2,)},
-        "rho_range": {"dtype": np.float32, "shape": (2,)},
+        "elevation_tilt_limits": {"dtype": np.float32, "shape": (2,)},
+        "rlims": {"dtype": np.float32, "shape": (2,)},
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
     }
@@ -358,6 +359,22 @@ class Parameters(BaseParameters):
             "(the old distance_to_apex is -grid_apex[2])."
         ),
     }
+
+    # Former names of parameters, mapped onto the current name with a deprecation warning.
+    _RENAMED_PARAMS: ClassVar[dict[str, str]] = {
+        "rho_range": "rlims",
+        "theta_range": "polar_limits",
+        "phi_range": "elevation_tilt_limits",
+    }
+
+    @classmethod
+    def _renamed(cls, name):
+        """The current name of ``name``, warning when it is a deprecated one."""
+        if name not in cls._RENAMED_PARAMS:
+            return name
+        new = cls._RENAMED_PARAMS[name]
+        log.deprecated(f"Parameter `{name}` is deprecated, use `{new}` instead.")
+        return new
 
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
@@ -384,6 +401,8 @@ class Parameters(BaseParameters):
     def __getattr__(self, item):
         if item in Parameters._REMOVED_PARAMS:
             raise AttributeError(Parameters._REMOVED_PARAMS[item])
+        if item in Parameters._RENAMED_PARAMS:
+            return getattr(self, Parameters._renamed(item))
         return super().__getattr__(item)
 
     def update(self, params=None, *, force=False, **kwargs):
@@ -391,10 +410,12 @@ class Parameters(BaseParameters):
 
         See :meth:`zea.internal.parameters.BaseParameters.update`.
         """
-        for key in {**(dict(params) if params else {}), **kwargs}:
+        merged = {}
+        for key, value in {**(dict(params) if params else {}), **kwargs}.items():
             if key in self._REMOVED_PARAMS:
                 raise ValueError(self._REMOVED_PARAMS[key])
-        super().update(params, force=force, **kwargs)
+            merged[self._renamed(key)] = value
+        super().update(merged, force=force)
 
     @cache_with_dependencies(optional=("probe_geometry",))
     def radius_of_curvature(self):
@@ -459,7 +480,7 @@ class Parameters(BaseParameters):
         """The point ``(x, y, z)`` [m] a polar grid fans out from, of shape (3,).
 
         It lies on the central axis, at or behind the array: ``(0, 0, -d)`` with
-        ``d >= 0``. Radii are measured from it, so ``rho_range = zlims - grid_apex[2]``.
+        ``d >= 0``. Radii are measured from it, so ``rlims = zlims - grid_apex[2]``.
         It is derived, not set: the grid fans out from where the transmits fan out from.
         In order of precedence:
 
@@ -1387,30 +1408,22 @@ class Parameters(BaseParameters):
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
     @cache_with_dependencies("zlims", "grid_apex")
-    def rho_range(self):
-        """Range of radial distances ``(min_rho, max_rho)`` in meters, used for scan conversion.
+    def rlims(self):
+        """Radius ``(rho_min, rho_max)`` [m] of the first and last row of a polar grid.
 
         Rho is measured from :attr:`grid_apex`, so it is
         ``zlims - grid_apex[2]`` (:attr:`zlims` are depths below the transducer), matching
-        the rows of :func:`~zea.beamform.pixelgrid.polar_pixel_grid`."""
-        value = self._params.get("rho_range")
+        the rows of :func:`~zea.beamform.pixelgrid.polar_pixel_grid`. Used for scan
+        conversion, together with :attr:`polar_limits` for the columns."""
+        value = self._params.get("rlims")
         if value is None:
             apex_z = float(self.grid_apex[2])
             return (float(self.zlims[0]) - apex_z, float(self.zlims[1]) - apex_z)
         return value
 
-    @cache_with_dependencies("polar_limits")
-    def theta_range(self):
-        """A tuple specifying the range of theta values (min_theta, max_theta).
-        Defined in radians. Used for scan conversion."""
-        value = self._params.get("theta_range")
-        if value is None and self.polar_limits is not None:
-            return self.polar_limits
-        return value
-
     @cache_with_dependencies(
-        "rho_range",
-        "theta_range",
+        "rlims",
+        "polar_limits",
         "resolution",
         "grid_size_z",
         "grid_size_x",
@@ -1420,20 +1433,20 @@ class Parameters(BaseParameters):
         """The coordinates for scan conversion.
 
         These index the polar image, so they live in the frame of :attr:`grid_apex`;
-        :attr:`rho_range` already carries the offset. The output covers :attr:`extent`.
-        When ``rho_range`` or ``theta_range`` is set explicitly, it describes a polar image
-        of its own rather than this grid, so the output covers its bounding box instead.
+        :attr:`rlims` already carries the offset. The output covers :attr:`extent`.
+        When ``rlims`` is set explicitly, it describes a polar image of its own rather than
+        this grid, so the output covers its bounding box instead.
         """
         grid_apex = extent = None
-        if self._params.get("rho_range") is None and self._params.get("theta_range") is None:
+        if self._params.get("rlims") is None:
             try:
                 grid_apex, extent = self.grid_apex, self.extent
             except MissingDependencyError:
                 pass
         coords, _ = compute_scan_convert_2d_coordinates(
             (self.grid_size_z, self.grid_size_x),
-            self.rho_range,
-            self.theta_range,
+            self.rlims,
+            self.polar_limits,
             self.resolution,
             grid_apex=grid_apex,
             extent=extent,
@@ -1544,6 +1557,7 @@ class Parameters(BaseParameters):
     def __setattr__(self, name: str, value):
         if name in self._REMOVED_PARAMS:
             raise ValueError(self._REMOVED_PARAMS[name])
+        name = self._renamed(name)
         if name == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)
