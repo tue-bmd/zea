@@ -13,6 +13,7 @@ For more information about the dataset, resort to the following links:
 
 import functools
 import os
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Value
 from pathlib import Path
@@ -29,7 +30,17 @@ from scipy.spatial import Delaunay
 from tqdm import tqdm
 
 from zea import log
-from zea.data.convert.utils import load_avi, unzip_beside
+from zea.data.convert.utils import (
+    color_spread,
+    compare_fingerprints,
+    fingerprint_hdf5,
+    load_avi,
+    load_fingerprints,
+    rgb_to_gray,
+    sha256_file,
+    unzip_beside,
+    write_fingerprints,
+)
 from zea.data.file import File
 from zea.func.tensor import translate
 
@@ -344,7 +355,10 @@ class H5Processor:
 
         This method checks acceptance based on the first frame of `sequence`.
         If explicit splits were provided to the processor, it returns the split
-        found for `hdf5_file` (and asserts that the acceptance result matches the split).
+        found for `hdf5_file`, even when the acceptance check disagrees: the check
+        thresholds decoded pixels, so a different decoder can flip borderline videos,
+        and a published split should not change because of that. Disagreements are
+        logged and reported through the returned acceptance result.
         If no explicit splits are provided, rejected sequences are labeled `"rejected"`.
         Accepted sequences increment a shared counter and are assigned
         `"val"`, `"test"`, or `"train"` according to the processor's
@@ -357,7 +371,8 @@ class H5Processor:
                 used for acceptance checking.
 
         Returns:
-            str: One of `"train"`, `"val"`, `"test"`, or `"rejected"` indicating the assigned split.
+            tuple: The split (`"train"`, `"val"`, `"test"` or `"rejected"`) and whether
+            the acceptance check accepted the sequence.
         """
         # Always check acceptance
         accepted = accept_shape(sequence[0])
@@ -365,12 +380,19 @@ class H5Processor:
         # Previous split
         if self.splits is not None:
             split = find_split_for_file(self.splits, hdf5_file)
-            assert accepted == (split != "rejected"), "Rejection mismatch"
-            return split
+            if accepted != (split != "rejected"):
+                log.warning(
+                    "%s: the acceptance check %s it, but the given split puts it in %s. "
+                    "Keeping the given split.",
+                    hdf5_file,
+                    "accepts" if accepted else "rejects",
+                    split,
+                )
+            return split, accepted
 
         # New split
         if not accepted:
-            return "rejected"
+            return "rejected", accepted
 
         # Increment the hyperthreading counter
         # Note that some threads will start on subsequent splits
@@ -381,11 +403,11 @@ class H5Processor:
 
         # Determine the split
         if n <= self.num_val:
-            return "val"
+            return "val", accepted
         elif n <= self.num_val + self.num_test:
-            return "test"
+            return "test", accepted
         else:
-            return "train"
+            return "train", accepted
 
     def validate_split_copy(self, split_file):
         """
@@ -429,9 +451,18 @@ class H5Processor:
 
         Args:
             avi_file (pathlib.Path): Path to the source .avi file to process.
+
+        Returns:
+            dict: ``path`` of the written file relative to the output folder, plus its
+            :func:`~zea.data.convert.utils.fingerprint_hdf5` fields and ``split``,
+            ``accepted_by_shape``, ``color_spread`` and ``source_sha256``.
         """
         hdf5_file = avi_file.stem + ".hdf5"
-        sequence = load_avi(avi_file)
+        # Load in RGB to measure colour content; the grayscale frames are identical to
+        # load_avi(mode="L").
+        sequence_rgb = load_avi(avi_file, mode="RGB")
+        sequence = rgb_to_gray(sequence_rgb)
+        spread = color_spread(sequence_rgb, sequence)
 
         assert sequence.min() >= self.range_from[0], f"{sequence.min()} < {self.range_from[0]}"
         assert sequence.max() <= self.range_from[1], f"{sequence.max()} > {self.range_from[1]}"
@@ -441,7 +472,7 @@ class H5Processor:
 
         sequence = segment(sequence, number_erasing=0, min_clip=0)
 
-        split = self.get_split(hdf5_file, sequence)
+        split, accepted_by_shape = self.get_split(hdf5_file, sequence)
         accepted = split != "rejected"
 
         out_h5 = self.path_out_h5 / split / hdf5_file
@@ -473,12 +504,24 @@ class H5Processor:
             description="EchoNet dataset converted to zea format",
         )
 
+        return {
+            "path": f"{split}/{hdf5_file}",
+            **fingerprint_hdf5(out_h5),
+            "split": split,
+            "accepted_by_shape": bool(accepted_by_shape),
+            "color_spread": spread,
+            "source_sha256": sha256_file(avi_file),
+        }
+
 
 def _resolve_path(src: str | Path) -> Path:
     src = Path(src)
 
     if src.is_file() and src.suffix == ".zip":
         return unzip_beside(src) / "EchoNet-Dynamic" / "Videos"
+
+    if (src / "Videos").exists():
+        return src / "Videos"
 
     zip_name = "EchoNet-Dynamic.zip"
     folder_name = "EchoNet-Dynamic"
@@ -508,13 +551,23 @@ def convert_echonet(args):
                 an existing split; function asserts the file exists.
             - no_hyperthreading (bool): When false, processing uses a ProcessPoolExecutor
                 with a shared counter; when true, processing runs sequentially.
+            - reference_fingerprints (str|Path|None, optional): A ``fingerprints.json``
+                (or the folder containing it) of an earlier conversion to compare against.
 
     Note:
         - May unzip the source into a working directory.
         - Writes zea files into dst.
         - Writes a split.yaml into dst summarizing produced files per split.
+        - Writes a fingerprints.json into dst (see
+          :func:`~zea.data.convert.utils.write_fingerprints`), and sanity-checks the
+          conversion: tinted videos, files disagreeing with a given split, invalid values
+          and an unexpected fraction of rejected files are reported.
         - Logs progress and validation results.
         - Asserts that split.yaml exists at split_path when split reproduction is requested.
+
+    Raises:
+        RuntimeError: If any file failed to convert or has invalid values. The split.yaml
+            and fingerprints.json are still written for the files that succeeded.
     """
     # Check if unzip is needed
     src = _resolve_path(args.src)
@@ -547,20 +600,33 @@ def convert_echonet(args):
 
     log.info("Starting the conversion process.")
 
+    results = {}
+    failures = {}
+
+    def collect(file, run):
+        try:
+            result = run()
+        except Exception as exc:
+            failures[file.name] = exc
+            log.error(
+                "Failed to convert %s:\n%s",
+                log.yellow(file),
+                "".join(traceback.format_exception(exc)),
+            )
+        else:
+            results[result.pop("path")] = result
+
     if not args.no_hyperthreading:
         shared_counter = Value("i", 0)
         with ProcessPoolExecutor(initializer=count_init, initargs=(shared_counter,)) as executor:
-            futures = [executor.submit(processor, file) for file in h5_files]
+            futures = {executor.submit(processor, file): file for file in h5_files}
             for future in tqdm(as_completed(futures), total=len(futures)):
-                try:
-                    future.result()
-                except Exception:
-                    log.warning("Task raised an exception")
+                collect(futures[future], future.result)
     else:
         # Initialize global variable for counting
         count_init(Value("i", 0))
         for file in tqdm(h5_files):
-            processor(file)
+            collect(file, lambda file=file: processor(file))
 
     log.info("All tasks are completed.")
 
@@ -568,13 +634,125 @@ def convert_echonet(args):
     full_list = {}
     for split in ["train", "val", "test", "rejected"]:
         split_dir = Path(args.dst) / split
-
-        # Get only files (skip directories)
-        file_list = [f.name for f in split_dir.iterdir() if f.is_file()]
-        full_list[split] = file_list
+        full_list[split] = sorted(f.name for f in split_dir.glob("*.hdf5"))
 
     with open(Path(args.dst) / "split.yaml", "w") as f:
         yaml.dump(full_list, f)
 
     # Validate that the split was copied correctly
     processor.validate_split_copy(Path(args.dst) / "split.yaml")
+
+    fingerprints = _collect_fingerprints(Path(args.dst), full_list, results)
+    write_fingerprints(args.dst, fingerprints)
+    n_invalid = _check_conversion(fingerprints)
+
+    reference = getattr(args, "reference_fingerprints", None)
+    if reference is not None:
+        compare_fingerprints(load_fingerprints(reference), {"files": fingerprints})
+
+    if failures or n_invalid:
+        raise RuntimeError(
+            f"{len(failures)} of {len(h5_files)} files failed to convert and {n_invalid} "
+            "converted files have invalid values; see the errors above."
+        )
+
+
+# Mean deviation of the RGB channels from gray (in gray levels) above which a video
+# counts as tinted. Grayscale EchoNet videos are below 0.5, tinted ones 1.3-40.
+_TINT_THRESHOLD = 1.0
+
+# Fraction of videos the acceptance check rejects in the full dataset (2044 of 10030).
+_EXPECTED_REJECTED_FRACTION = (0.15, 0.25)
+
+
+def _fingerprint_existing(path):
+    return path, fingerprint_hdf5(path)
+
+
+def _collect_fingerprints(dst, full_list, results):
+    # Files converted in an earlier run are skipped by the processor, so reuse their
+    # entry from an existing fingerprints.json, or fingerprint them from disk.
+    previous = {}
+    if (dst / "fingerprints.json").exists():
+        previous = load_fingerprints(dst)["files"]
+
+    fingerprints = {}
+    todo = []
+    for split, names in full_list.items():
+        for name in names:
+            rel = f"{split}/{name}"
+            if rel in results:
+                fingerprints[rel] = results[rel]
+            elif rel in previous:
+                fingerprints[rel] = previous[rel]
+            else:
+                todo.append(dst / rel)
+
+    if todo:
+        log.info("Fingerprinting %d files from an earlier run.", len(todo))
+        with ProcessPoolExecutor() as executor:
+            for path, fp in tqdm(
+                executor.map(_fingerprint_existing, todo, chunksize=16), total=len(todo)
+            ):
+                fingerprints[str(path.relative_to(dst))] = {**fp, "split": path.parent.name}
+    return fingerprints
+
+
+def _check_conversion(fingerprints):
+    """Log sanity checks on a converted dataset and return the number of invalid files."""
+    tinted = sorted(
+        rel for rel, fp in fingerprints.items() if fp.get("color_spread", 0) > _TINT_THRESHOLD
+    )
+    if tinted:
+        log.warning(
+            "%d videos are tinted (colour channels differ from gray by more than %g gray "
+            "levels on average). Their grayscale values depend on the RGB-to-gray "
+            "conversion, so check them first if a reconversion differs. E.g.: %s",
+            len(tinted),
+            _TINT_THRESHOLD,
+            ", ".join(tinted[:5]),
+        )
+
+    disagree = sorted(
+        rel
+        for rel, fp in fingerprints.items()
+        if "accepted_by_shape" in fp and fp["accepted_by_shape"] != (fp["split"] != "rejected")
+    )
+    if disagree:
+        log.warning(
+            "%d files are in a split the acceptance check disagrees with: %s",
+            len(disagree),
+            ", ".join(disagree[:10]),
+        )
+
+    invalid = []
+    for rel, fp in fingerprints.items():
+        for array in (v for v in fp.values() if isinstance(v, dict) and "sha256" in v):
+            stats = [array["mean"], array["std"], array["min"], array["max"]]
+            if not np.all(np.isfinite(stats)) or array["min"] < -60 or array["max"] > 0:
+                invalid.append(rel)
+            elif array["std"] == 0:
+                log.warning("%s is constant (%g dB).", rel, array["mean"])
+    for rel in invalid:
+        log.error("%s has values that are not finite or outside [-60, 0] dB.", rel)
+
+    n_rejected = sum(fp["split"] == "rejected" for fp in fingerprints.values())
+    fraction = n_rejected / max(len(fingerprints), 1)
+    low, high = _EXPECTED_REJECTED_FRACTION
+    # Only meaningful for the full dataset, not for a handful of test files
+    if len(fingerprints) >= 1000 and not low <= fraction <= high:
+        log.warning(
+            "%.1f%% of the files are rejected, expected %g-%g%%. The acceptance check may "
+            "be seeing different pixel values than before.",
+            100 * fraction,
+            100 * low,
+            100 * high,
+        )
+    log.info(
+        "Converted dataset: %d files, %d rejected (%.1f%%), %d tinted.",
+        len(fingerprints),
+        n_rejected,
+        100 * fraction,
+        len(tinted),
+    )
+    return len(invalid)

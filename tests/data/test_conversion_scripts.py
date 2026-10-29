@@ -21,11 +21,18 @@ from zea.data.convert.__main__ import Dataset
 from zea.data.convert.images import convert_image_dataset
 from zea.data.convert.utils import (
     check_output_dir_ownership,
+    color_spread,
+    compare_fingerprints,
+    conversion_provenance,
+    fingerprint_hdf5,
     load_avi,
+    load_fingerprints,
     require_output_dir_ownership,
+    rgb_to_gray,
     sitk_load,
     unzip,
     upload_dataset_to_hf,
+    write_fingerprints,
 )
 from zea.data.convert.verasonics import (
     VerasonicsFile,
@@ -1264,6 +1271,88 @@ def test_load_avi(tmp_path):
         np.testing.assert_allclose(loaded_frames[i], frames[i], atol=2)
 
 
+def test_load_avi_color_channel_order(tmp_path):
+    """Grayscale conversion must weight red and blue correctly.
+
+    Grayscale videos have R = G = B, so a swapped channel order (e.g. treating OpenCV's
+    BGR frames as RGB) is invisible on them. It silently brightened the tinted EchoNet
+    videos in an earlier conversion; solid colours catch it.
+    """
+    colors = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255], [128, 128, 128]], np.uint8)
+    frames = np.broadcast_to(colors[:, None, None, :], (4, 16, 16, 3))
+    avi_path = tmp_path / "colors.avi"
+    # ffv1 with bgr0 is lossless, so the expected values are exact
+    with imageio.get_writer(
+        avi_path, fps=10, codec="ffv1", pixelformat="bgr0", macro_block_size=1
+    ) as writer:
+        for frame in frames:
+            writer.append_data(frame)
+
+    rgb = load_avi(avi_path, mode="RGB")
+    np.testing.assert_array_equal(rgb[:, 0, 0], colors)
+
+    gray = load_avi(avi_path, mode="L")
+    # ITU-R 601 luma: 0.299 R + 0.587 G + 0.114 B
+    np.testing.assert_array_equal(gray[:, 0, 0], [76, 150, 29, 128])
+    np.testing.assert_array_equal(rgb_to_gray(rgb), gray)
+
+    assert color_spread(rgb[:3], gray[:3]) > 50
+    assert color_spread(rgb[3:], gray[3:]) == 0
+
+
+def _write_fingerprint_test_file(path, values):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    File.create(path=path, data={"image": {"values": values}}, probe={"name": "generic"})
+
+
+def test_fingerprints_roundtrip_and_compare(tmp_path):
+    """Fingerprints classify a reconversion as identical, close, different, moved or missing."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    base = rng.uniform(-60, 0, (3, 8, 8)).astype(np.float32)
+
+    old, new = tmp_path / "old", tmp_path / "new"
+    _write_fingerprint_test_file(old / "train/same.hdf5", base)
+    _write_fingerprint_test_file(old / "train/noisy.hdf5", base)
+    _write_fingerprint_test_file(old / "train/changed.hdf5", base)
+    _write_fingerprint_test_file(old / "train/moved.hdf5", base)
+    _write_fingerprint_test_file(old / "train/gone.hdf5", base)
+
+    _write_fingerprint_test_file(new / "train/same.hdf5", base)
+    _write_fingerprint_test_file(new / "train/noisy.hdf5", base + 1e-3)
+    _write_fingerprint_test_file(new / "train/changed.hdf5", np.clip(base + 5, -60, 0))
+    _write_fingerprint_test_file(new / "rejected/moved.hdf5", base)
+    _write_fingerprint_test_file(new / "train/added.hdf5", base)
+
+    def fingerprints(folder):
+        files = {str(p.relative_to(folder)): fingerprint_hdf5(p) for p in folder.rglob("*.hdf5")}
+        write_fingerprints(folder, files, provenance={"test": True})
+        return load_fingerprints(folder)
+
+    reference, current = fingerprints(old), fingerprints(new)
+
+    (array,) = reference["files"]["train/same.hdf5"].values()
+    assert array["shape"] == [3, 8, 8]
+    assert array["dtype"] == "float32"
+    assert np.isclose(array["mean"], base.mean())
+    assert reference["provenance"] == {"test": True}
+
+    result = compare_fingerprints(reference, current, atol=0.1)
+    assert sorted(result["identical"]) == ["moved.hdf5", "same.hdf5"]
+    assert result["close"] == ["noisy.hdf5"]
+    assert result["different"] == ["changed.hdf5"]
+    assert result["missing"] == ["gone.hdf5"]
+    assert result["extra"] == ["added.hdf5"]
+    assert result["moved"] == [("moved.hdf5", "train/moved.hdf5", "rejected/moved.hdf5")]
+
+
+def test_conversion_provenance():
+    """Provenance records the zea version, library versions and CPU."""
+    info = conversion_provenance()
+    assert info["zea_version"]
+    assert "numpy" in info["packages"]
+    assert "cpu_model" in info
+
+
 def test_sitk_load(tmp_path):
     """Direct test of sitk_load from zea.data.convert.utils."""
     # Create a small 3-D NIfTI file
@@ -1417,6 +1506,63 @@ def test_echonet_processor_writes_image_not_image_sc(tmp_path):
 
     with File(rejected[0], "r") as f:
         assert f.data.image.values.ndim == 3, "rejected file should store the 3D Cartesian image"
+
+
+def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
+    """A given split is kept when the acceptance check disagrees, and the disagreement
+    is reported, so a decoder change cannot reshuffle a published split."""
+    from multiprocessing import Value
+
+    from zea.data.convert.echonet import H5Processor, count_init
+
+    src = tmp_path / "src"
+    src.mkdir()
+    create_echonet_test_data(src)
+    videos = src / "EchoNet-Dynamic" / "Videos"
+
+    # video_6 fails the acceptance check, video_0 passes it
+    splits = {"train": ["video_6.hdf5"], "val": [], "test": [], "rejected": ["video_0.hdf5"]}
+    processor = H5Processor(path_out_h5=tmp_path / "out", splits=splits)
+    count_init(Value("i", 0))
+
+    result = processor(videos / "video_6.avi")
+    assert result["split"] == "train" and not result["accepted_by_shape"]
+    assert (tmp_path / "out/train/video_6.hdf5").exists()
+
+    result = processor(videos / "video_0.avi")
+    assert result["split"] == "rejected" and result["accepted_by_shape"]
+    assert (tmp_path / "out/rejected/video_0.hdf5").exists()
+
+
+def test_echonet_conversion_reports_failures(tmp_path):
+    """A file that fails to convert makes the conversion raise after the other files are
+    written, instead of being logged as an anonymous warning."""
+    from zea.data.convert.echonet import convert_echonet
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echonet_test_data(src)
+    (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").write_bytes(b"not a video")
+
+    args = types.SimpleNamespace(src=src, dst=dst, split_path=None, no_hyperthreading=True)
+    with pytest.raises(RuntimeError, match="1 of 9 files failed"):
+        convert_echonet(args)
+
+    fingerprints = load_fingerprints(dst)
+    assert len(fingerprints["files"]) == 8
+    assert "packages" in fingerprints["provenance"]
+    for fp in fingerprints["files"].values():
+        assert fp["color_spread"] < 2
+        assert len(fp["source_sha256"]) == 64
+
+    # A rerun only converts what is left, reuses the fingerprints of the other files, and
+    # can be compared with the first run.
+    (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").unlink()
+    first = dst / "first_fingerprints.json"
+    shutil.copy(dst / "fingerprints.json", first)
+    args.reference_fingerprints = first
+    convert_echonet(args)
+    assert load_fingerprints(dst)["files"] == fingerprints["files"]
 
 
 def test_camus_build_polar_image_in_process(tmp_path):

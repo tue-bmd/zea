@@ -679,6 +679,8 @@ class _Echonet:
     """Path to the split.yaml file containing the dataset split if a split should be copied."""
     no_hyperthreading: bool = False
     """Disable hyperthreading for multiprocessing."""
+    reference_fingerprints: Path | None = None
+    """fingerprints.json (or its folder) of an earlier conversion to compare the result with."""
 
     def run(self):
         from zea.data.convert.echonet import convert_echonet
