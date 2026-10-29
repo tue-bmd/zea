@@ -213,16 +213,20 @@ class SignedURL:
         return resolved.url, self._headers(resolved)
 
     def refresh(self, stale_url: str) -> bool:
-        """Resolve again after ``stale_url`` was rejected. Returns whether there is a new URL.
+        """Resolve again after ``stale_url`` was rejected or expired. Returns whether there is
+        a new URL.
 
-        If several requests fail at once, only the first one asks the Hub.
+        Checks the shared cache first to prevent multiple handles of the same file sending
+        multiple requests.
         """
         with self._lock:
             if self._resolved.url != stale_url:
                 return True
-            resolved = resolve(
-                self.hf_path, revision=self._revision, repo_type=self.repo_type, refresh=True
-            )
+            resolved = resolve(self.hf_path, revision=self._revision, repo_type=self.repo_type)
+            if resolved == self._resolved:
+                resolved = resolve(
+                    self.hf_path, revision=self._revision, repo_type=self.repo_type, refresh=True
+                )
             if self._resolved.etag and resolved.etag and resolved.etag != self._resolved.etag:
                 raise OSError(
                     f"'{self.hf_path}' changed on the Hub while it was open "
