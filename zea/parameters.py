@@ -519,8 +519,7 @@ class Parameters(BaseParameters):
             transmit_origins=transmit_origins,
             demodulated=demodulated,
             bandwidth=bandwidth,
-            # The raw parameter avoids the "using zeros" warning for 2D data.
-            azimuth_angles=self.azimuth_angles if "azimuth_angles" in self._params else None,
+            azimuth_angles=stored("azimuth_angles"),
             ylims=self.ylims if self.is_3d else (0.0, 0.0),
             grid_size_y=self.grid_size_y if self.is_3d else 1,
             element_width=self._params.get("element_width"),
