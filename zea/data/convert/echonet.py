@@ -11,6 +11,7 @@ For more information about the dataset, resort to the following links:
 
 """
 
+import functools
 import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Value
@@ -19,7 +20,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
-from scipy.interpolate import griddata
+from scipy.interpolate import (
+    CloughTocher2DInterpolator,
+    LinearNDInterpolator,
+    NearestNDInterpolator,
+)
+from scipy.spatial import Delaunay
 from tqdm import tqdm
 
 from zea import log
@@ -205,38 +211,17 @@ def rotate_coordinates(data_points, degrees):
     return rotated_points.T
 
 
-def cartesian_to_polar_matrix(
-    cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
-):
-    """
-    Function that converts a timeseries of a cartesian cone to a polar representation
-    that is more compatible with CNN's/action selection.
-
-    Args:
-        - cartesian_matrix (2d array): (rows, cols) matrix containing time sequence
-            of scan-converted (Cartesian) image data.
-        - tip (tuple, optional): coordinates (in indices) of the tip of the cone.
-            Defaults to (61, 7).
-        - r_max (int, optional): expected radius of the cone. Defaults to 107.
-        - angle (float, optional): expected angle of the cone, will be used as (-angle, angle).
-            Defaults to 0.79.
-        - interpolation (str, optional): can be [nearest, linear, cubic]. Defaults to 'nearest'.
-
-    Returns:
-        polar_matrix (2d array): polar conversion of the input.
-    """
-    rows, cols = cartesian_matrix.shape
+@functools.lru_cache
+def _polar_grid(rows, cols, tip, r_max, angle):
+    # The triangulation only depends on the grid, so it is shared by all frames and files.
     center_x, center_y = tip
 
     # Create cartesian coordinates of the image data
     x = np.linspace(-center_x, cols - center_x - 1, cols)
     y = np.linspace(-center_y, rows - center_y - 1, rows)
     x, y = np.meshgrid(x, y)
-
-    # Flatten the grid and values
     data_points = np.column_stack((x.ravel(), y.ravel()))
     data_points = rotate_coordinates(data_points, -90)
-    data_values = cartesian_matrix.ravel()
 
     # Define new points to sample from in the region of the data.
     # R_max and Theta are found manually. R_max differs from the number of rows in EchoNet!
@@ -247,13 +232,48 @@ def cartesian_to_polar_matrix(
     x_polar = r * np.cos(theta)
     y_polar = r * np.sin(theta)
     new_points = np.column_stack((x_polar.ravel(), y_polar.ravel()))
+    return Delaunay(data_points), new_points
 
-    # Interpolate and reshape to 2D matrix
-    polar_values = griddata(
-        data_points, data_values, new_points, method=interpolation, fill_value=0
-    )
-    polar_matrix = np.rot90(polar_values.reshape(cols, rows), k=-1)
-    return polar_matrix
+
+def cartesian_to_polar_matrix(
+    cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
+):
+    """
+    Function that converts a timeseries of a cartesian cone to a polar representation
+    that is more compatible with CNN's/action selection.
+
+    Args:
+        - cartesian_matrix (ndarray): (rows, cols) scan-converted (Cartesian) image, or a
+            (n_frames, rows, cols) time sequence of them.
+        - tip (tuple, optional): coordinates (in indices) of the tip of the cone.
+            Defaults to (61, 7).
+        - r_max (int, optional): expected radius of the cone. Defaults to 107.
+        - angle (float, optional): expected angle of the cone, will be used as (-angle, angle).
+            Defaults to 0.79.
+        - interpolation (str, optional): can be [nearest, linear, cubic]. Defaults to 'nearest'.
+
+    Returns:
+        polar_matrix (ndarray): polar conversion of the input, same shape as the input.
+    """
+    *batch, rows, cols = cartesian_matrix.shape
+    tri, new_points = _polar_grid(rows, cols, tuple(tip), r_max, angle)
+
+    # (rows * cols, n_frames) so that all frames are interpolated at once
+    data_values = cartesian_matrix.reshape(-1, rows * cols).T
+
+    if interpolation == "nearest":
+        interpolator = NearestNDInterpolator(tri.points, data_values)
+    elif interpolation == "linear":
+        interpolator = LinearNDInterpolator(tri, data_values, fill_value=0)
+    elif interpolation == "cubic":
+        interpolator = CloughTocher2DInterpolator(tri, data_values, fill_value=0)
+    else:
+        raise ValueError(f"Unknown interpolation method: {interpolation}")
+    polar_values = interpolator(new_points)
+
+    # Reshape to (n_frames, rows, cols)
+    polar_matrix = np.rot90(polar_values.T.reshape(-1, cols, rows), k=-1, axes=(1, 2))
+    return polar_matrix.reshape(*batch, rows, cols)
 
 
 def find_split_for_file(file_dict, target_file):
@@ -426,17 +446,9 @@ class H5Processor:
 
         out_h5 = self.path_out_h5 / split / hdf5_file
 
-        polar_im_set = []
-        for _, im in enumerate(sequence):
-            if not accepted:
-                continue
-
-            polar_im = cartesian_to_polar_matrix(im, interpolation="cubic")
-            polar_im = np.clip(polar_im, *self._process_range)
-            polar_im_set.append(polar_im)
-
         if accepted:
-            polar_im_set = np.stack(polar_im_set, axis=0)
+            polar_im_set = cartesian_to_polar_matrix(sequence, interpolation="cubic")
+            polar_im_set = np.clip(polar_im_set, *self._process_range)
 
         # Check the ranges
         assert sequence.min() >= self._process_range[0], sequence.min()
