@@ -432,18 +432,26 @@ def download_camus(  # pragma: no cover
     )
 
 
+def _find_nifti_root(folder: Path) -> Path:
+    # CAMUS_public.zip nests everything under a top-level CAMUS_public/ folder.
+    for candidate in (folder / "database_nifti", folder / "CAMUS_public" / "database_nifti"):
+        if candidate.exists():
+            return candidate
+    return folder
+
+
 def _resolve_path(src: str | Path) -> Path:
     src = Path(src)
 
     if src.is_file() and src.suffix == ".zip":
-        return unzip_beside(src) / "database_nifti"
+        return _find_nifti_root(unzip_beside(src))
 
     zip_name = "CAMUS_public.zip"
     folder_name = "CAMUS_public"
     unzip_dir = src / folder_name
 
     if (src / folder_name).exists():
-        return unzip_dir
+        return _find_nifti_root(unzip_dir)
 
     # Girder download produces a database_nifti sub-folder,
     # or the user may have extracted patient* folders directly into src.
@@ -456,8 +464,7 @@ def _resolve_path(src: str | Path) -> Path:
 
     zip_path = src / zip_name
 
-    unzipped_path = unzip_beside(zip_path)
-    return unzipped_path / "database_nifti"
+    return _find_nifti_root(unzip_beside(zip_path))
 
 
 def convert_camus(args):
