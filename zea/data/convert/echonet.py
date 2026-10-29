@@ -23,7 +23,7 @@ from scipy.interpolate import griddata
 from tqdm import tqdm
 
 from zea import log
-from zea.data.convert.utils import load_avi, unzip
+from zea.data.convert.utils import load_avi, unzip_beside
 from zea.data.file import File
 from zea.func.tensor import translate
 
@@ -465,6 +465,9 @@ class H5Processor:
 def _resolve_path(src: str | Path) -> Path:
     src = Path(src)
 
+    if src.is_file() and src.suffix == ".zip":
+        return unzip_beside(src) / "EchoNet-Dynamic" / "Videos"
+
     zip_name = "EchoNet-Dynamic.zip"
     folder_name = "EchoNet-Dynamic"
     unzip_dir = src / folder_name / "Videos"
@@ -472,7 +475,7 @@ def _resolve_path(src: str | Path) -> Path:
     if (src / folder_name).exists():
         return unzip_dir
 
-    unzipped_path = unzip(src / zip_name, src)
+    unzipped_path = unzip_beside(src / zip_name)
     return unzipped_path / folder_name / "Videos"
 
 

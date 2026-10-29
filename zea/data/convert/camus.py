@@ -59,7 +59,7 @@ from zea.data.convert.utils import (
     download_from_girder,
     require_output_dir_ownership,
     sitk_load,
-    unzip,
+    unzip_beside,
     upload_dataset_to_hf,
     write_dataset_card,
 )
@@ -435,6 +435,9 @@ def download_camus(  # pragma: no cover
 def _resolve_path(src: str | Path) -> Path:
     src = Path(src)
 
+    if src.is_file() and src.suffix == ".zip":
+        return unzip_beside(src) / "database_nifti"
+
     zip_name = "CAMUS_public.zip"
     folder_name = "CAMUS_public"
     unzip_dir = src / folder_name
@@ -453,7 +456,7 @@ def _resolve_path(src: str | Path) -> Path:
 
     zip_path = src / zip_name
 
-    unzipped_path = unzip(zip_path, src)
+    unzipped_path = unzip_beside(zip_path)
     return unzipped_path / "database_nifti"
 
 
