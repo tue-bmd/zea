@@ -42,6 +42,7 @@ from zea.data.convert.utils import (
     write_fingerprints,
 )
 from zea.data.file import File
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.func.tensor import translate
 
 if TYPE_CHECKING:
@@ -298,12 +299,67 @@ def find_split_for_file(file_dict, target_file):
 
     Returns:
         str: The split name that contains `target_file`, or `"rejected"` if the file is not found.
+            Warns about a file that is not found only when `file_dict` lists the rejected
+            files explicitly; otherwise unlisted files are rejected by definition.
     """
     for split, files in file_dict.items():
         if target_file in files:
             return split
-    log.warning(f"File {target_file} not found in any split, defaulting to rejected.")
+    if "rejected" in file_dict:
+        log.warning(f"File {target_file} not found in any split, defaulting to rejected.")
     return "rejected"
+
+
+# The published EchoNet-Dynamic split (train.yaml, val.yaml and test.yaml)
+ECHONET_SPLIT_PATH = "hf://zeahub/echonet-dynamic"
+
+
+def load_split(split_path):
+    """Load an EchoNet dataset split.
+
+    Two formats are supported:
+
+    * ``split.yaml``, as written by :func:`convert_echonet`: maps ``train``, ``val``,
+      ``test`` and ``rejected`` to lists of file names.
+    * ``train.yaml``, ``val.yaml`` and ``test.yaml``, as published on
+      `zeahub/echonet-dynamic <https://huggingface.co/datasets/zeahub/echonet-dynamic>`_:
+      each has ``file_paths`` and ``file_lengths`` (frames per file). Files that are in
+      none of them are rejected.
+
+    Args:
+        split_path (str, Path): A folder containing either format, a ``split.yaml``
+            file, or an ``hf://`` path to a Hugging Face dataset repository.
+
+    Returns:
+        tuple: The split, mapping split names to sets of ``.hdf5`` file names, and the
+        expected number of frames per file name (empty for ``split.yaml``).
+    """
+    text = str(split_path)
+    if text.startswith(HF_PREFIX):
+        split_path = _hf_resolve_path(text)
+    split_path = Path(split_path)
+
+    if split_path.is_file():
+        split_path, split_file = split_path.parent, split_path
+    else:
+        split_file = split_path / "split.yaml"
+
+    if split_file.exists():
+        with open(split_file, "r") as f:
+            splits = yaml.safe_load(f)
+        return {split: set(names or []) for split, names in splits.items()}, {}
+
+    splits, frames = {}, {}
+    for split in ["train", "val", "test"]:
+        yaml_file = split_path / f"{split}.yaml"
+        if not yaml_file.exists():
+            raise FileNotFoundError(f"Neither split.yaml nor {split}.yaml found in {split_path}.")
+        with open(yaml_file, "r") as f:
+            content = yaml.safe_load(f)
+        names = [Path(p).name for p in content["file_paths"]]
+        splits[split] = set(names)
+        frames.update(zip(names, content.get("file_lengths", [])))
+    return splits, frames
 
 
 def count_init(shared_counter):
@@ -547,8 +603,11 @@ def convert_echonet(args):
             - dst (str|Path): Destination directory for generated zea files
                 per-split subdirectories (train, val, test, rejected) and a split.yaml
                 are created or updated.
-            - split_path (str|Path|None): If provided, must contain a split.yaml to reproduce
-                an existing split; function asserts the file exists.
+            - split_path (str|Path|None, optional): The split to reproduce, in any format
+                :func:`load_split` reads. Defaults to the published split,
+                :data:`ECHONET_SPLIT_PATH`.
+            - new_split (bool, optional): Create a new random split instead of reproducing
+                one. Defaults to False.
             - no_hyperthreading (bool): When false, processing uses a ProcessPoolExecutor
                 with a shared counter; when true, processing runs sequentially.
             - reference_fingerprints (str|Path|None, optional): A ``fingerprints.json``
@@ -563,7 +622,6 @@ def convert_echonet(args):
           conversion: tinted videos, files disagreeing with a given split, invalid values
           and an unexpected fraction of rejected files are reported.
         - Logs progress and validation results.
-        - Asserts that split.yaml exists at split_path when split reproduction is requested.
 
     Raises:
         RuntimeError: If any file failed to convert or has invalid values. The split.yaml
@@ -572,16 +630,14 @@ def convert_echonet(args):
     # Check if unzip is needed
     src = _resolve_path(args.src)
 
-    if args.split_path is not None:
-        # Reproduce a previous split...
-        yaml_file = Path(args.split_path) / "split.yaml"
-        assert yaml_file.exists(), f"File {yaml_file} does not exist."
-        splits = {"train": None, "val": None, "test": None, "rejected": None}
-        with open(yaml_file, "r") as f:
-            splits = yaml.safe_load(f)
-        log.info(f"Processor initialized with train-val-test split from {yaml_file}.")
+    split_path = getattr(args, "split_path", ECHONET_SPLIT_PATH)
+    if getattr(args, "new_split", False) or split_path is None:
+        splits, expected_frames = None, {}
+        log.info("Creating a new train-val-test split.")
     else:
-        splits = None
+        # Reproduce a previous split...
+        splits, expected_frames = load_split(split_path)
+        log.info(f"Processor initialized with train-val-test split from {split_path}.")
 
     # List the files that have an entry in path_out_h5 already
     files_done = []
@@ -644,7 +700,7 @@ def convert_echonet(args):
 
     fingerprints = _collect_fingerprints(Path(args.dst), full_list, results)
     write_fingerprints(args.dst, fingerprints)
-    n_invalid = _check_conversion(fingerprints)
+    n_invalid = _check_conversion(fingerprints, expected_frames)
 
     reference = getattr(args, "reference_fingerprints", None)
     if reference is not None:
@@ -698,8 +754,24 @@ def _collect_fingerprints(dst, full_list, results):
     return fingerprints
 
 
-def _check_conversion(fingerprints):
-    """Log sanity checks on a converted dataset and return the number of invalid files."""
+def _check_conversion(fingerprints, expected_frames=None):
+    """Log sanity checks on a converted dataset and return the number of invalid files.
+
+    `expected_frames` maps file names to the number of frames the published split lists.
+    """
+    wrong_length = []
+    for rel, fp in fingerprints.items():
+        expected = (expected_frames or {}).get(Path(rel).name)
+        arrays = [v for v in fp.values() if isinstance(v, dict) and "shape" in v]
+        if expected is not None and arrays and arrays[0]["shape"][0] != expected:
+            wrong_length.append(f"{rel} ({arrays[0]['shape'][0]} frames, expected {expected})")
+    if wrong_length:
+        log.warning(
+            "%d files have a different number of frames than the published split: %s",
+            len(wrong_length),
+            ", ".join(wrong_length[:10]),
+        )
+
     tinted = sorted(
         rel for rel, fp in fingerprints.items() if fp.get("color_spread", 0) > _TINT_THRESHOLD
     )

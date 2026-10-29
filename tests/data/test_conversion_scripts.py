@@ -146,6 +146,8 @@ def create_test_data_for_dataset(dataset, src):
     os.mkdir(src)
     if dataset == "echonet":
         create_echonet_test_data(src)
+        # The published split does not know the synthetic videos
+        extra_args = ["--new-split"]
     elif dataset == "echonetlvh":
         extra_args = create_echonetlvh_test_data(src)
     elif dataset == "camus":
@@ -1534,6 +1536,39 @@ def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
     assert (tmp_path / "out/rejected/video_0.hdf5").exists()
 
 
+def test_echonet_load_split_formats(tmp_path):
+    """load_split reads both split.yaml and the published per-split files; in the latter,
+    unlisted files are rejected."""
+    from zea.data.convert.echonet import find_split_for_file, load_split
+
+    published = tmp_path / "published"
+    published.mkdir()
+    for split, names in {"train": ["a", "b"], "val": ["c"], "test": ["d"]}.items():
+        content = {
+            "file_paths": [f"{n}.hdf5" for n in names],
+            "file_lengths": [10] * len(names),
+            "total_num_files": len(names),
+        }
+        (published / f"{split}.yaml").write_text(yaml.dump(content))
+
+    splits, frames = load_split(published)
+    assert splits == {"train": {"a.hdf5", "b.hdf5"}, "val": {"c.hdf5"}, "test": {"d.hdf5"}}
+    assert frames == {"a.hdf5": 10, "b.hdf5": 10, "c.hdf5": 10, "d.hdf5": 10}
+    assert find_split_for_file(splits, "e.hdf5") == "rejected"
+
+    own = tmp_path / "own"
+    own.mkdir()
+    (own / "split.yaml").write_text(
+        yaml.dump({"train": ["a.hdf5"], "val": [], "test": [], "rejected": ["e.hdf5"]})
+    )
+    for path in (own, own / "split.yaml"):
+        splits, frames = load_split(path)
+        assert splits["rejected"] == {"e.hdf5"} and frames == {}
+
+    with pytest.raises(FileNotFoundError):
+        load_split(tmp_path / "empty")
+
+
 def test_echonet_conversion_reports_failures(tmp_path):
     """A file that fails to convert makes the conversion raise after the other files are
     written, instead of being logged as an anonymous warning."""
@@ -1544,7 +1579,7 @@ def test_echonet_conversion_reports_failures(tmp_path):
     create_echonet_test_data(src)
     (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").write_bytes(b"not a video")
 
-    args = types.SimpleNamespace(src=src, dst=dst, split_path=None, no_hyperthreading=True)
+    args = types.SimpleNamespace(src=src, dst=dst, new_split=True, no_hyperthreading=True)
     with pytest.raises(RuntimeError, match="1 of 9 files failed"):
         convert_echonet(args)
 
