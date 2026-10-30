@@ -1,7 +1,6 @@
 """Test dataset conversion scripts"""
 
 import csv
-import json
 import os
 import shutil
 import subprocess
@@ -23,18 +22,11 @@ from zea.data.convert.__main__ import Dataset
 from zea.data.convert.images import convert_image_dataset
 from zea.data.convert.utils import (
     check_output_dir_ownership,
-    color_spread,
-    compare_fingerprints,
-    conversion_provenance,
-    fingerprint_hdf5,
     load_avi,
-    load_fingerprints,
     require_output_dir_ownership,
-    rgb_to_gray,
     sitk_load,
     unzip,
     upload_dataset_to_hf,
-    write_fingerprints,
 )
 from zea.data.convert.verasonics import (
     VerasonicsFile,
@@ -1298,67 +1290,6 @@ def test_load_avi_color_channel_order(tmp_path):
     gray = load_avi(avi_path, mode="L")
     # ITU-R 601 luma: 0.299 R + 0.587 G + 0.114 B
     np.testing.assert_array_equal(gray[:, 0, 0], [76, 150, 29, 128])
-    np.testing.assert_array_equal(rgb_to_gray(rgb), gray)
-
-    assert color_spread(rgb[:3], gray[:3]) > 50
-    assert color_spread(rgb[3:], gray[3:]) == 0
-
-
-def _write_fingerprint_test_file(path, values):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    File.create(path=path, data={"image": {"values": values}}, probe={"name": "generic"})
-
-
-def test_fingerprints_roundtrip_and_compare(tmp_path):
-    """Fingerprints classify a reconversion as identical, close, different, moved or missing."""
-    rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    base = rng.uniform(-60, 0, (3, 8, 8)).astype(np.float32)
-
-    old, new = tmp_path / "old", tmp_path / "new"
-    _write_fingerprint_test_file(old / "train/same.hdf5", base)
-    _write_fingerprint_test_file(old / "train/noisy.hdf5", base)
-    _write_fingerprint_test_file(old / "train/changed.hdf5", base)
-    _write_fingerprint_test_file(old / "train/moved.hdf5", base)
-    _write_fingerprint_test_file(old / "train/gone.hdf5", base)
-
-    _write_fingerprint_test_file(new / "train/same.hdf5", base)
-    _write_fingerprint_test_file(new / "train/noisy.hdf5", base + 1e-3)
-    _write_fingerprint_test_file(new / "train/changed.hdf5", np.clip(base + 5, -60, 0))
-    _write_fingerprint_test_file(new / "rejected/moved.hdf5", base)
-    _write_fingerprint_test_file(new / "train/added.hdf5", base)
-
-    def fingerprints(folder):
-        files = {str(p.relative_to(folder)): fingerprint_hdf5(p) for p in folder.rglob("*.hdf5")}
-        write_fingerprints(folder, files, provenance={"test": True})
-        return load_fingerprints(folder)
-
-    reference, current = fingerprints(old), fingerprints(new)
-
-    (array,) = reference["files"]["train/same.hdf5"].values()
-    assert array["shape"] == [3, 8, 8]
-    assert array["dtype"] == "float32"
-    assert np.isclose(array["mean"], base.mean())
-    assert reference["provenance"] == {"test": True}
-
-    result = compare_fingerprints(reference, current, atol=0.1)
-    assert sorted(result["identical"]) == ["moved.hdf5", "same.hdf5"]
-    assert result["close"] == ["noisy.hdf5"]
-    assert result["different"] == ["changed.hdf5"]
-    assert result["missing"] == ["gone.hdf5"]
-    assert result["extra"] == ["added.hdf5"]
-    assert result["moved"] == [("moved.hdf5", "train/moved.hdf5", "rejected/moved.hdf5")]
-
-    current["files"]["test/same.hdf5"] = current["files"]["train/same.hdf5"]
-    with pytest.raises(ValueError, match="same.hdf5 appears more than once"):
-        compare_fingerprints(reference, current)
-
-
-def test_conversion_provenance():
-    """Provenance records the zea version, library versions and CPU."""
-    info = conversion_provenance()
-    assert info["zea_version"]
-    assert "numpy" in info["packages"]
-    assert "cpu_model" in info
 
 
 def test_sitk_load(tmp_path):
@@ -1517,28 +1448,34 @@ def test_echonet_processor_writes_image_not_image_sc(tmp_path):
 
 
 def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
-    """A given split is kept when the acceptance check disagrees, and the disagreement
-    is reported, so a decoder change cannot reshuffle a published split."""
+    """A given split is kept when the acceptance check or the frame count disagrees, and
+    the disagreement is reported, so a decoder change cannot reshuffle a published split."""
     from multiprocessing import Value
 
-    from zea.data.convert.echonet import H5Processor, count_init
+    from zea.data.convert import echonet
 
     src = tmp_path / "src"
     src.mkdir()
     create_echonet_test_data(src)
     videos = src / "EchoNet-Dynamic" / "Videos"
+    n_frames = len(load_avi(videos / "video_0.avi"))
 
     # video_6 fails the acceptance check, video_0 passes it
     splits = {"train": ["video_6.hdf5"], "val": [], "test": [], "rejected": ["video_0.hdf5"]}
-    processor = H5Processor(path_out_h5=tmp_path / "out", splits=splits)
-    count_init(Value("i", 0))
+    processor = echonet.H5Processor(
+        path_out_h5=tmp_path / "out", splits=splits, expected_frames={"video_0.hdf5": n_frames + 1}
+    )
+    echonet.count_init(Value("i", 0))
 
-    result = processor(videos / "video_6.avi")
-    assert result["split"] == "train" and not result["accepted_by_shape"]
+    with mock.patch.object(echonet.log, "warning") as warning:
+        processor(videos / "video_6.avi")
+        processor(videos / "video_0.avi")
+    messages = [call.args[0] % call.args[1:] for call in warning.call_args_list]
+    assert any("video_6.hdf5: the acceptance check rejects" in m for m in messages)
+    assert any("video_0.hdf5: the acceptance check accepts" in m for m in messages)
+    assert any(f"but the published split lists {n_frames + 1}" in m for m in messages)
+
     assert (tmp_path / "out/train/video_6.hdf5").exists()
-
-    result = processor(videos / "video_0.avi")
-    assert result["split"] == "rejected" and result["accepted_by_shape"]
     assert (tmp_path / "out/rejected/video_0.hdf5").exists()
 
 
@@ -1656,33 +1593,14 @@ def test_echonet_conversion_reports_failures(tmp_path):
     with pytest.raises(RuntimeError, match="1 of 9 files failed"):
         convert_echonet(args)
 
-    fingerprints = load_fingerprints(dst)
-    assert len(fingerprints["files"]) == 8
-    assert "packages" in fingerprints["provenance"]
-    for fp in fingerprints["files"].values():
-        assert fp["color_spread"] < 2
-        assert len(fp["source_sha256"]) == 64
+    split = yaml.safe_load((dst / "split.yaml").read_text())
+    assert sum(len(names) for names in split.values()) == 8
 
-    # A rerun only converts what is left, reuses the fingerprints of the other files, and
-    # can be compared with the first run.
+    # A rerun only converts what is left
     (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").unlink()
-    first = dst / "first_fingerprints.json"
-    shutil.copy(dst / "fingerprints.json", first)
-    args.reference_fingerprints = first
     convert_echonet(args)
-    assert load_fingerprints(dst)["files"] == fingerprints["files"]
 
-    # The reference is read before dst/fingerprints.json is overwritten, so it can be dst
-    # itself.
-    reference = load_fingerprints(dst)
-    reference["files"] = {k: {**v, "extra": 1} for k, v in reference["files"].items()}
-    (dst / "fingerprints.json").write_text(json.dumps(reference))
-    args.reference_fingerprints = dst
-    with mock.patch("zea.data.convert.echonet.compare_fingerprints") as compare:
-        convert_echonet(args)
-    assert compare.call_args.args[0] == reference
-
-    # A stale copy in another split is refused rather than fingerprinted twice
+    # A stale copy in another split is refused rather than listed twice in split.yaml
     stale = next(f for split in ("train", "val", "test") for f in (dst / split).glob("*.hdf5"))
     shutil.copy(stale, dst / "rejected" / stale.name)
     with pytest.raises(RuntimeError, match="1 files are in more than one split"):

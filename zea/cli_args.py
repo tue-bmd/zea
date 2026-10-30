@@ -682,8 +682,6 @@ class _Echonet:
     """Create a new random train/val/test split instead of reproducing one."""
     no_hyperthreading: bool = False
     """Disable hyperthreading for multiprocessing."""
-    reference_fingerprints: Path | None = None
-    """fingerprints.json (or its folder) of an earlier conversion to compare the result with."""
 
     def run(self):
         from zea.data.convert.echonet import convert_echonet
