@@ -352,7 +352,8 @@ class BaseParameters:
         # Attribute not found
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
 
-    def __setattr__(self, name: str, value):
+    def _check_settable(self, name: str):
+        """Raise if ``name`` is a method or (computed/read-only) property."""
         # Give clear error message on assignment to methods
         class_attr = getattr(self.__class__, name, None)
         if callable(class_attr):
@@ -362,9 +363,9 @@ class BaseParameters:
                 f"To use it, call it as a function, e.g.: '{self.__class__.__name__}.{name}(...)'"
             )
 
-        # Allow setting private attributes
+        # Private attributes are always settable
         if name.startswith("_"):
-            return super().__setattr__(name, value)
+            return
 
         # Give clear error message on assignment to computed properties
         if self._is_property_with_dependencies(name) and name not in self.VALID_PARAMS:
@@ -377,6 +378,13 @@ class BaseParameters:
         # Give clear error message on assignment to read-only (plain) properties
         if isinstance(class_attr, property) and name not in self.VALID_PARAMS:
             raise AttributeError(f"Cannot set read-only property '{name}'.")
+
+    def __setattr__(self, name: str, value):
+        self._check_settable(name)
+
+        # Allow setting private attributes
+        if name.startswith("_"):
+            return super().__setattr__(name, value)
 
         # Any key not in VALID_PARAMS is stored as a custom (passthrough) parameter.
         # Custom params are never type-checked and never participate in derivation.
@@ -402,9 +410,9 @@ class BaseParameters:
 
         Validated parameters (those listed in ``VALID_PARAMS``) are type-checked
         and may invalidate cached computed properties.  Any other key is stored
-        as a custom (passthrough) parameter, except names that collide with a
-        method or computed property of the class, which are silently ignored
-        (they cannot be overridden).
+        as a custom (passthrough) parameter.  Names that collide with a method or
+        (computed/read-only) property raise, as with ``__setitem__``.  All keys
+        are checked before any is set, so such an error leaves the object unchanged.
 
         Args:
             params: Optional mapping of parameters to set.
@@ -415,12 +423,11 @@ class BaseParameters:
         """
         merged = dict(params) if params else {}
         merged.update(kwargs)
+        # Check all keys up front so a bad key does not leave a partial update.
+        for key in merged:
+            self._check_settable(key)
         for key, new_val in merged.items():
             if key not in self.VALID_PARAMS:
-                # Cannot override methods or (computed/plain) properties.
-                class_attr = getattr(self.__class__, key, None)
-                if callable(class_attr) or isinstance(class_attr, property):
-                    continue
                 # Genuine custom passthrough parameter.
                 self._custom_params[key] = new_val
                 continue

@@ -104,7 +104,12 @@ import numpy as np
 from keras import ops
 
 from zea import log
-from zea.beamform.geometry import compute_element_normals
+from zea.beamform.geometry import (
+    compute_element_normals,
+    is_diverging,
+    is_focused,
+    is_plane_wave,
+)
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -153,7 +158,12 @@ class Parameters(BaseParameters):
     """Nominal center frequency of the probe [Hz]."""
 
     probe_bandwidth_percent: float
-    """Probe bandwidth as a percentage of the center frequency. Defaults to 200.0."""
+    """Probe bandwidth as a percentage of the center frequency. Defaults to 100.0."""
+
+    bandwidth: float
+    """Width of the RF band kept by processing [Hz], centered on the
+    ``demodulation_frequency``. Used by :class:`~zea.ops.BandPassFilter` and by
+    :meth:`check_for_aliasing`."""
 
     n_el: int
     """Number of elements in the transducer array."""
@@ -318,6 +328,7 @@ class Parameters(BaseParameters):
         "n_tx": {"dtype": np.int32},
         "n_ax": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
+        "bandwidth": {"dtype": np.float32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
@@ -331,7 +342,7 @@ class Parameters(BaseParameters):
 
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
-    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
+    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 100.0
     # Give these a default of None (rather than leaving them unset) so that they can be
     # declared as dependencies of computed properties (e.g. t_peak, n_waveforms) without
     # tripping MissingDependencyError
@@ -434,17 +445,90 @@ class Parameters(BaseParameters):
                 grid_size_x=self.grid_size_x,
                 grid_size_y=self.grid_size_y,
             )
-            try:
-                check_for_aliasing(self)
-            except MissingDependencyError:
-                # No wavelength (e.g. missing center frequency); cannot assess aliasing.
-                pass
+            # Aliasing cannot be assessed without the frequency and probe geometry.
+            if (
+                self._params.get("center_frequency") is not None
+                and self._params.get("probe_geometry") is not None
+            ):
+                try:
+                    self.check_for_aliasing()
+                except MissingDependencyError:
+                    pass
             return grid
         else:
             raise ValueError(
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
                 "'cartesian' and 'polar'."
             )
+
+    def check_for_aliasing(self, demodulated=True, bandwidth=None) -> list:
+        """Warn when the beamforming grid under-samples the data it will carry.
+
+        Run by :attr:`grid` for cartesian grids. Whether a pixel pitch
+        under-samples depends on whether the data reaching the grid is RF or
+        baseband IQ, which the parameters alone do not tell. By default IQ is
+        assumed: its axial limit is never stricter than the RF one, so a grid
+        that fails it aliases either way, and the lateral limit is the same for
+        both. See :func:`zea.beamform.pixelgrid.aliasing_limits` for the
+        criteria. Only regular cartesian grids, 2D or 3D, are checked.
+
+        Args:
+            demodulated: Whether the data reaching the grid is baseband IQ.
+                Pass ``False`` to check against the stricter RF axial limit.
+            bandwidth: The RF band in Hz. Overrides the ``bandwidth`` parameter;
+                when neither is set, ``probe_bandwidth_percent`` of the
+                ``center_frequency`` is assumed.
+
+        Returns:
+            list of str: The warnings emitted; empty when the grid is adequate.
+        """
+        if self.grid_type != "cartesian" or self.enable_scanline:
+            return []
+
+        def stored(name):
+            # Read through the property so the transmit selection applies, but only
+            # when the value was provided: the fallbacks log a warning that the
+            # check should not trigger.
+            return getattr(self, name) if self._params.get(name) is not None else None
+
+        focus_distances = stored("focus_distances")
+        tx_apodizations = stored("tx_apodizations")
+        if focus_distances is None or tx_apodizations is None:
+            # Unknown transmit geometry: an empty one makes aliasing_limits assume
+            # the symmetric transmit cone.
+            focus_distances, tx_apodizations = np.zeros(0), np.zeros((0, 0))
+        transmit_origins = stored("transmit_origins")
+        if transmit_origins is None:
+            transmit_origins = np.zeros((len(focus_distances), 3))
+
+        if bandwidth is None:
+            bandwidth = self._params.get("bandwidth")
+        if bandwidth is None:
+            center_frequency = np.max(np.asarray(self.center_frequency, dtype=float))
+            bandwidth = self.probe_bandwidth_percent / 100 * center_frequency
+
+        return check_for_aliasing(
+            self.xlims,
+            self.zlims,
+            self.grid_size_x,
+            self.grid_size_z,
+            self.sound_speed,
+            self.center_frequency,
+            self.f_number,
+            demodulation_frequency=self.demodulation_frequency,
+            focus_distances=focus_distances,
+            probe_geometry=self.probe_geometry,
+            tx_apodizations=tx_apodizations,
+            polar_angles=self.polar_angles,
+            transmit_origins=transmit_origins,
+            demodulated=demodulated,
+            bandwidth=bandwidth,
+            azimuth_angles=stored("azimuth_angles"),
+            ylims=self.ylims if self.is_3d else (0.0, 0.0),
+            grid_size_y=self.grid_size_y if self.is_3d else 1,
+            element_width=self._params.get("element_width"),
+            element_height=self._params.get("element_height"),
+        )
 
     @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
     def flat_aligned_apodization(self):
@@ -502,8 +586,9 @@ class Parameters(BaseParameters):
         if grid_size_x is not None:
             return grid_size_x
 
+        # Pixels sit on both limits, so n pixels span n - 1 pitches.
         width = self.xlims[1] - self.xlims[0]
-        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_x, 1)
 
     @cache_with_dependencies(
@@ -521,7 +606,7 @@ class Parameters(BaseParameters):
             return grid_size_y
 
         height = self.ylims[1] - self.ylims[0]
-        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_y, 1)
 
     @cache_with_dependencies(
@@ -538,7 +623,7 @@ class Parameters(BaseParameters):
             return grid_size_z
 
         depth = self.zlims[1] - self.zlims[0]
-        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_z, 1)
 
     @cache_with_dependencies("sound_speed", "center_frequency")
@@ -791,20 +876,19 @@ class Parameters(BaseParameters):
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select focused transmits")
-            # Plane waves use inf (or 0); a finite positive focus marks a focused transmit.
-            return np.where((value > 0) & np.isfinite(value))[0].tolist()
+            return np.where(is_focused(value))[0].tolist()
 
         if selection == "diverging":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select diverging transmits")
-            return np.where(value < 0)[0].tolist()
+            return np.where(is_diverging(value))[0].tolist()
 
         if selection == "plane":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select plane wave transmits")
-            return np.where((value == 0) | np.isinf(value))[0].tolist()
+            return np.where(is_plane_wave(value))[0].tolist()
 
         # Handle integer - select evenly spaced transmits
         if isinstance(selection, (int, np.integer)):
