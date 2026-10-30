@@ -11,6 +11,8 @@ For more information about the dataset, resort to the following links:
 
 """
 
+import collections
+import contextlib
 import functools
 import os
 import traceback
@@ -21,12 +23,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
-from scipy.interpolate import (
-    CloughTocher2DInterpolator,
-    LinearNDInterpolator,
-    NearestNDInterpolator,
-)
-from scipy.spatial import Delaunay
+from scipy.interpolate import CloughTocher2DInterpolator, LinearNDInterpolator
+from scipy.spatial import Delaunay, cKDTree
 from tqdm import tqdm
 
 from zea import log
@@ -42,8 +40,8 @@ from zea.data.convert.utils import (
     write_fingerprints,
 )
 from zea.data.file import File
-from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 from zea.func.tensor import translate
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 
 if TYPE_CHECKING:
     from multiprocessing.sharedctypes import Synchronized
@@ -247,6 +245,13 @@ def _polar_grid(rows, cols, tip, r_max, angle):
     return Delaunay(data_points), new_points
 
 
+@functools.lru_cache
+def _nearest_indices(rows, cols, tip, r_max, angle):
+    # What NearestNDInterpolator looks up, without rebuilding its KD-tree on every call.
+    tri, new_points = _polar_grid(rows, cols, tip, r_max, angle)
+    return cKDTree(tri.points).query(new_points)[1]
+
+
 def cartesian_to_polar_matrix(
     cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
 ):
@@ -274,14 +279,13 @@ def cartesian_to_polar_matrix(
     data_values = cartesian_matrix.reshape(-1, rows * cols).T
 
     if interpolation == "nearest":
-        interpolator = NearestNDInterpolator(tri.points, data_values)
+        polar_values = data_values[_nearest_indices(rows, cols, tuple(tip), r_max, angle)]
     elif interpolation == "linear":
-        interpolator = LinearNDInterpolator(tri, data_values, fill_value=0)
+        polar_values = LinearNDInterpolator(tri, data_values, fill_value=0)(new_points)
     elif interpolation == "cubic":
-        interpolator = CloughTocher2DInterpolator(tri, data_values, fill_value=0)
+        polar_values = CloughTocher2DInterpolator(tri, data_values, fill_value=0)(new_points)
     else:
         raise ValueError(f"Unknown interpolation method: {interpolation}")
-    polar_values = interpolator(new_points)
 
     # Reshape to (n_frames, rows, cols)
     polar_matrix = np.rot90(polar_values.T.reshape(-1, cols, rows), k=-1, axes=(1, 2))
@@ -314,6 +318,18 @@ def find_split_for_file(file_dict, target_file):
 ECHONET_SPLIT_PATH = "hf://zeahub/echonet-dynamic"
 
 
+def _hf_resolve_split(hf_path):
+    # Download only the split files
+    if hf_path.endswith(".yaml"):
+        return _hf_resolve_path(hf_path)
+    hf_path = hf_path.rstrip("/")
+    try:
+        return _hf_resolve_path(f"{hf_path}/split.yaml")
+    except FileNotFoundError:
+        files = [_hf_resolve_path(f"{hf_path}/{split}.yaml") for split in ["train", "val", "test"]]
+        return files[0].parent
+
+
 def load_split(split_path):
     """Load an EchoNet dataset split.
 
@@ -336,11 +352,14 @@ def load_split(split_path):
     """
     text = str(split_path)
     if text.startswith(HF_PREFIX):
-        split_path = _hf_resolve_path(text)
+        split_path = _hf_resolve_split(text)
     split_path = Path(split_path)
 
     if split_path.is_file():
         split_path, split_file = split_path.parent, split_path
+        if split_file.name != "split.yaml":
+            # One of the published per-split files; read all three from its folder.
+            split_file = split_path / "split.yaml"
     else:
         split_file = split_path / "split.yaml"
 
@@ -570,24 +589,32 @@ class H5Processor:
         }
 
 
+def _find_videos(folder: Path) -> Path:
+    # EchoNet-Dynamic.zip nests everything under a top-level EchoNet-Dynamic/ folder, so
+    # unzip_beside yields EchoNet-Dynamic/EchoNet-Dynamic/Videos, while a manual extraction
+    # into the folder holding the zip yields EchoNet-Dynamic/Videos.
+    for candidate in (folder / "Videos", folder / "EchoNet-Dynamic" / "Videos"):
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"No Videos folder found in {folder}.")
+
+
 def _resolve_path(src: str | Path) -> Path:
     src = Path(src)
 
     if src.is_file() and src.suffix == ".zip":
-        return unzip_beside(src) / "EchoNet-Dynamic" / "Videos"
+        return _find_videos(unzip_beside(src))
 
     if (src / "Videos").exists():
         return src / "Videos"
 
     zip_name = "EchoNet-Dynamic.zip"
     folder_name = "EchoNet-Dynamic"
-    unzip_dir = src / folder_name / "Videos"
 
     if (src / folder_name).exists():
-        return unzip_dir
+        return _find_videos(src / folder_name)
 
-    unzipped_path = unzip_beside(src / zip_name)
-    return unzipped_path / folder_name / "Videos"
+    return _find_videos(unzip_beside(src / zip_name))
 
 
 def convert_echonet(args):
@@ -630,6 +657,11 @@ def convert_echonet(args):
     # Check if unzip is needed
     src = _resolve_path(args.src)
 
+    # Load before fingerprints.json in dst is overwritten, which may be the reference.
+    reference = getattr(args, "reference_fingerprints", None)
+    if reference is not None:
+        reference = load_fingerprints(reference)
+
     split_path = getattr(args, "split_path", ECHONET_SPLIT_PATH)
     if getattr(args, "new_split", False) or split_path is None:
         splits, expected_frames = None, {}
@@ -647,7 +679,9 @@ def convert_echonet(args):
 
     # List all files of echonet and exclude those already processed
     path_in = Path(src)
-    h5_files = path_in.glob("*.avi")
+    h5_files = list(path_in.glob("*.avi"))
+    if not h5_files:
+        raise FileNotFoundError(f"No .avi files found in {path_in}.")
     h5_files = [file for file in h5_files if file.stem not in files_done]
     log.info(f"Files left to process: {len(h5_files)}")
 
@@ -692,19 +726,29 @@ def convert_echonet(args):
         split_dir = Path(args.dst) / split
         full_list[split] = sorted(f.name for f in split_dir.glob("*.hdf5"))
 
+    # Resumes skip files that exist in any split, so a duplicate was put there by hand.
+    counts = collections.Counter(name for names in full_list.values() for name in names)
+    duplicates = sorted(name for name, count in counts.items() if count > 1)
+    if duplicates:
+        raise RuntimeError(
+            f"{len(duplicates)} files are in more than one split of {args.dst}, e.g. "
+            f"{', '.join(duplicates[:5])}. Remove the stale copies and rerun."
+        )
+
     with open(Path(args.dst) / "split.yaml", "w") as f:
         yaml.dump(full_list, f)
 
     # Validate that the split was copied correctly
     processor.validate_split_copy(Path(args.dst) / "split.yaml")
 
-    fingerprints = _collect_fingerprints(Path(args.dst), full_list, results)
+    fingerprints = _collect_fingerprints(
+        Path(args.dst), full_list, results, parallel=not args.no_hyperthreading
+    )
     write_fingerprints(args.dst, fingerprints)
-    n_invalid = _check_conversion(fingerprints, expected_frames)
+    n_invalid = _check_conversion(fingerprints, expected_frames, processor.range_to)
 
-    reference = getattr(args, "reference_fingerprints", None)
     if reference is not None:
-        compare_fingerprints(load_fingerprints(reference), {"files": fingerprints})
+        compare_fingerprints(reference, {"files": fingerprints})
 
     if failures or n_invalid:
         raise RuntimeError(
@@ -725,7 +769,7 @@ def _fingerprint_existing(path):
     return path, fingerprint_hdf5(path)
 
 
-def _collect_fingerprints(dst, full_list, results):
+def _collect_fingerprints(dst, full_list, results, parallel=True):
     # Files converted in an earlier run are skipped by the processor, so reuse their
     # entry from an existing fingerprints.json, or fingerprint them from disk.
     previous = {}
@@ -744,21 +788,28 @@ def _collect_fingerprints(dst, full_list, results):
             else:
                 todo.append(dst / rel)
 
-    if todo:
-        log.info("Fingerprinting %d files from an earlier run.", len(todo))
-        with ProcessPoolExecutor() as executor:
-            for path, fp in tqdm(
-                executor.map(_fingerprint_existing, todo, chunksize=16), total=len(todo)
-            ):
-                fingerprints[str(path.relative_to(dst))] = {**fp, "split": path.parent.name}
+    if not todo:
+        return fingerprints
+
+    log.info("Fingerprinting %d files from an earlier run.", len(todo))
+    with contextlib.ExitStack() as stack:
+        if parallel:
+            executor = stack.enter_context(ProcessPoolExecutor())
+            mapped = executor.map(_fingerprint_existing, todo, chunksize=16)
+        else:
+            mapped = map(_fingerprint_existing, todo)
+        for path, fp in tqdm(mapped, total=len(todo)):
+            fingerprints[str(path.relative_to(dst))] = {**fp, "split": path.parent.name}
     return fingerprints
 
 
-def _check_conversion(fingerprints, expected_frames=None):
+def _check_conversion(fingerprints, expected_frames=None, value_range=(-60, 0)):
     """Log sanity checks on a converted dataset and return the number of invalid files.
 
-    `expected_frames` maps file names to the number of frames the published split lists.
+    `expected_frames` maps file names to the number of frames the published split lists,
+    and `value_range` is the range (in dB) all values must lie in.
     """
+    low_db, high_db = value_range
     wrong_length = []
     for rel, fp in fingerprints.items():
         expected = (expected_frames or {}).get(Path(rel).name)
@@ -801,12 +852,12 @@ def _check_conversion(fingerprints, expected_frames=None):
     for rel, fp in fingerprints.items():
         for array in (v for v in fp.values() if isinstance(v, dict) and "sha256" in v):
             stats = [array["mean"], array["std"], array["min"], array["max"]]
-            if not np.all(np.isfinite(stats)) or array["min"] < -60 or array["max"] > 0:
+            if not np.all(np.isfinite(stats)) or array["min"] < low_db or array["max"] > high_db:
                 invalid.append(rel)
             elif array["std"] == 0:
                 log.warning("%s is constant (%g dB).", rel, array["mean"])
     for rel in invalid:
-        log.error("%s has values that are not finite or outside [-60, 0] dB.", rel)
+        log.error("%s has values that are not finite or outside [%g, %g] dB.", rel, *value_range)
 
     n_rejected = sum(fp["split"] == "rejected" for fp in fingerprints.values())
     fraction = n_rejected / max(len(fingerprints), 1)

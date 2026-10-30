@@ -1,6 +1,7 @@
 """Test dataset conversion scripts"""
 
 import csv
+import json
 import os
 import shutil
 import subprocess
@@ -8,6 +9,7 @@ import sys
 import types
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import h5py
 import imageio
@@ -1346,6 +1348,10 @@ def test_fingerprints_roundtrip_and_compare(tmp_path):
     assert result["extra"] == ["added.hdf5"]
     assert result["moved"] == [("moved.hdf5", "train/moved.hdf5", "rejected/moved.hdf5")]
 
+    current["files"]["test/same.hdf5"] = current["files"]["train/same.hdf5"]
+    with pytest.raises(ValueError, match="same.hdf5 appears more than once"):
+        compare_fingerprints(reference, current)
+
 
 def test_conversion_provenance():
     """Provenance records the zea version, library versions and CPU."""
@@ -1565,8 +1571,75 @@ def test_echonet_load_split_formats(tmp_path):
         splits, frames = load_split(path)
         assert splits["rejected"] == {"e.hdf5"} and frames == {}
 
+    # Pointing at one of the published files reads all three
+    assert load_split(published / "train.yaml") == load_split(published)
+
     with pytest.raises(FileNotFoundError):
         load_split(tmp_path / "empty")
+
+
+def test_echonet_load_split_hf_downloads_only_split_files(tmp_path, monkeypatch):
+    """An hf:// split resolves the split files one by one, never the whole repository."""
+    from zea.data.convert import echonet
+
+    for split in ["train", "val", "test"]:
+        content = {"file_paths": [f"{split}.hdf5"], "file_lengths": [1]}
+        (tmp_path / f"{split}.yaml").write_text(yaml.dump(content))
+
+    requested = []
+
+    def fake_resolve(hf_path):
+        requested.append(hf_path)
+        path = tmp_path / hf_path.rsplit("/", 1)[1]
+        if not path.exists():
+            raise FileNotFoundError(hf_path)
+        return path
+
+    monkeypatch.setattr(echonet, "_hf_resolve_path", fake_resolve)
+    splits, _ = echonet.load_split("hf://org/repo/")
+    assert splits["val"] == {"val.hdf5"}
+    assert requested == [f"hf://org/repo/{name}.yaml" for name in ["split", "train", "val", "test"]]
+
+
+def test_echonet_resolve_path_layouts(tmp_path):
+    """Videos are found after unzipping beside the zip, on a rerun, and in a manual
+    extraction; an empty Videos folder raises instead of silently converting nothing."""
+    from zea.data.convert.echonet import _resolve_path, convert_echonet
+
+    create_echonet_test_data(tmp_path)
+    videos = tmp_path / "EchoNet-Dynamic" / "Videos"
+    assert _resolve_path(tmp_path) == videos  # manual extraction
+
+    zipped = tmp_path / "zipped"
+    zipped.mkdir()
+    with zipfile.ZipFile(zipped / "EchoNet-Dynamic.zip", "w") as zf:
+        for avi in videos.glob("*.avi"):
+            zf.write(avi, f"EchoNet-Dynamic/Videos/{avi.name}")
+    nested = zipped / "EchoNet-Dynamic" / "EchoNet-Dynamic" / "Videos"
+    assert _resolve_path(zipped) == nested  # unzips
+    assert _resolve_path(zipped) == nested  # rerun
+    assert _resolve_path(zipped / "EchoNet-Dynamic.zip") == nested
+
+    for avi in videos.glob("*.avi"):
+        avi.unlink()
+    args = types.SimpleNamespace(
+        src=tmp_path, dst=tmp_path / "dst", new_split=True, no_hyperthreading=True
+    )
+    with pytest.raises(FileNotFoundError, match="No .avi files"):
+        convert_echonet(args)
+
+
+def test_echonet_nearest_matches_scipy():
+    """The cached nearest-neighbour lookup gives what NearestNDInterpolator gives."""
+    from scipy.interpolate import NearestNDInterpolator
+
+    from zea.data.convert.echonet import _polar_grid, cartesian_to_polar_matrix
+
+    frames = np.random.default_rng(DEFAULT_TEST_SEED).uniform(size=(2, 112, 112))
+    tri, new_points = _polar_grid(112, 112, (61, 7), 107, 0.79)
+    values = NearestNDInterpolator(tri.points, frames.reshape(2, -1).T)(new_points)
+    expected = np.rot90(values.T.reshape(-1, 112, 112), k=-1, axes=(1, 2))
+    np.testing.assert_array_equal(cartesian_to_polar_matrix(frames), expected)
 
 
 def test_echonet_conversion_reports_failures(tmp_path):
@@ -1598,6 +1671,22 @@ def test_echonet_conversion_reports_failures(tmp_path):
     args.reference_fingerprints = first
     convert_echonet(args)
     assert load_fingerprints(dst)["files"] == fingerprints["files"]
+
+    # The reference is read before dst/fingerprints.json is overwritten, so it can be dst
+    # itself.
+    reference = load_fingerprints(dst)
+    reference["files"] = {k: {**v, "extra": 1} for k, v in reference["files"].items()}
+    (dst / "fingerprints.json").write_text(json.dumps(reference))
+    args.reference_fingerprints = dst
+    with mock.patch("zea.data.convert.echonet.compare_fingerprints") as compare:
+        convert_echonet(args)
+    assert compare.call_args.args[0] == reference
+
+    # A stale copy in another split is refused rather than fingerprinted twice
+    stale = next(f for split in ("train", "val", "test") for f in (dst / split).glob("*.hdf5"))
+    shutil.copy(stale, dst / "rejected" / stale.name)
+    with pytest.raises(RuntimeError, match="1 files are in more than one split"):
+        convert_echonet(args)
 
 
 def test_camus_build_polar_image_in_process(tmp_path):

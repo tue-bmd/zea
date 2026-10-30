@@ -326,7 +326,8 @@ def compare_fingerprints(reference, current, atol=0.1):
     """Compare two sets of dataset fingerprints and log what changed.
 
     Files are matched by file name, so a file that moved between splits is reported as
-    moved rather than as missing and extra. Each matched file is classified as:
+    moved rather than as missing and extra; file names must therefore be unique within
+    each set, or a ``ValueError`` is raised. Each matched file is classified as:
 
     * ``identical`` — every array is bit-identical.
     * ``close`` — same shapes, and every array's mean and std differ by at most ``atol``.
@@ -346,7 +347,16 @@ def compare_fingerprints(reference, current, atol=0.1):
     """
 
     def by_name(files):
-        return {Path(rel).name: (rel, fp) for rel, fp in files.items()}
+        named = {}
+        for rel, fp in files.items():
+            name = Path(rel).name
+            if name in named:
+                raise ValueError(
+                    f"{name} appears more than once ({named[name][0]} and {rel}), so files "
+                    "cannot be matched by name."
+                )
+            named[name] = (rel, fp)
+        return named
 
     ref, cur = by_name(reference["files"]), by_name(current["files"])
     max_mean_diff: dict[str, float] = {}
