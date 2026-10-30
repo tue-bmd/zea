@@ -6,6 +6,7 @@ including delay calculations, time-of-flight correction, lens correction, and pr
 Modules
 -------
 
+- :mod:`zea.beamform.admire` -- Aperture Domain Model Image REconstruction (ADMIRE) models and fit.
 - :mod:`zea.beamform.beamformer` -- Main beamforming functions and time-of-flight correction.
 - :mod:`zea.beamform.delays` -- Delay calculation routines for plane wave and focused transmissions.
 - :mod:`zea.beamform.lens_correction` -- Lens-corrected delay computation.
@@ -17,4 +18,4 @@ see the pipeline example notebook: :doc:`../notebooks/pipeline/zea_pipeline_exam
 
 """
 
-from . import beamformer, delays, lens_correction, pfield, phantoms, pixelgrid
+from . import admire, beamformer, delays, lens_correction, pfield, phantoms, pixelgrid
