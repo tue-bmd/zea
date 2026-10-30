@@ -196,7 +196,7 @@ def baseband_mode_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> 
     ``cos = 1`` and hold ``I``, and the odd samples fall where ``sin = 1`` and hold
     ``-Q``. The odd samples are therefore negated to recover ``Q``. Because Q is sampled
     a quarter carrier period after I, Q is then shifted back to the I sample times with
-    :func:`align_baseband_quadrature`.
+    a band-limited fractional delay.
 
     Args:
         data: Input array of shape ``(n_frames, n_tx, n_ax_raw, n_el, 1)``.
@@ -218,12 +218,13 @@ def baseband_mode_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> 
     d = data.astype(np.float32)
     # Even samples hold I, odd samples hold -Q.
     iq_data = np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
+    del d
     # Q lags I by a quarter carrier period, expressed here in IQ samples.
     q_delay = 0.25 / carrier_periods_per_pair
-    return align_baseband_quadrature(iq_data, axis=2, q_delay=q_delay)
+    return _align_baseband_quadrature(iq_data, axis=2, q_delay=q_delay)
 
 
-def align_baseband_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.25) -> np.ndarray:
+def _align_baseband_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.25) -> np.ndarray:
     """Shift Q back to the I sample times in IQ data built from BS100BW/BS50BW pairs.
 
     The baseband sample modes capture I at time ``t`` and Q a quarter carrier period
@@ -231,29 +232,32 @@ def align_baseband_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.
     ``Q(t + Ts/8)`` for BS50BW. This function applies a band-limited fractional delay
     of ``q_delay`` samples to Q so that it is evaluated at the I sample times.
 
+    Q is overwritten in place to limit peak memory on full recordings.
+
     Args:
-        iq: IQ data with I and Q on the last axis.
+        iq: Float32 IQ data with I and Q on the last axis. Modified in place.
         axis: The axial (fast-time) axis.
         q_delay: How far Q lags I, in IQ samples. 0.25 for BS100BW, 0.125 for BS50BW.
             Defaults to 0.25.
 
     Returns:
-        IQ data of the same shape and dtype where Q is evaluated at the I sample times.
+        ``iq``, with Q evaluated at the I sample times.
     """
-    q_data = np.moveaxis(iq[..., 1], axis, -1).astype(np.float32)
+    q_data = np.moveaxis(iq[..., 1], axis, -1)
     n_ax = q_data.shape[-1]
     # Mirror the record so the circular FFT shift sees no jump between its end and start.
     n_fft = 2 * n_ax
     q_data_extended = np.concatenate([q_data, q_data[..., ::-1]], axis=-1)
     spectrum = scipy.fft.rfft(q_data_extended, axis=-1, workers=-1)
+    del q_data_extended
     frequency = scipy.fft.rfftfreq(n_fft)
     # Q[n] holds Im b at sample n + q_delay; evaluate it at sample n.
     spectrum *= np.exp(-2j * np.pi * frequency * q_delay).astype(spectrum.dtype)
-    q_aligned = scipy.fft.irfft(spectrum, n=n_fft, axis=-1, workers=-1)[..., :n_ax]
+    q_aligned = scipy.fft.irfft(spectrum, n=n_fft, axis=-1, workers=-1)
+    del spectrum
 
-    out = np.array(iq, copy=True)
-    out[..., 1] = np.moveaxis(q_aligned, -1, axis).astype(iq.dtype)
-    return out
+    iq[..., 1] = np.moveaxis(q_aligned[..., :n_ax], -1, axis)
+    return iq
 
 
 def _validate_convert_config(data):
