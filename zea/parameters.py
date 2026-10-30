@@ -445,11 +445,15 @@ class Parameters(BaseParameters):
                 grid_size_x=self.grid_size_x,
                 grid_size_y=self.grid_size_y,
             )
-            try:
-                self.check_for_aliasing()
-            except MissingDependencyError:
-                # No wavelength (e.g. missing center frequency); cannot assess aliasing.
-                pass
+            # Aliasing cannot be assessed without the frequency and probe geometry.
+            if (
+                self._params.get("center_frequency") is not None
+                and self._params.get("probe_geometry") is not None
+            ):
+                try:
+                    self.check_for_aliasing()
+                except MissingDependencyError:
+                    pass
             return grid
         else:
             raise ValueError(
