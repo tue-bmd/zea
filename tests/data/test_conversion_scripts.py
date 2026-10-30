@@ -8,6 +8,7 @@ import sys
 import types
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import h5py
 import imageio
@@ -139,6 +140,8 @@ def create_test_data_for_dataset(dataset, src):
     os.mkdir(src)
     if dataset == "echonet":
         create_echonet_test_data(src)
+        # The published split does not know the synthetic videos
+        extra_args = ["--new-split"]
     elif dataset == "echonetlvh":
         extra_args = create_echonetlvh_test_data(src)
     elif dataset == "camus":
@@ -1264,6 +1267,31 @@ def test_load_avi(tmp_path):
         np.testing.assert_allclose(loaded_frames[i], frames[i], atol=2)
 
 
+def test_load_avi_color_channel_order(tmp_path):
+    """Grayscale conversion must weight red and blue correctly.
+
+    Grayscale videos have R = G = B, so a swapped channel order (e.g. treating OpenCV's
+    BGR frames as RGB) is invisible on them. It silently brightened the tinted EchoNet
+    videos in an earlier conversion; solid colours catch it.
+    """
+    colors = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255], [128, 128, 128]], np.uint8)
+    frames = np.broadcast_to(colors[:, None, None, :], (4, 16, 16, 3))
+    avi_path = tmp_path / "colors.avi"
+    # ffv1 with bgr0 is lossless, so the expected values are exact
+    with imageio.get_writer(
+        avi_path, fps=10, codec="ffv1", pixelformat="bgr0", macro_block_size=1
+    ) as writer:
+        for frame in frames:
+            writer.append_data(frame)
+
+    rgb = load_avi(avi_path, mode="RGB")
+    np.testing.assert_array_equal(rgb[:, 0, 0], colors)
+
+    gray = load_avi(avi_path, mode="L")
+    # ITU-R 601 luma: 0.299 R + 0.587 G + 0.114 B
+    np.testing.assert_array_equal(gray[:, 0, 0], [76, 150, 29, 128])
+
+
 def test_sitk_load(tmp_path):
     """Direct test of sitk_load from zea.data.convert.utils."""
     # Create a small 3-D NIfTI file
@@ -1417,6 +1445,166 @@ def test_echonet_processor_writes_image_not_image_sc(tmp_path):
 
     with File(rejected[0], "r") as f:
         assert f.data.image.values.ndim == 3, "rejected file should store the 3D Cartesian image"
+
+
+def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
+    """A given split is kept when the acceptance check or the frame count disagrees, and
+    the disagreement is reported, so a decoder change cannot reshuffle a published split."""
+    from multiprocessing import Value
+
+    from zea.data.convert import echonet
+
+    src = tmp_path / "src"
+    src.mkdir()
+    create_echonet_test_data(src)
+    videos = src / "EchoNet-Dynamic" / "Videos"
+    n_frames = len(load_avi(videos / "video_0.avi"))
+
+    # video_6 fails the acceptance check, video_0 passes it
+    splits = {"train": ["video_6.hdf5"], "val": [], "test": [], "rejected": ["video_0.hdf5"]}
+    processor = echonet.H5Processor(
+        path_out_h5=tmp_path / "out", splits=splits, expected_frames={"video_0.hdf5": n_frames + 1}
+    )
+    echonet.count_init(Value("i", 0))
+
+    with mock.patch.object(echonet.log, "warning") as warning:
+        processor(videos / "video_6.avi")
+        processor(videos / "video_0.avi")
+    messages = [call.args[0] % call.args[1:] for call in warning.call_args_list]
+    assert any("video_6.hdf5: the acceptance check rejects" in m for m in messages)
+    assert any("video_0.hdf5: the acceptance check accepts" in m for m in messages)
+    assert any(f"but the published split lists {n_frames + 1}" in m for m in messages)
+
+    assert (tmp_path / "out/train/video_6.hdf5").exists()
+    assert (tmp_path / "out/rejected/video_0.hdf5").exists()
+
+
+def test_echonet_load_split_formats(tmp_path):
+    """load_split reads both split.yaml and the published per-split files; in the latter,
+    unlisted files are rejected."""
+    from zea.data.convert.echonet import find_split_for_file, load_split
+
+    published = tmp_path / "published"
+    published.mkdir()
+    for split, names in {"train": ["a", "b"], "val": ["c"], "test": ["d"]}.items():
+        content = {
+            "file_paths": [f"{n}.hdf5" for n in names],
+            "file_lengths": [10] * len(names),
+            "total_num_files": len(names),
+        }
+        (published / f"{split}.yaml").write_text(yaml.dump(content))
+
+    splits, frames = load_split(published)
+    assert splits == {"train": {"a.hdf5", "b.hdf5"}, "val": {"c.hdf5"}, "test": {"d.hdf5"}}
+    assert frames == {"a.hdf5": 10, "b.hdf5": 10, "c.hdf5": 10, "d.hdf5": 10}
+    assert find_split_for_file(splits, "e.hdf5") == "rejected"
+
+    own = tmp_path / "own"
+    own.mkdir()
+    (own / "split.yaml").write_text(
+        yaml.dump({"train": ["a.hdf5"], "val": [], "test": [], "rejected": ["e.hdf5"]})
+    )
+    for path in (own, own / "split.yaml"):
+        splits, frames = load_split(path)
+        assert splits["rejected"] == {"e.hdf5"} and frames == {}
+
+    # Pointing at one of the published files reads all three
+    assert load_split(published / "train.yaml") == load_split(published)
+
+    with pytest.raises(FileNotFoundError):
+        load_split(tmp_path / "empty")
+
+
+def test_echonet_load_split_hf_downloads_only_split_files(tmp_path, monkeypatch):
+    """An hf:// split resolves the split files one by one, never the whole repository."""
+    from zea.data.convert import echonet
+
+    for split in ["train", "val", "test"]:
+        content = {"file_paths": [f"{split}.hdf5"], "file_lengths": [1]}
+        (tmp_path / f"{split}.yaml").write_text(yaml.dump(content))
+
+    requested = []
+
+    def fake_resolve(hf_path):
+        requested.append(hf_path)
+        path = tmp_path / hf_path.rsplit("/", 1)[1]
+        if not path.exists():
+            raise FileNotFoundError(hf_path)
+        return path
+
+    monkeypatch.setattr(echonet, "_hf_resolve_path", fake_resolve)
+    splits, _ = echonet.load_split("hf://org/repo/")
+    assert splits["val"] == {"val.hdf5"}
+    assert requested == [f"hf://org/repo/{name}.yaml" for name in ["split", "train", "val", "test"]]
+
+
+def test_echonet_resolve_path_layouts(tmp_path):
+    """Videos are found after unzipping beside the zip, on a rerun, and in a manual
+    extraction; an empty Videos folder raises instead of silently converting nothing."""
+    from zea.data.convert.echonet import _resolve_path, convert_echonet
+
+    create_echonet_test_data(tmp_path)
+    videos = tmp_path / "EchoNet-Dynamic" / "Videos"
+    assert _resolve_path(tmp_path) == videos  # manual extraction
+
+    zipped = tmp_path / "zipped"
+    zipped.mkdir()
+    with zipfile.ZipFile(zipped / "EchoNet-Dynamic.zip", "w") as zf:
+        for avi in videos.glob("*.avi"):
+            zf.write(avi, f"EchoNet-Dynamic/Videos/{avi.name}")
+    nested = zipped / "EchoNet-Dynamic" / "EchoNet-Dynamic" / "Videos"
+    assert _resolve_path(zipped) == nested  # unzips
+    assert _resolve_path(zipped) == nested  # rerun
+    assert _resolve_path(zipped / "EchoNet-Dynamic.zip") == nested
+
+    for avi in videos.glob("*.avi"):
+        avi.unlink()
+    args = types.SimpleNamespace(
+        src=tmp_path, dst=tmp_path / "dst", new_split=True, no_hyperthreading=True
+    )
+    with pytest.raises(FileNotFoundError, match="No .avi files"):
+        convert_echonet(args)
+
+
+def test_echonet_nearest_matches_scipy():
+    """The cached nearest-neighbour lookup gives what NearestNDInterpolator gives."""
+    from scipy.interpolate import NearestNDInterpolator
+
+    from zea.data.convert.echonet import _polar_grid, cartesian_to_polar_matrix
+
+    frames = np.random.default_rng(DEFAULT_TEST_SEED).uniform(size=(2, 112, 112))
+    tri, new_points = _polar_grid(112, 112, (61, 7), 107, 0.79)
+    values = NearestNDInterpolator(tri.points, frames.reshape(2, -1).T)(new_points)
+    expected = np.rot90(values.T.reshape(-1, 112, 112), k=-1, axes=(1, 2))
+    np.testing.assert_array_equal(cartesian_to_polar_matrix(frames), expected)
+
+
+def test_echonet_conversion_reports_failures(tmp_path):
+    """A file that fails to convert makes the conversion raise after the other files are
+    written, instead of being logged as an anonymous warning."""
+    from zea.data.convert.echonet import convert_echonet
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echonet_test_data(src)
+    (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").write_bytes(b"not a video")
+
+    args = types.SimpleNamespace(src=src, dst=dst, new_split=True, no_hyperthreading=True)
+    with pytest.raises(RuntimeError, match="1 of 9 files failed"):
+        convert_echonet(args)
+
+    split = yaml.safe_load((dst / "split.yaml").read_text())
+    assert sum(len(names) for names in split.values()) == 8
+
+    # A rerun only converts what is left
+    (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").unlink()
+    convert_echonet(args)
+
+    # A stale copy in another split is refused rather than listed twice in split.yaml
+    stale = next(f for split in ("train", "val", "test") for f in (dst / split).glob("*.hdf5"))
+    shutil.copy(stale, dst / "rejected" / stale.name)
+    with pytest.raises(RuntimeError, match="1 files are in more than one split"):
+        convert_echonet(args)
 
 
 def test_camus_build_polar_image_in_process(tmp_path):
