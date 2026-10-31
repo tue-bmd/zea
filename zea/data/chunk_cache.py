@@ -135,6 +135,8 @@ class CachedFile:
         self.size = fileobj.size
         #: Passed through: this is where the chunk fetcher reads the file's content hash from.
         self.details = getattr(fileobj, "details", {})
+        #: Passed through: the chunk fetcher reuses the file's CDN URL.
+        self.location = getattr(fileobj, "location", None)
 
     def _block_bytes(self, index: int) -> bytes:
         offset = index * self._block
@@ -208,6 +210,8 @@ def cache_for(details: dict, root: str | os.PathLike | None = None) -> ChunkCach
     content_id = None
     if isinstance(lfs, dict):
         content_id = lfs.get("sha256")
+    # The Hub etag equals the LFS sha256, so both give the same cache key.
+    content_id = content_id or details.get("etag")
     content_id = content_id or details.get("blob_id")  # non-LFS files
     if not content_id:
         return None

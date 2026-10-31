@@ -13,12 +13,13 @@ layouts and selections where it could plausibly diverge. The cases that earn the
 
 import http.server
 import inspect
+import logging
 import os
 import socketserver
 import threading
 from importlib import import_module
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import aiohttp
 import h5py
@@ -448,6 +449,22 @@ class TestFallbackNotes:
             np.testing.assert_array_equal(got, file[RAW][selection])
 
 
+class TestSmallRemoteReads:
+    def test_small_remote_read_takes_the_fast_path(self, structured_file):
+        """A small read over HTTP is still one merged request, not h5py's block-by-block reads."""
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                selection = (0, 0, slice(0, 4))
+                got = read(file[RAW], selection, fetcher)
+                assert got.nbytes < MIN_BYTES
+                np.testing.assert_array_equal(got, file[RAW][selection])
+            assert server.count == 1
+        finally:
+            server.close()
+
+
 class TestHumanBytes:
     @pytest.mark.parametrize(
         ("n", "expected"),
@@ -695,6 +712,11 @@ class _CountingServer:
                     self.end_headers()
                     return None
                 path = self.translate_path(self.path)
+                if not os.path.isfile(path):  # an expired or unknown URL
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
                 with open(path, "rb") as handle:
                     body = handle.read()
                 rng = self.headers.get("Range")
@@ -739,6 +761,12 @@ class _Body:
         pass
 
 
+@pytest.fixture
+def no_merge(monkeypatch):
+    """Send one request per chunk, for tests about concurrency rather than merging."""
+    monkeypatch.setattr(chunk_reader, "MERGE_GAP", -1)
+
+
 class TestRemote:
     def test_http_fetcher_matches_local_bytes(self, structured_file):
         server = _CountingServer(structured_file.parent, latency=0)
@@ -768,7 +796,7 @@ class TestRemote:
         finally:
             server.close()
 
-    def test_chunks_are_fetched_concurrently(self, structured_file):
+    def test_chunks_are_fetched_concurrently(self, structured_file, no_merge):
         """The point of the remote path: N chunks cost ~1 round trip, not N.
 
         Asserted on *peak concurrency* — the maximum number of requests the server held open
@@ -906,8 +934,8 @@ class TestRetry:
         finally:
             server.close()
 
-    def test_requests_in_flight_are_capped(self, structured_file, monkeypatch):
-        """The cap is what keeps a read from tripping the rate limit in the first place."""
+    def test_requests_in_flight_are_capped(self, structured_file, monkeypatch, no_merge):
+        """No more requests are in flight than the cap allows."""
         cap = 2
         monkeypatch.setattr(chunk_reader, "MAX_CONCURRENT_REQUESTS", cap)
         # The semaphore is made once per event loop and cached, so drop whatever earlier
@@ -924,6 +952,171 @@ class TestRetry:
             assert server.peak <= cap, f"{server.peak} requests in flight, cap is {cap}"
         finally:
             server.close()
+
+
+class TestMerge:
+    def test_adjacent_chunks_cost_one_request(self, structured_file):
+        """A read of neighbouring chunks goes out as one request, and still matches h5py."""
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                got = read(file[RAW], slice(0, 4), fetcher)
+                np.testing.assert_array_equal(got, file[RAW][0:4])
+            assert server.count == 1
+        finally:
+            server.close()
+
+    def test_merged_bytes_are_cached_per_chunk(self, structured_file, tmp_path):
+        """The cache stores each chunk on its own, so a later partial read is a hit."""
+        from zea.data.chunk_cache import ChunkCache
+
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            cache = ChunkCache("merge-test", root=tmp_path)
+            fetcher = HTTPFetcher(server.url + structured_file.name, cache=cache)
+            with File(structured_file) as file:
+                read(file[RAW], slice(0, 4), fetcher)
+                before = server.count
+                np.testing.assert_array_equal(read(file[RAW], 2, fetcher), file[RAW][2])
+            assert server.count == before
+        finally:
+            server.close()
+
+    def test_groups_by_gap_and_size(self, monkeypatch):
+        monkeypatch.setattr(chunk_reader, "MERGE_GAP", 10)
+        monkeypatch.setattr(chunk_reader, "MERGE_MAX", 100)
+        misses = [(0, 0, 40), (1, 45, 40), (2, 200, 10), (3, 85, 30)]
+        spans = chunk_reader._merge(misses)
+        # 0 and 1 merge (gap 5); 3 would make the request 115 bytes, over the max; 2 is far.
+        assert [(start, end) for start, end, _ in spans] == [(0, 85), (85, 115), (200, 210)]
+        assert [[m[0] for m in members] for *_, members in spans] == [[0, 1], [3], [2]]
+
+    def test_unsorted_and_overlapping_ranges(self):
+        spans = chunk_reader._merge([(0, 50, 10), (1, 0, 60), (2, 55, 10)])
+        assert [(start, end) for start, end, _ in spans] == [(0, 65)]
+
+
+class _Location:
+    """A SignedURL stand-in: a URL that is rejected until it is refreshed."""
+
+    def __init__(self, stale, fresh):
+        self.url, self.fresh, self.refreshes = stale, fresh, 0
+
+    def current(self):
+        return self.url, {}
+
+    def refresh(self, stale_url):
+        if self.url == stale_url:
+            self.refreshes += 1
+            self.url = self.fresh
+        return True
+
+
+class TestRefusedLocation:
+    def test_rejected_url_is_refreshed_once(self, structured_file):
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            location = _Location(server.url + "expired.hdf5", server.url + structured_file.name)
+            fetcher = HTTPFetcher(location)
+            with File(structured_file) as file:
+                got = read(file[RAW], slice(0, 4), fetcher)
+                np.testing.assert_array_equal(got, file[RAW][0:4])
+            assert location.refreshes == 1
+        finally:
+            server.close()
+
+    def test_plain_url_is_not_refreshed(self, structured_file, fast_backoff):
+        server = _CountingServer(
+            structured_file.parent, latency=0, reject_first=1, reject_status=403
+        )
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with pytest.raises(aiohttp.ClientResponseError):
+                fetcher.fetch([(0, 16)])
+            assert server.count == 1
+        finally:
+            server.close()
+
+    @pytest.mark.parametrize("status", [401, 403, 410])
+    def test_refused_statuses(self, status):
+        exc = aiohttp.ClientResponseError(MagicMock(), (), status=status)
+        assert chunk_reader._is_refused(exc)
+
+    def test_missing_file_is_refused(self):
+        assert chunk_reader._is_refused(FileNotFoundError("x"))
+
+    def test_server_errors_are_not_refusals(self):
+        exc = aiohttp.ClientResponseError(MagicMock(), (), status=503)
+        assert not chunk_reader._is_refused(exc)
+
+
+def test_request_cap_is_read_from_the_environment():
+    """ZEA_MAX_CONCURRENT_REQUESTS sets the cap (read once, at import)."""
+    import subprocess
+    import sys
+
+    env = {**os.environ, "ZEA_MAX_CONCURRENT_REQUESTS": "7", "KERAS_BACKEND": "numpy"}
+    code = "from zea.data import chunk_reader as c; print(c.MAX_CONCURRENT_REQUESTS)"
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip().splitlines()[-1] == "7"
+
+
+@pytest.mark.parametrize("value", ["0", "-3", "lots"])
+def test_bad_request_cap_falls_back_to_the_default(monkeypatch, value):
+    """A cap of zero would hang every request; a non-number would break the import."""
+    monkeypatch.setenv("ZEA_MAX_CONCURRENT_REQUESTS", value)
+    with pytest.warns(UserWarning, match="ZEA_MAX_CONCURRENT_REQUESTS"):
+        assert chunk_reader._max_concurrent_requests(default=64) == 64
+
+
+def test_retry_log_does_not_refresh_or_leak_the_url(structured_file, fast_backoff):
+    """The retry message neither reads ``self.url`` (which may refresh) nor logs a signature."""
+
+    class Location:
+        def __init__(self, url):
+            self.url, self.calls = url, 0
+
+        def current(self):
+            self.calls += 1
+            return self.url, {}
+
+        def refresh(self, stale_url):
+            return False
+
+    server = _CountingServer(structured_file.parent, latency=0, reject_first=1)
+    try:
+        location = Location(server.url + structured_file.name + "?Signature=secret")
+        fetcher = HTTPFetcher(location)
+        with patch("zea.log.debug") as debug:
+            fetcher.fetch([(0, 16)])
+        assert location.calls == 1  # only the one call in fetch(), none from the retry
+        message = debug.call_args[0][0]
+        assert "retrying" in message and "secret" not in message
+    finally:
+        server.close()
+
+
+def test_fsspec_debug_log_redacts_signed_urls(structured_file, caplog):
+    """fsspec logs every URL it requests; the signature must not end up in the log."""
+    server = _CountingServer(structured_file.parent, latency=0)
+    try:
+        url = server.url + structured_file.name + "?Policy=abc&Signature=secret"
+        fetcher = HTTPFetcher(url)  # the test server ignores the query string
+        with caplog.at_level(logging.DEBUG, logger="fsspec.http"):
+            data = fetcher.fetch([(0, 16)])
+        assert data[0] == structured_file.read_bytes()[:16]  # requested with the full URL
+        logged = [r.getMessage() for r in caplog.records if r.name == "fsspec.http"]
+        assert any(structured_file.name in m for m in logged)
+        assert not any("secret" in m or "Policy" in m for m in logged)
+    finally:
+        server.close()
 
 
 class TestIsTransient:
