@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import types
 import zipfile
 from pathlib import Path
@@ -26,6 +27,7 @@ from zea.data.convert.utils import (
     require_output_dir_ownership,
     sitk_load,
     unzip,
+    unzip_beside,
     upload_dataset_to_hf,
 )
 from zea.data.convert.verasonics import (
@@ -1377,6 +1379,83 @@ def test_unzip_rejects_path_traversal(tmp_path):
     assert not (tmp_path / "evil.txt").exists()
 
 
+def test_unzip_beside(tmp_path, monkeypatch):
+    """unzip_beside extracts next to the zip, or into the temp dir if that is read-only."""
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
+
+    assert unzip_beside(src) == tmp_path / "archive"
+    assert (tmp_path / "archive" / "dummy.txt").exists()
+
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    monkeypatch.setattr(os, "access", lambda *args: False)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_dir))
+    assert unzip_beside(src) == tmp_dir / "zea_unzipped_archive"
+    assert (tmp_dir / "zea_unzipped_archive" / "dummy.txt").exists()
+
+
+def _write_zip(path, names):
+    # Names ending in "/" are written as directories
+    with zipfile.ZipFile(path, "w") as zf:
+        for name in names:
+            zf.writestr(name, "" if name.endswith("/") else "data")
+    return path
+
+
+def test_camus_resolve_path_zip_layouts(tmp_path):
+    """CAMUS sources are found from the zip itself, a folder holding it, and a zip
+    without a database_nifti folder."""
+    from zea.data.convert.camus import _resolve_path
+
+    nested = ["CAMUS_public/database_nifti/patient0001/"]
+    as_file = tmp_path / "as_file"
+    as_file.mkdir()
+    zip_path = _write_zip(as_file / "CAMUS_public.zip", nested)
+    expected = as_file / "CAMUS_public" / "CAMUS_public" / "database_nifti"
+    assert _resolve_path(zip_path) == expected
+
+    in_folder = tmp_path / "in_folder"
+    in_folder.mkdir()
+    _write_zip(in_folder / "CAMUS_public.zip", nested)
+    expected = in_folder / "CAMUS_public" / "CAMUS_public" / "database_nifti"
+    assert _resolve_path(in_folder) == expected
+
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    zip_path = _write_zip(flat / "patients.zip", ["patient0001/"])
+    assert _resolve_path(zip_path) == flat / "patients"
+
+
+def test_picmus_resolve_zip(tmp_path):
+    """PICMUS is found in picmus.zip, whether src is the zip or the folder holding it."""
+    from zea.data.convert.picmus import _resolve_path, convert_picmus
+
+    in_folder = tmp_path / "in_folder"
+    in_folder.mkdir()
+    _write_zip(in_folder / "picmus.zip", ["archive_to_download/"])
+    assert _resolve_path(in_folder) == in_folder / "picmus" / "archive_to_download"
+
+    zip_path = _write_zip(tmp_path / "picmus.zip", ["archive_to_download/"])
+    dst = tmp_path / "dst"
+    convert_picmus(types.SimpleNamespace(src=zip_path, dst=dst))
+    assert (tmp_path / "picmus" / "archive_to_download").is_dir()
+    assert dst.is_dir()
+
+
+def test_echonetlvh_unzips_zip_source(tmp_path):
+    """A zipped EchoNet-LVH source is unzipped beside itself before its contents are checked."""
+    from zea.data.convert.echonetlvh import convert_echonetlvh
+
+    zip_path = _write_zip(tmp_path / "EchoNet-LVH.zip", ["Batch1/"])
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    with pytest.raises(AssertionError, match="Missing Batch2"):
+        convert_echonetlvh(zip_path, dst, True, None, False, False, None, False)
+    assert (tmp_path / "EchoNet-LVH" / "Batch1").is_dir()
+
+
 def test_camus_db_not_cast_to_uint8():
     """translate() to [-60, 0] dB produces negative floats; casting to uint8
     wraps them (e.g. -60 → 196). The fix removes the .astype(np.uint8) call."""
@@ -1577,6 +1656,70 @@ def test_echonet_nearest_matches_scipy():
     values = NearestNDInterpolator(tri.points, frames.reshape(2, -1).T)(new_points)
     expected = np.rot90(values.T.reshape(-1, 112, 112), k=-1, axes=(1, 2))
     np.testing.assert_array_equal(cartesian_to_polar_matrix(frames), expected)
+
+
+def test_echonet_polar_interpolation_modes():
+    """Linear and cubic interpolation keep the input shape; unknown modes raise."""
+    from zea.data.convert.echonet import cartesian_to_polar_matrix
+
+    frame = np.random.default_rng(DEFAULT_TEST_SEED).uniform(size=(112, 112))
+    for interpolation in ["linear", "cubic"]:
+        polar = cartesian_to_polar_matrix(frame, interpolation=interpolation)
+        assert polar.shape == frame.shape and np.isfinite(polar).all()
+    with pytest.raises(ValueError, match="Unknown interpolation"):
+        cartesian_to_polar_matrix(frame, interpolation="bogus")
+
+
+def test_echonet_find_split_warns_only_with_explicit_rejected():
+    """An unlisted file is only surprising when the rejected files are listed too."""
+    from zea.data.convert import echonet
+
+    with mock.patch.object(echonet.log, "warning") as warning:
+        assert echonet.find_split_for_file({"train": {"a.hdf5"}}, "b.hdf5") == "rejected"
+        warning.assert_not_called()
+        splits = {"train": {"a.hdf5"}, "rejected": set()}
+        assert echonet.find_split_for_file(splits, "b.hdf5") == "rejected"
+        warning.assert_called_once()
+
+
+def test_echonet_hf_split_yaml_file(monkeypatch):
+    """An hf:// path to a .yaml file is resolved as is."""
+    from zea.data.convert import echonet
+
+    monkeypatch.setattr(echonet, "_hf_resolve_path", lambda path: f"resolved:{path}")
+    assert (
+        echonet._hf_resolve_split("hf://org/repo/train.yaml") == "resolved:hf://org/repo/train.yaml"
+    )
+
+
+def test_echonet_processor_rejects_non_finite(tmp_path):
+    """NaNs survive clipping, so they are caught before writing the file."""
+    from zea.data.convert import echonet
+
+    src = tmp_path / "src"
+    src.mkdir()
+    create_echonet_test_data(src)
+    splits = {"train": ["video_0.hdf5"], "val": [], "test": [], "rejected": []}
+    processor = echonet.H5Processor(path_out_h5=tmp_path / "out", splits=splits)
+
+    with mock.patch.object(
+        echonet, "cartesian_to_polar_matrix", side_effect=lambda x, **_: np.full(x.shape, np.nan)
+    ):
+        with pytest.raises(ValueError, match="non-finite"):
+            processor(src / "EchoNet-Dynamic" / "Videos" / "video_0.avi")
+    assert not (tmp_path / "out/train/video_0.hdf5").exists()
+
+
+def test_echonet_resolve_path_direct_and_missing(tmp_path):
+    """src may be the folder holding Videos; a folder without Videos raises."""
+    from zea.data.convert.echonet import _resolve_path
+
+    (tmp_path / "Videos").mkdir()
+    assert _resolve_path(tmp_path) == tmp_path / "Videos"
+
+    (tmp_path / "other" / "EchoNet-Dynamic").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="No Videos folder"):
+        _resolve_path(tmp_path / "other")
 
 
 def test_echonet_conversion_reports_failures(tmp_path):
