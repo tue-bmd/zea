@@ -85,7 +85,7 @@ zea = "zea.__main__:main"
 # uv installs `dev` by default; lean envs opt out with --no-default-groups /
 # --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
 [dependency-groups]
-lint = ["ruff==0.17.0", "ty==0.0.86"]
+lint = ["ruff==0.17.2", "ty==0.0.91"]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
@@ -300,6 +300,13 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
 invalid-method-override = "ignore"
+
+# torch declares nn.Module.forward as a writable Callable attribute, so ty flags
+# every forward() method as an invalid override; torch dispatches via __call__.
+[[tool.ty.overrides]]
+include = ["zea/models/speckle2self.py"]
+[tool.ty.overrides.rules]
+invalid-mutable-override = "ignore"
 
 
 [tool.pytest.ini_options]
