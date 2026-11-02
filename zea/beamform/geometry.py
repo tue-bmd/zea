@@ -24,6 +24,56 @@ SINC_HALF_AMPLITUDE = 0.6033545644016143
 """The argument ``x`` at which ``sinc(x) = sin(pi x) / (pi x)`` drops to 0.5 (-6 dB)."""
 
 
+def is_plane_wave(focus_distances):
+    """Mask of the transmits that are plane waves.
+
+    A plane wave is marked by an infinite focus distance (``np.inf``, the
+    canonical value) or by ``0``.
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = np.asarray(focus_distances, dtype=float)
+    return (focus_distances == 0) | np.isinf(focus_distances)
+
+
+def is_focused(focus_distances):
+    """Mask of the transmits that are focused.
+
+    A focused transmit has a finite, positive focus distance.
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = np.asarray(focus_distances, dtype=float)
+    return np.isfinite(focus_distances) & (focus_distances > 0)
+
+
+def is_diverging(focus_distances):
+    """Mask of the transmits that are diverging waves.
+
+    A diverging wave has a finite, negative focus distance (a virtual source
+    behind the array).
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = np.asarray(focus_distances, dtype=float)
+    return np.isfinite(focus_distances) & (focus_distances < 0)
+
+
 def element_pitch(probe_geometry):
     """Median distance between neighbouring elements in metres.
 
@@ -76,7 +126,7 @@ def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol)
 
     steered = np.abs(angles) > STEERING_TOLERANCE
     if np.any(steered):
-        lines = steered & np.isfinite(focus) & (focus > 0)
+        lines = steered & is_focused(focus)
         if not np.any(lines):
             return None
         # Where each steered focused axis crosses x = 0, as a distance behind the array
@@ -86,7 +136,7 @@ def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol)
             return max(middle, 0.0)
         return None
 
-    if np.all(np.isfinite(focus) & (focus < 0)):
+    if np.all(is_diverging(focus)):
         source_x = origins[:, 0]
         source_z = origins[:, 2] + focus
         if np.max(np.abs(source_x)) <= tol and np.ptp(source_z) <= tol:
@@ -136,10 +186,10 @@ def insonified_edge_rays(
     points, directions = [], []
     for origin, angle, f in zip(origins, angles, focus):
         axis = np.array([np.sin(angle), np.cos(angle)])
-        if np.isfinite(f) and f > 0:
+        if is_focused(f):
             points.append(origin)
             directions.append(axis)
-        elif np.isfinite(f) and f < 0:
+        elif is_diverging(f):
             source = origin + f * axis
             for end in end_points:
                 points.append(end)

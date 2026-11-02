@@ -109,6 +109,9 @@ from zea.beamform.geometry import (
     element_acceptance_angle,
     element_pitch,
     insonified_edge_rays,
+    is_diverging,
+    is_focused,
+    is_plane_wave,
     rays_at_depth,
     transmit_apex_distance,
 )
@@ -641,7 +644,7 @@ class Parameters(BaseParameters):
                 "'cartesian' and 'polar'."
             )
         focus = np.asarray(self.focus_distances, dtype=np.float64)
-        if not np.all(np.isfinite(focus) & (focus > 0)):
+        if not np.all(is_focused(focus)):
             raise ValueError(
                 "enable_scanline=True needs focused transmits (every focus distance > 0), "
                 f"got focus_distances from {focus.min():.4g} to {focus.max():.4g} m. Plane "
@@ -1079,20 +1082,19 @@ class Parameters(BaseParameters):
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select focused transmits")
-            # Plane waves use inf (or 0); a finite positive focus marks a focused transmit.
-            return np.where((value > 0) & np.isfinite(value))[0].tolist()
+            return np.where(is_focused(value))[0].tolist()
 
         if selection == "diverging":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select diverging transmits")
-            return np.where(value < 0)[0].tolist()
+            return np.where(is_diverging(value))[0].tolist()
 
         if selection == "plane":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select plane wave transmits")
-            return np.where((value == 0) | np.isinf(value))[0].tolist()
+            return np.where(is_plane_wave(value))[0].tolist()
 
         # Handle integer - select evenly spaced transmits
         if isinstance(selection, (int, np.integer)):
