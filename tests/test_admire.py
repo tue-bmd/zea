@@ -2,6 +2,7 @@
 
 import dataclasses
 
+import keras
 import numpy as np
 import pytest
 
@@ -9,8 +10,8 @@ from zea.beamform.admire import (
     ADMIREConfig,
     _aperture_growth,
     _fix_phase,
-    _resolve_calibration,
     _ica_basis,
+    _resolve_calibration,
     apply_admire,
     elastic_net_ccd,
     generate_admire_models,
@@ -116,7 +117,7 @@ def test_elastic_net_ccd_matches_reference(max_iterations):
     mask = np.r_[np.ones(n_obs), np.zeros(n_pad)].astype(np.float32)
     beta = elastic_net_ccd(X_padded, y_padded, mask, max_iterations=max_iterations, **settings)
 
-    np.testing.assert_allclose(np.asarray(beta), expected, atol=1e-4)
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(beta), expected, atol=1e-4)
     return beta
 
 
@@ -137,7 +138,7 @@ def test_elastic_net_ccd_stops_per_problem():
     expected = np.stack([_reference_ccd(X, y_i, **settings) for y_i in y])
 
     beta = elastic_net_ccd(X.astype(np.float32), y.astype(np.float32), np.ones(n_obs), **settings)
-    np.testing.assert_allclose(np.asarray(beta), expected, atol=1e-4)
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(beta), expected, atol=1e-4)
 
 
 def test_elastic_net_ccd_zero_data():
@@ -146,7 +147,7 @@ def test_elastic_net_ccd_zero_data():
     beta = elastic_net_ccd(
         X, np.zeros((2, 4), np.float32), np.ones(4, np.float32), 0.9, 0.0189, 0.1, 10
     )
-    np.testing.assert_array_equal(np.asarray(beta), 0)
+    np.testing.assert_array_equal(keras.ops.convert_to_numpy(beta), 0)
 
 
 @pytest.mark.parametrize("keep_chunks", [True, False])
@@ -285,7 +286,7 @@ def test_apply_admire_suppresses_off_axis_clutter(iq_models):
 
     def retained_energy(x, z):
         data = _point_channel_data(depths, models.n_elements, x, z)
-        out = np.asarray(apply_admire(data, models))
+        out = keras.ops.convert_to_numpy(apply_admire(data, models))
         das = data[..., 0].sum(-1) + 1j * data[..., 1].sum(-1)
         admire = out[..., 0].sum(-1) + 1j * out[..., 1].sum(-1)
         return np.sum(np.abs(admire) ** 2) / np.sum(np.abs(das) ** 2)
@@ -302,7 +303,7 @@ def test_apply_admire_leaves_uncovered_samples(iq_models):
     rng = np.random.default_rng(2)
     n_extra = 3
     data = rng.standard_normal((depths.size + n_extra, 2, models.n_elements, 2)).astype(np.float32)
-    out = np.asarray(apply_admire(data, models, window_batch_size=2))
+    out = keras.ops.convert_to_numpy(apply_admire(data, models, window_batch_size=2))
 
     assert out.shape == data.shape
     end = models.window_starts[-1] + models.window_length
@@ -315,8 +316,8 @@ def test_apply_admire_window_batching(iq_models):
     depths, models = iq_models
     data = _point_channel_data(depths, models.n_elements, 1e-3, 12e-3)
     np.testing.assert_allclose(
-        np.asarray(apply_admire(data, models, window_batch_size=3)),
-        np.asarray(apply_admire(data, models)),
+        keras.ops.convert_to_numpy(apply_admire(data, models, window_batch_size=3)),
+        keras.ops.convert_to_numpy(apply_admire(data, models)),
         atol=1e-5,
     )
 
@@ -329,7 +330,7 @@ def test_apply_admire_rf():
             depths, SOUND_SPEED, CENTER_FREQUENCY, PITCH, 12, f_number=2.0, analytic=False
         )
     data = _point_channel_data(depths, 12, 0.0, 12e-3, analytic=False)
-    out = np.asarray(apply_admire(data, models))
+    out = keras.ops.convert_to_numpy(apply_admire(data, models))
     assert out.shape == data.shape
     assert np.sum(out**2) > 0.3 * np.sum(data**2)
 
@@ -372,16 +373,18 @@ def test_admire_operation():
     n_z, n_x = params["grid"].shape[:2]
     with cache_disabled():
         operation = ops.ADMIRE(n_elements=9, with_batch_dim=True)
-        output = np.asarray(operation(data=data, **params)["data"])
+        output = keras.ops.convert_to_numpy(operation(data=data, **params)["data"])
         eager_operation = ops.ADMIRE(n_elements=9, with_batch_dim=True, jit_compile=False)
-        eager_output = np.asarray(eager_operation(data=data, **params)["data"])
+        eager_output = keras.ops.convert_to_numpy(eager_operation(data=data, **params)["data"])
     assert output.shape == (1, n_z * n_x, 2)
 
     # Columns sit on elements 6..10, so their 9-element sub-apertures are elements 2..14
     models = next(iter(operation._models_cache.values()))
     compounded = data[0].sum(axis=0).reshape(n_z, n_x, -1, 2)
     lines = np.stack([compounded[:, i, 2 + i : 11 + i] for i in range(n_x)], axis=1)
-    expected = np.asarray(apply_admire(lines, models)).sum(axis=2).reshape(n_z * n_x, 2)
+    expected = (
+        keras.ops.convert_to_numpy(apply_admire(lines, models)).sum(axis=2).reshape(n_z * n_x, 2)
+    )
     np.testing.assert_allclose(eager_output[0], expected, rtol=1e-4, atol=1e-4)
     # Compiled reductions may round differently (e.g. on GPU), which can shift the
     # sweep at which the coarse CCD tolerance is met
@@ -465,3 +468,22 @@ def test_admire_registered_as_beamformer():
     assert "models" not in params
     restored = ops.get_ops("admire")(**params)
     assert ADMIREConfig(**restored.config) == config
+
+
+def test_beamform_admire_serializes(iq_models):
+    """A Beamform with ADMIRE settings and models round-trips through JSON."""
+    from zea import ops
+    from zea.ops.pipeline import pipeline_from_json
+
+    config = ADMIREConfig(alpha=0.5, roi_x=np.array([-0.4, 0.02, 0.4]))
+    beamform = ops.Beamform(beamformer="admire", n_elements=9, config=config)
+    params = beamform.get_dict()["params"]
+    assert params["n_elements"] == 9 and "models" not in params
+
+    restored = pipeline_from_json(ops.Pipeline([beamform]).to_json()).operations[0]
+    assert ADMIREConfig(**restored._beamformer.config) == config.replace(roi_x=(-0.4, 0.02, 0.4))
+
+    _, models = iq_models
+    with_models = ops.Beamform(beamformer="admire", models=models)
+    assert "models" not in with_models.get_dict()["params"]
+    ops.Pipeline([with_models]).to_json()

@@ -22,6 +22,12 @@ The implementation is split in two parts:
 The beamformer is usually used through :class:`zea.ops.ADMIRE`, which handles
 the data layout of a zea pipeline.
 
+.. note::
+    The reference code and its default settings target focused, walked-aperture
+    scans. Compounded plane-wave data works too, but may need retuned settings.
+    Part of ADMIRE's contrast gain over DAS acts as a stretch of the dynamic range,
+    to which the gCNR (:func:`zea.metrics.gcnr`) is insensitive.
+
 .. important::
     This is a ``zea`` implementation of ADMIRE. For the original MATLAB, C and
     CUDA code of the Vanderbilt BEAM Lab, see

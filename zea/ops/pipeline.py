@@ -1503,12 +1503,14 @@ class Beamform(Pipeline):
         beamformer_params -= pipeline_params
         self.beamformer_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in beamformer_params}
 
+        self._beamformer = beamformer_cls(**self.beamformer_kwargs)
+
         # Get beamforming ops
         beamforming: List[Operation] = [
             TOFCorrection(),
             # ReceiveApodization() / AlignedApodization() / PfieldWeighting(),
             # inserted conditionally
-            beamformer_cls(**self.beamformer_kwargs),
+            self._beamformer,
         ]
 
         if self.enable_receive_apodization:
@@ -1577,9 +1579,11 @@ class Beamform(Pipeline):
             params["enable_aligned_apodization"] = self.enable_aligned_apodization
         if not compact or self.enable_receive_apodization:
             params["enable_receive_apodization"] = self.enable_receive_apodization
-        # Beamformer keywords that are objects rather than plain values (such as the
-        # trained model of the "able" beamformer) cannot be written to a config.
-        params.update({k: v for k, v in self.beamformer_kwargs.items() if not callable(v)})
+        # Take the beamformer keywords from the beamformer's own serialization, which
+        # leaves out objects that cannot be written to a config (such as the trained
+        # model of the "able" beamformer or precomputed ADMIRE models).
+        beamformer_params = self._beamformer.get_dict(compact=compact).get("params", {})
+        params.update({k: v for k, v in beamformer_params.items() if k in self.beamformer_kwargs})
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))
@@ -2159,10 +2163,12 @@ class ADMIRE(Operation):
     - the full grid at once: windows run along depth, so the pipeline must not be
       patched. Use ``Beamform(beamformer="admire", num_patches=1)``.
 
-    Transmits are compounded (summed) before ADMIRE is applied, so the method works
-    on the compounded channel data of plane-wave or diverging-wave sequences as well
-    as on scanline data. Aperture growth follows the pipeline ``f_number``
-    parameter (``0`` disables it).
+    Transmits are compounded (summed) before ADMIRE is applied. ADMIRE was designed
+    for focused walking-aperture (scanline) data: use ``enable_scanline=True`` with
+    ``Beamform(beamformer="admire", enable_aligned_apodization=True)``. The
+    compounded channel data of plane-wave or diverging-wave sequences works too, but
+    the default settings were tuned for focused transmits. Aperture growth follows
+    the pipeline ``f_number`` parameter (``0`` disables it).
 
     The models depend on the geometry only; they are generated (on the CPU, which
     takes seconds to minutes) the first time the operation sees a geometry, and
@@ -2206,9 +2212,15 @@ class ADMIRE(Operation):
         if isinstance(config, ADMIREConfig):
             config = dataclasses.asdict(config)
         if config is not None:
-            # Validate early; lists (e.g. from a JSON config) become tuples again
-            config = {k: tuple(v) if isinstance(v, list) else v for k, v in config.items()}
-            ADMIREConfig(**config)  # ty: ignore[invalid-argument-type]
+            # Validate early; lists and arrays (e.g. from a JSON or YAML config) become
+            # tuples again, so the config stays hashable
+            def _as_tuple(v):
+                if isinstance(v, np.ndarray):
+                    v = v.tolist()
+                return tuple(_as_tuple(x) for x in v) if isinstance(v, (list, tuple)) else v
+
+            config = {k: _as_tuple(v) for k, v in config.items()}
+            ADMIREConfig(**config)
         super().__init__(
             input_data_type=DataTypes.ALIGNED_DATA,
             output_data_type=DataTypes.BEAMFORMED_DATA,
@@ -2256,7 +2268,7 @@ class ADMIRE(Operation):
 
         if self.models is not None:
             return self.models
-        config = ADMIREConfig(**(self.config or {}))  # ty: ignore[invalid-argument-type]
+        config = ADMIREConfig(**(self.config or {}))
         key = (
             depths.tobytes(), pitch, n_elements, sound_speed, center_frequency, f_number,
             analytic, config,
@@ -2328,9 +2340,10 @@ class ADMIRE(Operation):
             ]
         except Exception as e:
             raise RuntimeError(
-                "ADMIRE generates its models from concrete parameter values and cannot "
-                "run inside a traced function. Pass precomputed `models` (see "
-                "zea.beamform.admire.generate_admire_models) to compile it."
+                "ADMIRE derives its models and line layout from concrete parameter values "
+                "and cannot run inside a traced function, even with precomputed `models`. "
+                "Run it eagerly, e.g. in a Pipeline with jit_options='ops' or None; the fit "
+                "itself is JIT compiled separately."
             ) from e
         sound_speed, center_frequency, demodulation_frequency, f_number = geometry
         if n_ch == 2 and not center_frequency:
