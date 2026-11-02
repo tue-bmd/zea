@@ -129,6 +129,8 @@ def simulate_rf(
 
     n_tx = t0_delays.shape[0]
 
+    from zea.probes import _resolve_element_width
+
     element_width = _resolve_element_width(probe_geometry, element_width)
 
     if element_height is None:
@@ -295,33 +297,6 @@ def _validate_scatter_exponent(scatter_exponent):
             "2 is Rayleigh scattering (e.g. blood), myocardium is approximately 1.5, "
             "soft tissue 0.6-0.8."
         )
-
-
-def _resolve_element_width(probe_geometry, element_width):
-    """Return the element width, inferring it from the probe pitch when not given."""
-    if element_width is not None:
-        return element_width
-    try:
-        geometry = ops.convert_to_numpy(probe_geometry)
-    except (RuntimeError, ValueError, TypeError) as exc:
-        raise ValueError(
-            "Element width is not provided, and automatic inference is not available for "
-            "traced/symbolic probe geometry (for example under JAX JIT or TensorFlow graph "
-            "mode). Please provide `element_width` explicitly in the scan/probe parameters."
-        ) from exc
-
-    try:
-        from zea.probes import Probe
-
-        pitch = Probe.get_pitch(geometry)
-    except (ValueError, IndexError, AttributeError) as exc:
-        raise ValueError(
-            "Element width is not provided and automatic estimation failed from probe "
-            "geometry. Please provide `element_width` explicitly or ensure the probe "
-            "geometry is a 1-D uniformly spaced linear array. "
-            f"Details: {exc}"
-        ) from exc
-    return pitch * 0.9  # 90% of the pitch
 
 
 def delay2(f, tau, n_fft, sampling_frequency):

@@ -66,6 +66,21 @@ class AppArgs:
             "on a machine without a browser, or to open the link yourself."
         ),
     ] = True
+    server_name: Annotated[
+        str | None,
+        tyro.conf.arg(
+            help="Host to bind to. Defaults to 127.0.0.1 (or $GRADIO_SERVER_NAME); use 0.0.0.0 "
+            "to accept connections from other machines."
+        ),
+    ] = None
+    ssl_certfile: Annotated[
+        str | None,
+        tyro.conf.arg(help="Certificate file for app https."),
+    ] = None
+    ssl_keyfile: Annotated[
+        str | None,
+        tyro.conf.arg(help="Private key matching --ssl-certfile."),
+    ] = None
 
     def run(self) -> None:
         """Launch the Gradio dataset visualizer."""
@@ -81,8 +96,13 @@ class AppArgs:
         presets = load_presets(self.presets, self.presets_revision)
         build_interface(presets).launch(
             share=self.share,
+            server_name=self.server_name,
             server_port=self.server_port,
             inbrowser=self.inbrowser,
+            ssl_certfile=self.ssl_certfile,
+            ssl_keyfile=self.ssl_keyfile,
+            # don't crash out with a self-signed certificate.
+            ssl_verify=False,
             theme=build_theme(),
             css=CSS,
             js=JS,
