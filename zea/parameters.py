@@ -228,6 +228,11 @@ class Parameters(BaseParameters):
     replacing the automatic margin derived from the transmits. Defaults to ``None``
     (automatic)."""
 
+    elevation_margin: float | None
+    """Fixed angle [rad] to widen the default :attr:`elevation_limits` by on each side,
+    replacing the automatic margin of 15 % of their range. Defaults to ``None``
+    (automatic)."""
+
     fill_value: float
     """Value used for out-of-bounds pixels during scan conversion."""
 
@@ -252,11 +257,6 @@ class Parameters(BaseParameters):
 
     lens_sound_speed: float
     """Speed of sound in the lens material [m/s]."""
-
-    elevation_tilt_limits: tuple | np.ndarray
-    """Elevation tilt ``atan(y / z)`` [rad] of the first and last sample of a 3D frustum,
-    shape (2,). Used to scan convert 3D volumes, together with :attr:`rlims` and
-    :attr:`polar_limits` (the lateral tilt); see :func:`zea.display.scan_convert_3d`."""
 
     pfield_kwargs: dict
     """Extra keyword arguments for the pressure-field computation.
@@ -346,8 +346,9 @@ class Parameters(BaseParameters):
         # native dtype on purpose; None derives it from the probe (see the f_number property)
         "f_number": {"dtype": (float, type(None)), "default": None},
         "polar_margin": {"dtype": (np.float32, type(None)), "default": None},
+        "elevation_margin": {"dtype": (np.float32, type(None)), "default": None},
         "t_peak": {"dtype": np.float32},
-        "elevation_tilt_limits": {"dtype": np.float32, "shape": (2,)},
+        "elevation_limits": {"dtype": np.float32, "shape": (2,)},
         "rlims": {"dtype": np.float32, "shape": (2,)},
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
@@ -367,7 +368,9 @@ class Parameters(BaseParameters):
     _RENAMED_PARAMS: ClassVar[dict[str, str]] = {
         "rho_range": "rlims",
         "theta_range": "polar_limits",
-        "phi_range": "elevation_tilt_limits",
+        "phi_range": "elevation_limits",
+        # azimuth_limits fed ylims as an elevation angle, so explicit values keep their effect
+        "azimuth_limits": "elevation_limits",
     }
 
     @classmethod
@@ -772,9 +775,9 @@ class Parameters(BaseParameters):
         "pixels_per_wavelength",
     )
     def grid_size_y(self):
-        """Grid height in pixels. For a cartesian grid, this is the vertical (y) pixels in the grid,
+        """Grid size in elevation (y), across the array, in pixels. For a cartesian grid,
         set to prevent aliasing if not provided. For a polar grid, this can be thought of as
-        the number for rays in the azimuthal direction.
+        the number of rays in the elevation direction.
         """
         grid_size_y = self._params.get("grid_size_y")
         if grid_size_y is not None:
@@ -896,29 +899,29 @@ class Parameters(BaseParameters):
         x = np.concatenate([probe_x, edges_x[np.isfinite(edges_x)]])
         return (float(np.min(x)), float(np.max(x)))
 
-    @cache_with_dependencies("zlims", "grid_type", "azimuth_limits", "probe_geometry", "grid_apex")
+    @cache_with_dependencies(
+        "zlims", "grid_type", "elevation_limits", "probe_geometry", "grid_apex"
+    )
     def ylims(self):
         """The y-limits of the beamforming grid [m]. If not explicitly set, it is computed based
-        on the azimuth limits and probe geometry.
+        on the :attr:`elevation_limits` and probe geometry.
         """
         ylims = self._params.get("ylims")
         if ylims is not None:
             return ylims
 
-        # If ylims not set, compute based on azimuth limits and probe geometry
+        # If ylims not set, compute based on elevation limits and probe geometry
         radius = max(self.zlims) - float(self.grid_apex[2])
-        ylims_azimuth = (
-            (0.0, 0.0)  # avoid numerical imprecision with np.cos(np.pi/2)
-            if self.azimuth_limits is None or self.azimuth_limits[0] == self.azimuth_limits[1]
-            else (
-                radius * np.cos(-np.pi / 2 + self.azimuth_limits[0]),
-                radius * np.cos(-np.pi / 2 + self.azimuth_limits[1]),
-            )
+        limits = self.elevation_limits
+        ylims_elevation = (
+            (0.0, 0.0)
+            if limits is None or limits[0] == limits[1]
+            else (radius * np.sin(limits[0]), radius * np.sin(limits[1]))
         )
         ylims_plane = (min(self.probe_geometry[:, 1]), max(self.probe_geometry[:, 1]))
         ylims = (
-            min(ylims_azimuth[0], ylims_plane[0]),
-            max(ylims_azimuth[1], ylims_plane[1]),
+            min(ylims_elevation[0], ylims_plane[0]),
+            max(ylims_elevation[1], ylims_plane[1]),
         )
         return ylims
 
@@ -1146,8 +1149,14 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
-        """Polar angles for each transmit event in radians of shape (n_tx,).
-        These angles are often used in 2D imaging."""
+        """Polar angle ``theta`` [rad] of each transmit, of shape (n_tx,).
+
+        The spherical polar angle (physics convention): the angle between the transmit
+        direction and +z. Together with :attr:`azimuth_angles` it gives the direction
+        ``(sin(theta) cos(phi), sin(theta) sin(phi), cos(theta))``. In 2D imaging
+        ``phi = 0`` and ``theta`` is signed, positive toward +x, so it equals the polar
+        angle ``atan(x / z)`` of the grid (see :attr:`polar_limits`).
+        """
         value = self._params.get("polar_angles")
         if value is None:
             return None
@@ -1156,7 +1165,9 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("polar_angles", "enable_scanline", optional=("_derived_polar_sector",))
     def polar_limits(self):
-        """The angles [rad] of the first and last column of a polar grid.
+        """The polar angle ``atan(x / z)`` [rad] of the first and last column of a polar grid,
+        signed, positive toward +x. In 3D it is the angle of the projection onto the x-z
+        plane, next to :attr:`elevation_limits` for the y-z plane.
 
         If not explicitly provided, the range of the transmit angles (:attr:`polar_angles`),
         widened on each side to cover the region each transmit insonifies down to
@@ -1241,8 +1252,13 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("selected_transmits", "n_tx")
     def azimuth_angles(self):
-        """Azimuth angles for each transmit event in radians
-        of shape (n_tx,). These angles are often used in 3D imaging."""
+        """Azimuth angle ``phi`` [rad] of each transmit, of shape (n_tx,).
+
+        The spherical azimuth angle (physics convention): the rotation of the transmit
+        direction around the z axis, from +x. Zero for 2D imaging. This is not the
+        ultrasound "azimuth" (lateral, along the array) direction; the transmit's angle in
+        the y-z plane is its elevation angle (see :attr:`elevation_limits`).
+        """
         value = self._params.get("azimuth_angles")
         if value is None:
             log.warning_once(
@@ -1253,23 +1269,34 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("selected_transmits", "n_tx")
-    def azimuth_limits(self):
-        """The limits of the azimuth angles.
+    @cache_with_dependencies(
+        "selected_transmits", "n_tx", optional=("polar_angles", "elevation_margin")
+    )
+    def elevation_limits(self):
+        """Elevation angle ``atan(y / z)`` [rad] of the first and last sample in elevation,
+        shape (2,). Sets the default :attr:`ylims`, and with :attr:`rlims` and
+        :attr:`polar_limits` spans a 3D frustum (see :func:`zea.display.scan_convert_3d`).
 
-        Returns ``None`` if azimuth angles were
-        not provided (e.g. standard 2D imaging).
+        If not explicitly provided, the range of the transmits' elevation angles
+        ``atan2(sin(theta) sin(phi), cos(theta))``, from :attr:`polar_angles` and
+        :attr:`azimuth_angles`, widened on each side by 15 % of that range, or by
+        :attr:`elevation_margin` when set. ``None`` without ``azimuth_angles`` (e.g.
+        standard 2D imaging).
 
         The presence check uses the raw parameter to avoid triggering the
         :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
         """
-        value = self._params.get("azimuth_limits")
+        value = self._params.get("elevation_limits")
         if value is None and self._params.get("azimuth_angles") is not None:
-            azimuth_angles = self.azimuth_angles
-            value = azimuth_angles.min(), azimuth_angles.max()
-            diff = value[1] - value[0]
-            # add 15% margin to the limits
-            value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
+            azimuth = np.asarray(self.azimuth_angles, dtype=np.float64)
+            polar = self.polar_angles
+            polar = np.zeros_like(azimuth) if polar is None else np.asarray(polar, np.float64)
+            elevation = np.arctan2(np.sin(polar) * np.sin(azimuth), np.cos(polar))
+            low, high = float(elevation.min()), float(elevation.max())
+            margin = self._params.get("elevation_margin")
+            if margin is None:
+                margin = 0.15 * (high - low)
+            value = (low - float(margin), high + float(margin))
         return value
 
     @cache_with_dependencies("selected_transmits", "n_el", "n_tx")

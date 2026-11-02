@@ -904,7 +904,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - (n_tx)
            - rad
-           - Polar angles of transmit beams.
+           - Polar angle of each transmit beam, from +z (signed in 2D).
            - |badge-req|
          * - ``time_to_next_transmit``
            - ``float32``
@@ -916,7 +916,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - (n_tx)
            - rad
-           - Azimuthal angles of transmit beams.
+           - Azimuth angle of each transmit beam, around z from +x.
            - |badge-opt|
          * - ``rx_aperture_indices``
            - ``int16`` | ``int32`` | ``int64``

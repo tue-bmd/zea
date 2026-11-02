@@ -422,11 +422,10 @@ class ScanConvert(Operation):
         "z_lim",
         "rlims",
         "polar_limits",
-        "lateral_tilt_limits",
-        "elevation_tilt_limits",
-        "d_rho",
-        "d_theta",
-        "d_phi",
+        "elevation_limits",
+        "dr",
+        "d_polar",
+        "d_elevation",
     ]
 
     def __init__(self, order=1, **kwargs):
@@ -456,8 +455,7 @@ class ScanConvert(Operation):
         self,
         rlims=None,
         polar_limits=None,
-        lateral_tilt_limits=None,
-        elevation_tilt_limits=None,
+        elevation_limits=None,
         resolution=None,
         coordinates=None,
         fill_value=None,
@@ -470,21 +468,20 @@ class ScanConvert(Operation):
         Args:
             rlims (Tuple): Radius of the first and last row of the polar image, measured
                 from ``grid_apex``. Defined in meters.
-            polar_limits (Tuple): Angle of the first and last column of a 2D polar image.
-                Defined in radians.
-            lateral_tilt_limits (Tuple): Lateral tilt ``atan(x / z)`` of the first and last
-                sample of a 3D frustum. Defaults to ``polar_limits``. Defined in radians.
-            elevation_tilt_limits (Tuple): Elevation tilt ``atan(y / z)`` of the first and
-                last sample of a 3D frustum. Defined in radians.
+            polar_limits (Tuple): Polar angle ``atan(x / z)`` of the first and last column
+                of the polar image (2D) or frustum (3D). Defined in radians.
+            elevation_limits (Tuple): Elevation angle ``atan(y / z)`` of the first and last
+                sample of a 3D frustum. Defined in radians.
             resolution (float): Resolution of the output image in meters per pixel.
                 if None, the resolution is computed based on the input data.
             coordinates (Tensor): Coordinates for scan convertion. If None, will be computed
                 based on the limits above and resolution. If provided, this
                 operation can be jitted.
             fill_value (float): Value to fill the image with outside the defined region.
-            grid_apex (Tensor): The point ``(x, y, z)`` that ``rho`` is measured from,
-                in the transducer frame (see :attr:`zea.Parameters.grid_apex`). Moves the
-                reported ``x_lim`` and ``z_lim`` into the transducer frame.
+            grid_apex (Tensor): The point ``(x, y, z)`` that the radius (``rlims``) is
+                measured from, in the transducer frame (see
+                :attr:`zea.Parameters.grid_apex`). Moves the reported ``x_lim`` and
+                ``z_lim`` into the transducer frame.
             extent (Tensor): Output window in the transducer frame, as
                 :attr:`zea.Parameters.extent` gives it. Defaults to the bounding box of
                 the polar image. Only used when ``coordinates`` is not given.
@@ -509,12 +506,12 @@ class ScanConvert(Operation):
         limits = {
             "rlims": rlims,
             "polar_limits": polar_limits,
-            "elevation_tilt_limits": elevation_tilt_limits,
+            "elevation_limits": elevation_limits,
         }
         for old, new in (
             ("rho_range", "rlims"),
             ("theta_range", "polar_limits"),
-            ("phi_range", "elevation_tilt_limits"),
+            ("phi_range", "elevation_limits"),
         ):
             if kwargs.get(old) is not None:
                 log.deprecated(f"ScanConvert input `{old}` is deprecated, use `{new}` instead.")
@@ -524,7 +521,7 @@ class ScanConvert(Operation):
             data,
             limits["rlims"],
             limits["polar_limits"],
-            limits["elevation_tilt_limits"],
+            limits["elevation_limits"],
             resolution,
             coordinates,
             fill_value,
@@ -532,7 +529,6 @@ class ScanConvert(Operation):
             with_batch_dim=self.with_batch_dim,
             grid_apex=grid_apex,
             extent=extent,
-            lateral_tilt_limits=lateral_tilt_limits,
         )
 
         return {self.output_key: data_out, **parameters}

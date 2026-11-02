@@ -134,8 +134,9 @@ def radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels=None):
         dr (float): Pixel spacing in radius
         oris (np.ndarray): Origin of each ray in Cartesian coordinates (x, y, z)
             with shape (nrays, 3)
-        dirs (np.ndarray): Steering direction of each ray in azimuth, in units of
-            radians (nrays, 2)
+        dirs (np.ndarray): Direction of each ray [rad], shape (nrays, 2): the polar angle
+            ``atan(x / z)`` in column 0 and the elevation angle ``atan(y / z)`` in column 1
+            (currently ignored).
         num_radial_pixels (int, optional): Number of samples along each ray. Derived from
             ``rlims`` and ``dr`` when not given.
 
@@ -204,10 +205,10 @@ def polar_pixel_grid(
 
     if polar_angles is None:
         assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
-        dirs_az = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
+        dirs_polar = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
     else:
-        dirs_az = np.asarray(polar_angles, dtype=np.float64)
-        num_polar_pixels = len(dirs_az)
+        dirs_polar = np.asarray(polar_angles, dtype=np.float64)
+        num_polar_pixels = len(dirs_polar)
 
     # Radii are measured from the apex, depths from the transducer surface.
     apex = np.asarray(grid_apex, dtype=np.float64)
@@ -216,8 +217,8 @@ def polar_pixel_grid(
 
     oris = np.tile(apex, (num_polar_pixels, 1))
 
-    dirs_el = np.zeros(num_polar_pixels)
-    dirs = np.vstack((dirs_az, dirs_el)).T
+    dirs_elevation = np.zeros(num_polar_pixels)
+    dirs = np.vstack((dirs_polar, dirs_elevation)).T
 
     return radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels).transpose(1, 0, 2)
 

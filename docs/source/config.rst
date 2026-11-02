@@ -159,7 +159,7 @@ records: the probe geometry, the transmits (``polar_angles``, ``transmit_origins
 ``focus_distances``) and the record length. You choose the grid type with ``grid_type``
 and ``enable_scanline``, and can tune the result with a few overrides. Positions are in
 the transducer frame: ``z = 0`` at the middle of the array, ``+z`` into the medium, and
-angles measured from ``+z``, positive toward ``+x``.
+angles measured from ``+z``, positive toward ``+x`` (see :ref:`angle-conventions`).
 
 :attr:`~zea.Parameters.zlims`
    Depths below the transducer. Defaults to the end of the record,
@@ -238,11 +238,18 @@ holds every setting, so you can share a link to the exact grid.
    </figure>
 
 
+.. _angle-conventions:
+
 Angle and radius names
 ~~~~~~~~~~~~~~~~~~~~~~
 
-zea follows the physics convention for spherical coordinates, with angles in radians.
-The names stay the same from the beamforming grid through to scan conversion.
+zea uses two kinds of angles, in radians, both in the transducer frame (``x`` along
+the array, ``y`` across it, ``+z`` into the medium):
+
+- **Transmit directions** are spherical coordinates, as stored in the file format.
+- **Grid and scan-conversion angles** are projections onto the x-z and y-z planes, so
+  a 3D volume is a frustum that extends the 2D sector in elevation. 3D adds one name,
+  ``elevation_limits``; every 2D name keeps its meaning.
 
 .. list-table::
    :header-rows: 1
@@ -251,26 +258,62 @@ The names stay the same from the beamforming grid through to scan conversion.
    * - Symbol
      - Name
      - Meaning
+   * - :math:`\theta`
+     - ``polar_angles``
+     - Spherical polar angle of each transmit: the angle between its direction and
+       ``+z``.
+   * - :math:`\phi`
+     - ``azimuth_angles``
+     - Spherical azimuth angle of each transmit: the rotation of its direction around
+       ``z``, from ``+x``. Zero for 2D imaging.
    * - :math:`r`, :math:`\rho`
      - ``rlims``
      - Radius from :attr:`~zea.Parameters.grid_apex`, of the first and last row [m].
-   * - :math:`\theta`
-     - ``polar_angles``, ``polar_limits``
-     - Polar angle, from ``+z``. In 2D (the x-z plane) it is signed, positive toward
-       ``+x``: the steering angle of each transmit, and the angle of the first and last
-       column of a polar grid.
-   * - :math:`\phi`
-     - ``azimuth_angles``
-     - Azimuth angle of a transmit, around ``z`` from ``+x``. Zero for 2D imaging.
+       Not the depth: :attr:`~zea.Parameters.zlims` is measured from the array, so
+       ``rlims = zlims - grid_apex[2]``.
+   * - :math:`\operatorname{atan}(x/z)`
+     - ``polar_limits``
+     - Polar angle of the first and last column of a polar grid, signed, positive toward
+       ``+x``. In 3D, the angle of the projection onto the x-z plane.
+   * - :math:`\operatorname{atan}(y/z)`
+     - ``elevation_limits``
+     - Elevation angle of the first and last sample of a 3D frustum, signed, positive
+       toward ``+y``. Only in 3D. Defaults to the transmits' elevation angles, widened
+       by 15 % of their range, or by :attr:`~zea.Parameters.elevation_margin`.
 
-3D scan conversion (:func:`zea.display.scan_convert_3d`) uses a frustum instead of
-spherical coordinates: ``lateral_tilt_limits`` for :math:`\operatorname{atan}(x/z)` and
-``elevation_tilt_limits`` for :math:`\operatorname{atan}(y/z)`. These are two independent
-tilts, not a polar and an azimuth angle. In the x-z plane the lateral tilt equals the 2D
-polar angle, so a frustum extends a 2D sector in elevation.
+A transmit points along
+:math:`(\sin\theta\cos\phi,\ \sin\theta\sin\phi,\ \cos\theta)`. Its grid angles are
+:math:`\operatorname{atan}(\tan\theta\cos\phi)` (polar) and
+:math:`\operatorname{atan}(\tan\theta\sin\phi)` (elevation), so the two coincide with
+the spherical angles only in the x-z plane (:math:`\phi = 0`) and the y-z plane
+(:math:`\phi = \pm\pi/2`). That is why the grid angles are not called ``azimuth``.
 
-The former names ``rho_range``, ``theta_range`` and ``phi_range`` still work, with a
-deprecation warning.
+**The zea standard.** 2D data stores :math:`\phi = 0` and a *signed* :math:`\theta`,
+positive toward ``+x``, so :math:`\theta` equals the grid's polar angle. The spherical
+convention would instead keep :math:`\theta \geq 0` and steer toward ``-x`` with
+:math:`\phi = \pi`; both describe the same direction, but zea writes the signed form,
+and 3D data keeps :math:`\phi` in :math:`(-\pi/2, \pi/2]` so that the sign of
+:math:`\theta` still gives the side in ``x``.
+
+.. note::
+
+   **Physics vs. mathematics convention.** zea uses the physics convention (ISO 80000-2):
+   :math:`\theta` is the polar angle from ``+z`` and :math:`\phi` the azimuth around
+   ``z``. Many mathematics texts, and some libraries, swap the symbols: :math:`\theta`
+   is the azimuth and :math:`\phi` the polar angle. When converting data, go by the
+   names ``polar_angles`` and ``azimuth_angles``, not by the symbols of the source.
+
+.. note::
+
+   **Ultrasound jargon.** In ultrasound, "azimuth" usually names the *lateral* direction,
+   along the array (``x``), and "elevation" the direction across it (``y``). zea's
+   ``azimuth_angles`` is the spherical coordinate-system :math:`\phi` instead, not an
+   angle toward ``x``. "Elevation" means the same in both: ``elevation_limits`` is the
+   angle toward ``y``.
+
+The former names ``rho_range``, ``theta_range`` and ``phi_range`` (for ``rlims``,
+``polar_limits`` and ``elevation_limits``) and ``azimuth_limits`` (for
+``elevation_limits``) still work, with a deprecation warning.
 
 
 ----------------------------

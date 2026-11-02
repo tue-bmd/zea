@@ -435,8 +435,8 @@ def plot_biplanes(
 
 def plot_frustum_vertices(
     rlims=None,
-    lateral_tilt_limits=None,
-    elevation_tilt_limits=None,
+    polar_limits=None,
+    elevation_limits=None,
     num_points=20,
     phi_plane=None,
     theta_plane=None,
@@ -455,18 +455,18 @@ def plot_frustum_vertices(
     """
     Plots the vertices of a frustum and highlights specified planes.
 
-    The frustum is spanned by radius ``rho``, lateral tilt ``theta = atan(x / z)`` and
-    elevation tilt ``phi = atan(y / z)``, as in :func:`zea.display.scan_convert_3d`.
+    The frustum is spanned by radius ``rho``, polar angle ``theta = atan(x / z)`` and
+    elevation angle ``phi = atan(y / z)``, as in :func:`zea.display.scan_convert_3d`.
 
     Args:
         rlims (tuple): Radius ``(rho_min, rho_max)``.
-        lateral_tilt_limits (tuple): Lateral tilt ``(theta_min, theta_max)`` [rad].
-        elevation_tilt_limits (tuple): Elevation tilt ``(phi_min, phi_max)`` [rad].
+        polar_limits (tuple): Polar angle ``(theta_min, theta_max)`` [rad].
+        elevation_limits (tuple): Elevation angle ``(phi_min, phi_max)`` [rad].
         num_points (int, optional): Number of points to generate along each edge.
             Defaults to 20.
-        phi_plane (float or list, optional): Elevation tilt(s) at which to plot plane(s).
+        phi_plane (float or list, optional): Elevation angle(s) at which to plot plane(s).
             Defaults to None.
-        theta_plane (float or list, optional): Lateral tilt(s) at which to plot plane(s).
+        theta_plane (float or list, optional): Polar angle(s) at which to plot plane(s).
             Defaults to None.
         rho_plane (float or list, optional): Value(s) of rho at which to plot plane(s).
             Defaults to None.
@@ -487,8 +487,8 @@ def plot_frustum_vertices(
             'color', 'linestyle', 'linewidth', 'alpha', etc.
             Defaults to {'color': 'red', 'linestyle': '--'}.
         rho_range (tuple, optional): Deprecated, use ``rlims``.
-        theta_range (tuple, optional): Deprecated, use ``lateral_tilt_limits``.
-        phi_range (tuple, optional): Deprecated, use ``elevation_tilt_limits``.
+        theta_range (tuple, optional): Deprecated, use ``polar_limits``.
+        phi_range (tuple, optional): Deprecated, use ``elevation_limits``.
 
     Returns:
         tuple: A tuple containing the figure and axes objects (fig, ax).
@@ -502,8 +502,8 @@ def plot_frustum_vertices(
             >>> from zea.visualize import plot_frustum_vertices
             >>> fig, ax = plot_frustum_vertices(
             ...     rlims=[0.1e-3, 10e-3],  # in m
-            ...     lateral_tilt_limits=[-0.6, 0.6],  # in rad
-            ...     elevation_tilt_limits=[-0.6, 0.6],  # in rad
+            ...     polar_limits=[-0.6, 0.6],  # in rad
+            ...     elevation_limits=[-0.6, 0.6],  # in rad
             ...     phi_plane=0,
             ...     phi_style={"color": "red", "linestyle": "--", "linewidth": 2},
             ...     theta_plane=0.2,
@@ -513,14 +513,12 @@ def plot_frustum_vertices(
     """
     caller = "plot_frustum_vertices"
     rho_lims = deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
-    theta_lims = deprecated_alias(
-        lateral_tilt_limits, theta_range, "theta_range", "lateral_tilt_limits", caller
-    )
+    theta_lims = deprecated_alias(polar_limits, theta_range, "theta_range", "polar_limits", caller)
     phi_lims = deprecated_alias(
-        elevation_tilt_limits, phi_range, "phi_range", "elevation_tilt_limits", caller
+        elevation_limits, phi_range, "phi_range", "elevation_limits", caller
     )
     if rho_lims is None or theta_lims is None or phi_lims is None:
-        raise ValueError("rlims, lateral_tilt_limits and elevation_tilt_limits are required.")
+        raise ValueError("rlims, polar_limits and elevation_limits are required.")
 
     # Convert single values to lists
     phi_plane = [phi_plane] if isinstance(phi_plane, (int, float)) else phi_plane

@@ -100,7 +100,7 @@ def test_scan_convert_in_process_smoke():
 
     vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
     out3d, params3d = display.scan_convert_3d(
-        vol3d, rlims=(0, 1), lateral_tilt_limits=(-0.4, 0.4), elevation_tilt_limits=(-0.4, 0.4)
+        vol3d, rlims=(0, 1), polar_limits=(-0.4, 0.4), elevation_limits=(-0.4, 0.4)
     )
     assert isinstance(params3d, dict)
     assert np.asarray(out3d).ndim == 3
@@ -117,7 +117,7 @@ def test_scan_convert_deprecated_range_names():
 
     vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
     new, _ = display.scan_convert_3d(
-        vol3d, rlims=(0, 1), lateral_tilt_limits=(-0.4, 0.4), elevation_tilt_limits=(-0.3, 0.3)
+        vol3d, rlims=(0, 1), polar_limits=(-0.4, 0.4), elevation_limits=(-0.3, 0.3)
     )
     old, _ = display.scan_convert(
         vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.3, 0.3)
@@ -126,6 +126,19 @@ def test_scan_convert_deprecated_range_names():
 
     with pytest.raises(TypeError, match="deprecated alias 'rho_range'"):
         display.scan_convert_2d(img2d, rlims=(0, 1), rho_range=(0, 1), polar_limits=(-0.5, 0.5))
+
+    # The polar round-trip helpers take the same alias
+    cart = rng.random((40, 50)).astype(np.float32)
+    new = display.cartesian_to_polar_matrix(cart, polar_limits=(-0.3, 0.6))
+    old = display.cartesian_to_polar_matrix(cart, theta_range=(-0.3, 0.6))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.polar_to_cartesian_matrix(cart, (40, 50), polar_limits=(0.6, -0.3))
+    old = display.polar_to_cartesian_matrix(cart, (40, 50), theta_range=(0.6, -0.3))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    kwargs = dict(output_size=(40, 50), find_scan_cone=False)
+    new = display.inverse_scan_convert_2d(cart, polar_limits=(-0.3, 0.6), **kwargs)
+    old = display.inverse_scan_convert_2d(cart, theta_range=(-0.3, 0.6), **kwargs)
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
 
 
 def create_radial_pattern(size):
@@ -177,17 +190,17 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error, angle
 
     rlims = (0, 100)
 
-    theta_range = np.deg2rad((-45, 45))
+    polar_limits = np.deg2rad((-45, 45))
 
     # Scan convert
-    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, polar_limits)
 
     # Inverse scan convert
     cartesian_data_inv = display.inverse_scan_convert_2d(
         cartesian_data,
         output_size=polar_data.shape,
         find_scan_cone=False,
-        theta_range=theta_range,
+        polar_limits=polar_limits,
     )
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
 
@@ -226,9 +239,9 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
         raise ValueError("Unknown pattern creator")
 
     rlims = (0, 100)
-    theta_range = np.deg2rad((-45, 45))
+    polar_limits = np.deg2rad((-45, 45))
 
-    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, polar_limits)
     cartesian_data = ops.convert_to_numpy(cartesian_data)
 
     # now pad the cartesian image and test with find_scan_cone=True
@@ -253,8 +266,8 @@ def test_polar_to_cartesian_matrix_roundtrip():
 
     Unlike scan_convert_2d (which fits the cone bounding box into the output), it pins the
     apex at ``tip`` on a full-size canvas, so a forward/inverse round-trip reconstructs the
-    original frame at its original position and scale. Uses an *asymmetric* theta_range to
-    guard against an angular shift: the inverse is obtained by passing theta_range in the
+    original frame at its original position and scale. Uses an *asymmetric* polar_limits to
+    guard against an angular shift: the inverse is obtained by passing polar_limits in the
     reversed order (matching cartesian_to_polar_matrix's rot90 column ordering, which is what
     polar_geometry_from_coords_for_interp returns).
     """
@@ -277,15 +290,15 @@ def test_polar_to_cartesian_matrix_roundtrip():
         ops.convert_to_tensor(image),
         tip=(apex_x, apex_y),
         r_max=180.0,
-        theta_range=(theta_min, theta_max),
+        polar_limits=(theta_min, theta_max),
     )
-    # Invert: theta_range reversed to match the polar image's column order.
+    # Invert: polar_limits reversed to match the polar image's column order.
     back = display.polar_to_cartesian_matrix(
         polar,
         (height, width),
         tip=(apex_x, apex_y),
         r_max=180.0,
-        theta_range=(theta_max, theta_min),
+        polar_limits=(theta_max, theta_min),
     )
     back = np.nan_to_num(ops.convert_to_numpy(back))
 
@@ -938,3 +951,22 @@ def test_flat_array_scan_conversion_fills_the_extent(i, j):
     assert abs(float(x_found) - expected[0]) < resolution
     assert abs(float(z_found) - expected[2]) < resolution
     return np.array([float(x_found), float(z_found)])
+
+
+def test_scan_convert_reports_steps_under_the_limit_names():
+    """The row and column steps are named after the limits they step through."""
+    _, params_2d = display.compute_scan_convert_2d_coordinates(
+        (64, 32), rlims=(0.01, 0.05), polar_limits=(-0.5, 0.5)
+    )
+    _, params_3d = display.compute_scan_convert_3d_coordinates(
+        (16, 8, 8),
+        rlims=(0.01, 0.05),
+        polar_limits=(-0.5, 0.5),
+        elevation_limits=(-0.25, 0.25),
+    )
+
+    np.testing.assert_allclose(float(params_2d["dr"]), 0.04 / 63, rtol=1e-5)
+    np.testing.assert_allclose(float(params_2d["d_polar"]), 1.0 / 31, rtol=1e-5)
+    np.testing.assert_allclose(float(params_3d["d_polar"]), 1.0 / 7, rtol=1e-5)
+    np.testing.assert_allclose(float(params_3d["d_elevation"]), 0.5 / 7, rtol=1e-5)
+    assert not {"d_rho", "d_theta", "d_phi"} & (params_2d.keys() | params_3d.keys())

@@ -1005,7 +1005,7 @@ def test_private_helpers_are_not_parameters():
 
 def test_renamed_scan_conversion_parameters():
     """The former scan-conversion names map onto rlims, polar_limits and
-    elevation_tilt_limits."""
+    elevation_limits."""
     parameters = Parameters(rho_range=(0.0, 0.1), theta_range=(-0.5, 0.5))
     np.testing.assert_allclose(parameters.rlims, (0.0, 0.1))
     np.testing.assert_allclose(parameters.polar_limits, (-0.5, 0.5))
@@ -1013,10 +1013,58 @@ def test_renamed_scan_conversion_parameters():
     np.testing.assert_allclose(parameters.theta_range, parameters.polar_limits)
 
     parameters.update(phi_range=(-0.2, 0.2))
-    np.testing.assert_allclose(parameters.elevation_tilt_limits, (-0.2, 0.2))
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.2, 0.2))
     parameters.phi_range = (-0.3, 0.3)
-    np.testing.assert_allclose(parameters.elevation_tilt_limits, (-0.3, 0.3))
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3, 0.3))
     assert "phi_range" not in parameters._custom_params
+
+
+def test_elevation_limits_from_spherical_transmit_angles():
+    """The default elevation_limits are the transmits' angles in the y-z plane, from the
+    spherical polar and azimuth angles, widened by 15 % on each side."""
+    # In the y-z plane (phi = pi/2), steered toward -y and +y by a signed theta, plus one
+    # transmit steered in x only: elevation is -theta, theta and 0
+    parameters = Parameters(
+        n_tx=3,
+        polar_angles=np.array([-0.3, 0.3, 0.3]),
+        azimuth_angles=np.array([np.pi / 2, np.pi / 2, 0.0]),
+    )
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3 * 1.3, 0.3 * 1.3))
+
+    # A 2D scan (azimuth zero) has no elevation, however far it steers in polar angle
+    parameters = Parameters(
+        n_tx=3, polar_angles=np.array([-0.4, 0.0, 0.4]), azimuth_angles=np.zeros(3)
+    )
+    np.testing.assert_allclose(parameters.elevation_limits, (0.0, 0.0))
+
+    assert Parameters(n_tx=3, polar_angles=np.zeros(3)).elevation_limits is None
+
+
+def test_elevation_margin_replaces_the_automatic_margin():
+    """``elevation_margin`` widens the default elevation_limits by a fixed angle, like
+    polar_margin, and leaves explicit limits alone."""
+    parameters = Parameters(
+        n_tx=2,
+        polar_angles=np.array([-0.3, 0.3]),
+        azimuth_angles=np.full(2, np.pi / 2),
+        elevation_margin=0.05,
+    )
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.35, 0.35))
+
+    parameters.elevation_margin = 0.0
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3, 0.3))
+
+    parameters.elevation_limits = (-0.1, 0.1)
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.1, 0.1))
+
+
+def test_azimuth_limits_is_a_deprecated_alias_of_elevation_limits():
+    """``azimuth_limits`` set ylims as an elevation angle, so it now maps onto
+    elevation_limits."""
+    parameters = Parameters(azimuth_limits=(-0.2, 0.2))
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.2, 0.2))
+    np.testing.assert_allclose(parameters.azimuth_limits, parameters.elevation_limits)
+    assert "azimuth_limits" not in parameters._custom_params
 
 
 def test_polar_grid_uses_the_fitted_apex():

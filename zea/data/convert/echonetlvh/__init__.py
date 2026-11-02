@@ -403,7 +403,7 @@ class LVHProcessor:
                     matrix,
                     tip=(tip_x, tip_y),
                     r_max=r_max,
-                    theta_range=(theta_min, theta_max),
+                    polar_limits=(theta_min, theta_max),
                     polar_shape=polar_shape,  # fixed
                 ),
                 in_axes=(0, None, None, None, None, None),
@@ -439,10 +439,10 @@ class LVHProcessor:
 
         theta_max = -math.atan(cone_params["right_slope"])
         theta_min = -math.atan(cone_params["left_slope"])
-        theta_range = (theta_min, theta_max)
+        polar_limits = (theta_min, theta_max)
 
         return polar_to_cartesian_matrix(
-            image_polar, cartesian_shape, tip, r_max, theta_range, order=order
+            image_polar, cartesian_shape, tip, r_max, polar_limits, order=order
         )
 
     def load(self, avi_file: Path):
