@@ -302,11 +302,6 @@ class RemoteFile:
         self._cache = fsspec.caching.caches[cache_type](block_size, self._fetch, self.size)
         self._pos = 0
         self._closed = False
-        # zea files keep their HDF5 metadata at the start. Fetch that block now, before h5py
-        # opens the file and takes its global lock, so threads opening different files fetch
-        # in parallel instead of one after another.
-        if self.size:
-            self._fetch(0, min(block_size, self.size))
 
     def _fetch(self, start: int, end: int) -> bytes:
         key = (self.location.etag, start, end)
@@ -317,13 +312,19 @@ class RemoteFile:
             _shared_blocks.put(key, data)
         return data
 
+    def read_at(self, offset: int, size: int) -> bytes:
+        """Read ``size`` bytes at ``offset`` through the block cache, without moving the file
+        position. Safe to call from several threads.
+        """
+        end = min(self.size, offset + size)
+        if end <= offset:
+            return b""
+        return self._cache._fetch(offset, end)
+
     def read(self, length: int = -1) -> bytes:
         if length is None or length < 0:
             length = self.size - self._pos
-        end = min(self.size, self._pos + length)
-        if end <= self._pos:
-            return b""
-        data = self._cache._fetch(self._pos, end)
+        data = self.read_at(self._pos, length)
         self._pos += len(data)
         return data
 

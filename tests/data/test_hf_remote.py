@@ -195,3 +195,41 @@ def test_merged_requests_are_counted_once(tmp_path, hub):
         assert server.count == 1
     finally:
         server.close()
+
+
+@pytest.fixture
+def small_cdn(tmp_path, hub, monkeypatch):
+    """A streamed file whose frames are each below MIN_BYTES, with a private chunk cache."""
+    from zea.data import chunk_cache
+
+    monkeypatch.setattr(chunk_cache, "ZEA_CACHE_DIR", tmp_path / "zea-cache")
+    path = _write(tmp_path / "x.hdf5", _structured())
+    server = _CountingServer(tmp_path, latency=0)
+    hub.location = server.url + path.name
+    hub.size = path.stat().st_size
+    yield SimpleNamespace(server=server, path=path)
+    server.close()
+
+
+def test_small_reads_share_blocks(small_cdn):
+    """Frame reads below MIN_BYTES are served from the file's blocks, not one request each."""
+    with File(HF_PATH, progress=False) as remote, File(small_cdn.path) as local:
+        assert remote[RAW][0].nbytes < chunk_reader.MIN_BYTES
+        before = small_cdn.server.count
+        for i in range(remote[RAW].shape[0]):
+            got = chunk_reader.read(remote[RAW], i, remote._chunk_fetcher)
+            np.testing.assert_array_equal(got, local[RAW][i])
+    # The whole test file fits in the block fetched on open.
+    assert small_cdn.server.count == before
+
+
+def test_open_uses_cached_first_block(small_cdn):
+    """Opening a file whose first block is in the chunk cache sends no request for it,
+    e.g. in a second dataloader worker process (simulated by clearing the memory caches)."""
+    with File(HF_PATH, progress=False) as remote:
+        remote[RAW].shape
+    hf_remote._shared_blocks.clear()
+    before = small_cdn.server.count
+    with File(HF_PATH, progress=False) as remote:
+        remote[RAW].shape
+    assert small_cdn.server.count == before

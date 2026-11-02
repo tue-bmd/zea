@@ -1134,6 +1134,12 @@ class File(h5py.File):
 
         # Initialize the h5py.File
         try:
+            # zea files keep their HDF5 metadata at the start. Fetch that block now, before
+            # h5py opens the file and takes its global lock, so threads opening different
+            # files fetch in parallel instead of one after another. Reading one byte fetches
+            # the whole block, from the chunk cache if it is there.
+            if hasattr(stream_fileobj, "read_at"):
+                stream_fileobj.read_at(0, 1)
             super().__init__(name, mode, *args, **kwargs)
         except Exception:
             if stream_fileobj is not None:

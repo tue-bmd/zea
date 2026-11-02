@@ -137,6 +137,8 @@ class CachedFile:
         self.details = getattr(fileobj, "details", {})
         #: Passed through: the chunk fetcher reuses the file's CDN URL.
         self.location = getattr(fileobj, "location", None)
+        # Guards seek + read on a wrapped file object that has no positional read_at.
+        self._lock = threading.Lock()
 
     def _block_bytes(self, index: int) -> bytes:
         offset = index * self._block
@@ -144,21 +146,23 @@ class CachedFile:
         hit = self._cache.get(offset, size)
         if hit is not None:
             return hit
-        self._file.seek(offset)
-        data = self._file.read(size)
+        if hasattr(self._file, "read_at"):
+            data = self._file.read_at(offset, size)
+        else:
+            with self._lock:
+                self._file.seek(offset)
+                data = self._file.read(size)
         _count_network_bytes(len(data))
         self._cache.put(offset, size, data)
         return data
 
-    def read(self, length: int = -1) -> bytes:
-        if length < 0:
-            length = self.size - self._pos
-        length = max(0, min(length, self.size - self._pos))
-        if not length:
-            return b""
-
+    def read_at(self, offset: int, size: int) -> bytes:
+        """Read ``size`` bytes at ``offset`` through the cached blocks, without moving the file
+        position. Safe to call from several threads.
+        """
+        length = max(0, min(size, self.size - offset))
         out = bytearray()
-        pos = self._pos
+        pos = offset
         while len(out) < length:
             index = pos // self._block
             within = pos - index * self._block
@@ -168,8 +172,14 @@ class CachedFile:
                 break  # short block: end of file
             out += take
             pos += len(take)
-        self._pos = pos
         return bytes(out)
+
+    def read(self, length: int = -1) -> bytes:
+        if length < 0:
+            length = self.size - self._pos
+        data = self.read_at(self._pos, length)
+        self._pos += len(data)
+        return data
 
     def seek(self, offset: int, whence: int = 0) -> int:
         base = {0: 0, 1: self._pos, 2: self.size}[whence]

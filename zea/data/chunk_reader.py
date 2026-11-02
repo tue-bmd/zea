@@ -67,8 +67,8 @@ DECODABLE = (BLOSC, LZ4, ZSTD, GZIP, SHUFFLE)
 
 
 # Local reads below this are served by h5py: the thread hand-off costs more than it saves.
-# Remote reads always take the fast path. Through h5py they would be fetched block by block,
-# serially and under h5py's global lock, which stalls every dataloader thread.
+# Remote reads below this go through the file's block cache (see Fetcher.fetch_small), not
+# through h5py, which would fetch serially and under its global lock.
 MIN_BYTES = 1 << 20  # 1 MiB
 
 # Ceiling on compressed bytes held in memory at once. Bounded by bytes and not by chunk
@@ -308,6 +308,12 @@ class Fetcher:
         """
         raise NotImplementedError
 
+    def fetch_small(
+        self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None
+    ) -> list[bytes]:
+        """:meth:`fetch` for a read below :data:`MIN_BYTES`. See :meth:`HTTPFetcher.fetch_small`."""
+        return self.fetch(ranges, on_bytes)
+
     def pending_bytes(self, ranges: Sequence[tuple[int, int]]) -> int:
         """Bytes of ``ranges`` that :meth:`fetch` would actually have to stream or download.
 
@@ -399,6 +405,8 @@ class HTTPFetcher(Fetcher):
         else:
             self.location = url
         self.cache = cache  # zea.data.chunk_cache.ChunkCache, or None
+        #: The file object h5py reads through, if it has a block cache (see fetch_small).
+        self.blocks = None
         self._fs = fsspec.filesystem("http")
         _redact_fsspec_http_logs()
 
@@ -484,6 +492,24 @@ class HTTPFetcher(Fetcher):
         sync(self._fs.loop, gather)
         return cast(list[bytes], out)
 
+    def fetch_small(
+        self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None
+    ) -> list[bytes]:
+        """Serve a small read from the blocks of :attr:`blocks`, like h5py would.
+
+        Small chunks are often many to a block (e.g. ~70 frames per 1 MiB), so a run of small
+        reads then costs one request per block instead of one per read, and the blocks land in
+        the same in-memory and on-disk caches h5py's own reads use.
+        """
+        if self.blocks is None:
+            return self.fetch(ranges, on_bytes)
+        out = []
+        for offset, size in ranges:
+            out.append(self.blocks.read_at(int(offset), int(size)))
+            if on_bytes is not None:
+                on_bytes(int(size))
+        return out
+
     def read_range(self, offset: int, size: int) -> bytes:
         """Fetch one range without the chunk cache, merging or byte counting.
 
@@ -529,6 +555,8 @@ def fetcher_for(file: h5py.File) -> Fetcher | None:
         cache = cache_for(details) if getattr(file, "_cache_chunks", True) else None
         fetcher = HTTPFetcher(location, get_token(), cache)
         fetcher.source = str(source)  # the hf:// path, not the resolved streaming url
+        if hasattr(stream, "read_at"):
+            fetcher.blocks = stream
         return fetcher
 
     if getattr(file, "_stream_fileobj", None) is not None:
@@ -870,8 +898,10 @@ def read(
     dtype = dset.dtype
     itemsize = dtype.itemsize
     n_selected = int(np.prod([len(indices) for indices, _ in axes]))
-    if fetcher.per_chunk and n_selected * itemsize < MIN_BYTES:
+    small = n_selected * itemsize < MIN_BYTES
+    if fetcher.per_chunk and small:
         return dset[selection]
+    fetch = fetcher.fetch_small if small else fetcher.fetch
 
     chunks = dset.chunks
     out = np.empty(
@@ -944,7 +974,7 @@ def read(
                 # Bounded by *bytes*, since chunk sizes vary hugely across files.
                 for batch in _batched(tasks, MAX_BYTES_IN_FLIGHT):
                     ranges = [(int(t[0].byte_offset), int(t[0].size)) for t in batch]
-                    raws = fetcher.fetch(ranges, on_bytes)
+                    raws = fetch(ranges, on_bytes)
                     list(pool.map(place, batch, raws))
 
     return out
