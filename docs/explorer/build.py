@@ -2,8 +2,9 @@
 
 Embeds reference values computed by the installed zea into
 ``pixel_grid_explorer.html`` and writes a standalone page to
-``docs/_static/pixel-grid-explorer.html``. Run from the repository root after changing
-the grid geometry of :class:`zea.Parameters` or the page itself::
+``docs/_static/pixel-grid-explorer.html``. The docs build (``docs/source/conf.py``) runs
+this on every HTML build, so the page is not committed. To preview the page without
+building the docs, run from the repository root::
 
     python docs/explorer/build.py
 """
@@ -11,6 +12,8 @@ the grid geometry of :class:`zea.Parameters` or the page itself::
 import json
 import sys
 from pathlib import Path
+
+import zea
 
 HERE = Path(__file__).parent
 TEMPLATE = HERE / "pixel_grid_explorer.html"
@@ -39,10 +42,16 @@ def render(reference):
 
 
 def main():
+    """Write the page to ``OUTPUT``, leaving the file untouched when nothing changed."""
     sys.path.insert(0, str(HERE))
     from make_reference import reference
 
-    OUTPUT.write_text(SKELETON.replace("{page}", render(reference())))
+    # Some reference cases deliberately build grids zea warns about.
+    with zea.log.suppress_warnings():
+        page = SKELETON.replace("{page}", render(reference()))
+    if OUTPUT.exists() and OUTPUT.read_text() == page:
+        return
+    OUTPUT.write_text(page)
     print(f"Wrote {OUTPUT}")
 
 
