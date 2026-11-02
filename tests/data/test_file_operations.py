@@ -7,6 +7,7 @@ from typing import Generator
 from unittest.mock import patch
 
 import h5py
+import keras
 import numpy as np
 import pytest
 
@@ -25,6 +26,7 @@ from zea.data.file_operations import (
 )
 from zea.data.spec import SINGLE_CHUNK_BYTES, Spec
 
+from ..helpers import is_on_gpu
 from . import generate_dummy_scan, generate_example_dataset
 
 HF_INPUT_PATH = "hf://zeahub/pytest/case_0.hdf5"
@@ -775,13 +777,12 @@ def test_decode_hadamard_file_operation(tmp_path):
 
     # decode_hadamard runs a matmul on the active Keras backend, and on an NVIDIA GPU
     # that defaults to TF32 (10 mantissa bits, so ~1e-3 relative error) rather than full
-    # float32. CI pins CUDA_VISIBLE_DEVICES="" and therefore never sees it, but a
-    # developer machine with a GPU does. The tolerance covers that reduced precision and
-    # is still three orders of magnitude tighter than any genuine decoding error, which
-    # would be O(10) on data of this scale.
-    np.testing.assert_allclose(
-        decoded, synthetic_aperture_data * hadamard_size, rtol=1e-2, atol=1e-2
-    )
+    # float32. The GPU tolerance covers that reduced precision and is still three orders
+    # of magnitude tighter than any genuine decoding error, which would be O(10) on data
+    # of this scale. decode_hadamard gets numpy input from the file, so it runs on the
+    # default device, which is where a fresh tensor lands too.
+    tol = 1e-2 if is_on_gpu(keras.ops.zeros(())) else 1e-5
+    np.testing.assert_allclose(decoded, synthetic_aperture_data * hadamard_size, rtol=tol, atol=tol)
     # Each decoded transmit activates a single participating channel, so the decoded
     # apodizations form an identity over the participating (first ``hadamard_size``) channels.
     np.testing.assert_array_equal(tx_apodizations, np.eye(hadamard_size, n_el, dtype=np.float32))
