@@ -43,7 +43,6 @@ from zea.func.ultrasound import directivity
 from zea.simulator import (
     _apply_elevation_slab,
     _resolve_element_height,
-    _resolve_element_width,
     _validate_scatter_exponent,
     _warn_if_elevation_extent,
     attenuate,
@@ -134,6 +133,8 @@ def simulate_rf_td(
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1), noiseless:
             the receive chain is :func:`zea.simulator.apply_receive_chain`.
     """
+    from zea.probes import _resolve_element_width
+
     element_width = _resolve_element_width(probe_geometry, element_width)
     element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     n_ax = int(n_ax)

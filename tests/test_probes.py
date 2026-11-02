@@ -2,13 +2,14 @@
 
 import os
 import tempfile
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from zea.data.file import File
 from zea.internal.registry import probe_registry
-from zea.probes import Probe
+from zea.probes import Probe, _resolve_element_width
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
@@ -118,6 +119,40 @@ def test_pitch_derived_from_probe_geometry():
     probe = Probe(probe_geometry=pg)
     with pytest.raises(ValueError, match="Cannot compute pitch: probe has fewer than 2 elements"):
         _ = probe.pitch
+
+
+def test_pitch_positive_for_descending_geometry():
+    """Elements ordered by descending x still give a positive pitch."""
+    pg = np.zeros((4, 3), dtype=np.float32)
+    pg[:, 0] = np.arange(4)[::-1] * 0.3e-3
+    assert Probe.get_pitch(pg) == pytest.approx(0.3e-3, rel=1e-4)
+
+
+def test_pitch_rejects_coinciding_elements():
+    """Coinciding element positions have no pitch."""
+    with pytest.raises(ValueError, match="element positions coincide"):
+        Probe.get_pitch(np.zeros((4, 3), dtype=np.float32))
+
+
+def test_resolve_element_width():
+    """An explicit element width is returned as is; otherwise 90% of the pitch."""
+    pg = np.zeros((4, 3), dtype=np.float32)
+    pg[:, 0] = np.arange(4) * 0.3e-3
+    assert _resolve_element_width(pg, 1e-3) == 1e-3
+    assert _resolve_element_width(pg, None) == pytest.approx(0.27e-3, rel=1e-4)
+
+
+def test_resolve_element_width_invalid_geometry():
+    """Inference from a geometry without a pitch raises a helpful error."""
+    with pytest.raises(ValueError, match="automatic estimation failed"):
+        _resolve_element_width(np.zeros((1, 3), dtype=np.float32), None)
+
+
+def test_resolve_element_width_unconvertible_geometry():
+    """Inference from geometry that cannot be converted to numpy raises a helpful error."""
+    with patch("zea.probes.ops.convert_to_numpy", side_effect=RuntimeError("traced")):
+        with pytest.raises(ValueError, match="traced/symbolic probe geometry"):
+            _resolve_element_width(np.zeros((4, 3), dtype=np.float32), None)
 
 
 def test_verasonics_c5_2v_curved_probe():

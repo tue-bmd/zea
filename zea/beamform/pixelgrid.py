@@ -196,7 +196,7 @@ def polar_pixel_grid(
 
     oris = np.array([0, 0, -distance_to_apex])
     oris = np.tile(oris, (num_polar_pixels, 1))
-    dirs_az = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
+    dirs_az = np.linspace(polar_limits[0], polar_limits[1], num_polar_pixels)
 
     dirs_el = np.zeros(num_polar_pixels)
     dirs = np.vstack((dirs_az, dirs_el)).T

@@ -195,6 +195,8 @@ def simulate_rf(
 
     n_tx = t0_delays.shape[0]
 
+    from zea.probes import _resolve_element_width
+
     element_width = _resolve_element_width(probe_geometry, element_width)
     element_height = _resolve_element_height(probe_geometry, element_width, element_height)
     _validate_lens(
@@ -458,33 +460,6 @@ def _validate_lens(
             f"lens_thickness {thickness:.2e} m is too thin to focus at {elevation_focus} m: the "
             f"lens needs at least {sag:.2e} m at the centre."
         )
-
-
-def _resolve_element_width(probe_geometry, element_width):
-    """Return the element width, inferring it from the probe pitch when not given."""
-    if element_width is not None:
-        return element_width
-    try:
-        geometry = ops.convert_to_numpy(probe_geometry)
-    except (RuntimeError, ValueError, TypeError) as exc:
-        raise ValueError(
-            "Element width is not provided, and automatic inference is not available for "
-            "traced/symbolic probe geometry (for example under JAX JIT or TensorFlow graph "
-            "mode). Please provide `element_width` explicitly in the scan/probe parameters."
-        ) from exc
-
-    try:
-        from zea.probes import Probe
-
-        pitch = Probe.get_pitch(geometry)
-    except (ValueError, IndexError, AttributeError) as exc:
-        raise ValueError(
-            "Element width is not provided and automatic estimation failed from probe "
-            "geometry. Please provide `element_width` explicitly or ensure the probe "
-            "geometry is a 1-D uniformly spaced linear array. "
-            f"Details: {exc}"
-        ) from exc
-    return pitch * 0.9  # 90% of the pitch
 
 
 def _resolve_element_height(probe_geometry, element_width, element_height, tol=1e-6):
