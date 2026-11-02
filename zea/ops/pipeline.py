@@ -1023,6 +1023,11 @@ class Pipeline:
             # Only convert keys the pipeline needs and that are not overridden,
             # so we avoid deriving unnecessary parameters.
             needs_keys = self.needs_keys - override_keys
+            overridden = {Parameters._RENAMED_PARAMS.get(key, key) for key in override_keys}
+            if overridden & {"rlims", "polar_limits"}:
+                # Overridden scan-conversion limits describe a polar image of their own,
+                # so the apex and output window derived for this grid do not apply.
+                needs_keys -= {"grid_apex", "extent"}
             with backend.device(_device):
                 params_dict = parameters.to_tensor(
                     include=list(needs_keys), keep_as_is=self.static_params

@@ -746,6 +746,38 @@ def test_pipeline_with_parameters():
     assert "n_tx" in result  # now we actually need to have n_tx in the result
 
 
+def test_scan_convert_deprecated_inputs_override_the_current_names():
+    """An old config's theta_range reaches ScanConvert next to the polar_limits derived by
+    Parameters, and overrides it instead of raising."""
+    img = keras.ops.ones((4, 8), dtype="float32")
+    scan_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
+    out = scan_op(data=img, rlims=(0.0, 1.0), polar_limits=(-0.3, 0.3), theta_range=(-0.5, 0.5))
+    np.testing.assert_allclose(out["polar_limits"], (-0.5, 0.5))
+
+
+@pytest.mark.parametrize("override", ["rlims", "rho_range", "polar_limits", "theta_range"])
+def test_prepare_parameters_drops_the_derived_window_for_overridden_limits(override):
+    """Overridden scan-conversion limits (also under their old names) describe a polar
+    image of their own, so the grid_apex and extent derived by Parameters are not passed."""
+    from zea.probes import create_curved_probe_geometry
+
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=0.05),
+        grid_type="polar",
+        polar_limits=(-0.3, 0.3),
+        zlims=(0.005, 0.07),
+        grid_size_z=64,
+        grid_size_x=32,
+        center_frequency=3.5e6,
+        sampling_frequency=20e6,
+        n_ax=4096,
+    )
+    pipeline = ops.Pipeline(operations=[ops.ScanConvert(jit_compile=False)])
+    assert {"grid_apex", "extent"} <= set(pipeline.prepare_parameters(parameters))
+    inputs = pipeline.prepare_parameters(parameters, **{override: (0.0, 1.0)})
+    assert "grid_apex" not in inputs and "extent" not in inputs
+
+
 """Pipeline build from config / json tests"""
 
 

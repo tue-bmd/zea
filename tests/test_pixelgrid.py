@@ -435,4 +435,6 @@ def test_polar_grid_distance_to_apex_is_deprecated():
     """The old keyword still works, as ``grid_apex=(0, 0, -distance_to_apex)``."""
     new = polar_pixel_grid((-0.3, 0.3), (0.0, 0.05), 8, 8, grid_apex=(0.0, 0.0, -0.02))
     old = polar_pixel_grid((-0.3, 0.3), (0.0, 0.05), 8, 8, distance_to_apex=0.02)
+    positional = polar_pixel_grid((-0.3, 0.3), (0.0, 0.05), 8, 8, 0.02)
+    np.testing.assert_allclose(positional, old)
     np.testing.assert_array_equal(old, new)

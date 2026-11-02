@@ -504,11 +504,27 @@ class ScanConvert(Operation):
                 "Pre-compute coordinates and pass them explicitly, or disable JIT."
             )
 
+        # The deprecated names only come from explicit inputs (e.g. an old config), which
+        # override the values Parameters derives under the current names, as they used to.
+        limits = {
+            "rlims": rlims,
+            "polar_limits": polar_limits,
+            "elevation_tilt_limits": elevation_tilt_limits,
+        }
+        for old, new in (
+            ("rho_range", "rlims"),
+            ("theta_range", "polar_limits"),
+            ("phi_range", "elevation_tilt_limits"),
+        ):
+            if kwargs.get(old) is not None:
+                log.deprecated(f"ScanConvert input `{old}` is deprecated, use `{new}` instead.")
+                limits[new] = kwargs[old]
+
         data_out, parameters = scan_convert(
             data,
-            rlims,
-            polar_limits,
-            elevation_tilt_limits,
+            limits["rlims"],
+            limits["polar_limits"],
+            limits["elevation_tilt_limits"],
             resolution,
             coordinates,
             fill_value,
@@ -517,10 +533,6 @@ class ScanConvert(Operation):
             grid_apex=grid_apex,
             extent=extent,
             lateral_tilt_limits=lateral_tilt_limits,
-            # Deprecated names, mapped onto the ones above by scan_convert
-            rho_range=kwargs.get("rho_range"),
-            theta_range=kwargs.get("theta_range"),
-            phi_range=kwargs.get("phi_range"),
         )
 
         return {self.output_key: data_out, **parameters}

@@ -376,6 +376,11 @@ class Parameters(BaseParameters):
         log.deprecated(f"Parameter `{name}` is deprecated, use `{new}` instead.")
         return new
 
+    @classmethod
+    def _ignore_removed(cls, name):
+        """Warn that the removed parameter ``name`` is ignored, so old configs still load."""
+        log.deprecated(f"{cls._REMOVED_PARAMS[name]} The given value is ignored.")
+
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
     VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
@@ -413,7 +418,8 @@ class Parameters(BaseParameters):
         merged = {}
         for key, value in {**(dict(params) if params else {}), **kwargs}.items():
             if key in self._REMOVED_PARAMS:
-                raise ValueError(self._REMOVED_PARAMS[key])
+                self._ignore_removed(key)
+                continue
             merged[self._renamed(key)] = value
         super().update(merged, force=force)
 
@@ -440,27 +446,55 @@ class Parameters(BaseParameters):
             return np.zeros((self.n_tx, 3))
         return self.transmit_origins
 
-    def _transmit_or_probe_apex(self):
+    @cache_with_dependencies(
+        "polar_angles", optional=("probe_geometry", "focus_distances", "transmit_origins")
+    )
+    def _transmit_apex(self):
         """Distance [m] behind the middle of the array of the point the transmits fan out
-        from or, when they define none, of a curved array's centre of curvature.
-
-        ``None`` when neither defines one. See
+        from. ``None`` when they define none. See
         :func:`~zea.beamform.geometry.transmit_apex_distance`.
         """
         angles = self.polar_angles
         probe_geometry = self._params.get("probe_geometry")
-        if angles is not None and probe_geometry is not None:
-            distance = transmit_apex_distance(
-                self._transmit_origins_or_zeros(),
-                angles,
-                self.focus_distances,
-                tol=0.5 * element_pitch(probe_geometry),
-            )
-            if distance is not None:
-                return distance
-        if np.isfinite(self.radius_of_curvature):
-            return float(self.radius_of_curvature)
-        return None
+        if angles is None or probe_geometry is None:
+            return None
+        return transmit_apex_distance(
+            self._transmit_origins_or_zeros(),
+            angles,
+            self.focus_distances,
+            tol=0.5 * element_pitch(probe_geometry),
+        )
+
+    def _transmit_or_probe_apex(self):
+        """Distance [m] behind the middle of the array of the point the transmits fan out
+        from or, when they define none, of a curved array's centre of curvature.
+
+        ``None`` when neither defines one.
+        """
+        distance = self._transmit_apex
+        if distance is None and np.isfinite(self.radius_of_curvature):
+            distance = float(self.radius_of_curvature)
+        return distance
+
+    @cache_with_dependencies(
+        "probe_geometry",
+        "radius_of_curvature",
+        optional=("polar_angles", "focus_distances", "transmit_origins"),
+    )
+    def _edge_rays(self):
+        """The ``(points, directions)`` of the rays bounding what each transmit insonifies
+        (see :func:`~zea.beamform.geometry.insonified_edge_rays`). Missing polar angles
+        count as zeros."""
+        polar_angles = self.polar_angles
+        if polar_angles is None:
+            polar_angles = np.zeros_like(self.focus_distances)
+        return insonified_edge_rays(
+            self.probe_geometry,
+            self._transmit_origins_or_zeros(),
+            polar_angles,
+            self.focus_distances,
+            element_normals=self._element_normals(),
+        )
 
     def _element_normals(self):
         """Exact element normals for a curved array, pointing away from its centre of
@@ -474,7 +508,13 @@ class Parameters(BaseParameters):
     @cache_with_dependencies(
         "polar_limits",
         "radius_of_curvature",
-        optional=("probe_geometry", "polar_angles", "focus_distances", "transmit_origins"),
+        optional=(
+            "probe_geometry",
+            "polar_angles",
+            "focus_distances",
+            "transmit_origins",
+            "_derived_polar_sector",
+        ),
     )
     def grid_apex(self):
         """The point ``(x, y, z)`` [m] a polar grid fans out from, of shape (3,).
@@ -490,14 +530,19 @@ class Parameters(BaseParameters):
            transmits along a curved array's normals.
         2. Unsteered diverging waves that share one virtual source: that source.
         3. A curved array: its centre of curvature (see :attr:`radius_of_curvature`).
-        4. A flat array with a sector (non-zero :attr:`polar_limits`): the virtual apex
-           whose sector edges pass through the ends of the array,
-           ``d = (aperture / 2) / tan(max |polar_limits|)``.
-        5. Otherwise the middle of the array.
+        4. A flat array whose :attr:`polar_limits` are derived: the apex they are seen
+           from, where the outermost edge ray, traced back from its array end, crosses the
+           central axis. The middle of the array when the edge rays are all parallel to it.
+        5. A flat array with a sector (explicit or ``polar_margin``-widened, non-zero
+           :attr:`polar_limits`): the virtual apex whose sector edges pass through the ends
+           of the array, ``d = (aperture / 2) / tan(max |polar_limits|)``.
+        6. Otherwise the middle of the array.
 
         Missing ``transmit_origins`` count as zeros, as in the beamformer.
         """
         distance = self._transmit_or_probe_apex()
+        if distance is None and self._params.get("polar_limits") is None:
+            distance = self._derived_polar_sector[1]
         if distance is None:
             limits = self.polar_limits
             max_angle = 0.0 if limits is None else float(np.max(np.abs(limits)))
@@ -622,17 +667,21 @@ class Parameters(BaseParameters):
                     "A polar scanline grid needs steered transmits whose axes meet in one "
                     "point, but these are unsteered and parallel. Use grid_type='cartesian'."
                 )
-            apex = transmit_apex_distance(
-                self.transmit_origins,
-                polar_angles,
-                focus,
-                tol=0.5 * element_pitch(self.probe_geometry),
-            )
-            if apex is None:
+            if self._transmit_apex is None:
                 raise ValueError(
                     "A polar scanline grid needs transmit axes that meet in one point (the "
                     "grid apex), but these do not. Use a regular grid "
                     "(enable_scanline=False)."
+                )
+            # Scan conversion spreads the columns evenly over polar_limits, from the first
+            # transmit's angle to the last one's.
+            steps = np.diff(np.asarray(polar_angles, dtype=np.float64))
+            if len(steps) and not np.allclose(steps, steps[0], rtol=1e-3, atol=1e-9):
+                raise ValueError(
+                    "A polar scanline grid needs evenly spaced transmit angles, in ascending "
+                    "or descending order, since scan conversion places its columns evenly "
+                    "between the first and last angle. Select such a subset with "
+                    "selected_transmits, or use a regular grid (enable_scanline=False)."
                 )
         return polar_angles
 
@@ -794,6 +843,7 @@ class Parameters(BaseParameters):
             "polar_angles",
             "focus_distances",
             "transmit_origins",
+            "_edge_rays",
         ),
     )
     def xlims(self):
@@ -825,24 +875,16 @@ class Parameters(BaseParameters):
             x = [float(apex[0]) + r * np.sin(float(t)) for r in radii for t in limits]
             return (min(x), max(x))
 
-        focus_distances = self.focus_distances
-        polar_angles = self.polar_angles
-        if polar_angles is None:
-            polar_angles = np.zeros_like(focus_distances)
-        origins = self._transmit_origins_or_zeros()
-
         if self.enable_scanline:
+            focus_distances = self.focus_distances
+            polar_angles = self.polar_angles
+            if polar_angles is None:
+                polar_angles = np.zeros_like(focus_distances)
             focus = np.where(np.isfinite(focus_distances), focus_distances, 0.0)
-            columns = origins[:, 0] + focus * np.sin(polar_angles)
+            columns = self._transmit_origins_or_zeros()[:, 0] + focus * np.sin(polar_angles)
             return (float(np.min(columns)), float(np.max(columns)))
 
-        points, directions = insonified_edge_rays(
-            self.probe_geometry,
-            origins,
-            polar_angles,
-            focus_distances,
-            element_normals=self._element_normals(),
-        )
+        points, directions = self._edge_rays
         edges_x = rays_at_depth(points, directions, float(np.max(self.zlims)))[:, 0]
         x = np.concatenate([probe_x, edges_x[np.isfinite(edges_x)]])
         return (float(np.min(x)), float(np.max(x)))
@@ -1106,18 +1148,7 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies(
-        "polar_angles",
-        "enable_scanline",
-        optional=(
-            "polar_margin",
-            "probe_geometry",
-            "zlims",
-            "focus_distances",
-            "transmit_origins",
-            "radius_of_curvature",
-        ),
-    )
+    @cache_with_dependencies("polar_angles", "enable_scanline", optional=("_derived_polar_sector",))
     def polar_limits(self):
         """The angles [rad] of the first and last column of a polar grid.
 
@@ -1132,8 +1163,8 @@ class Parameters(BaseParameters):
         the central axis, so the sector covers each region from the array down.
         Set :attr:`polar_margin` to widen by a fixed angle instead.
 
-        With ``enable_scanline=True`` this is exactly the range of the transmit angles,
-        since the columns are the transmits; an explicit value is ignored there.
+        With ``enable_scanline=True`` this is the angle of the first and the last transmit,
+        since the columns are the transmits in order; an explicit value is ignored there.
         """
         value = self._params.get("polar_limits")
         angles = self.polar_angles
@@ -1144,14 +1175,36 @@ class Parameters(BaseParameters):
                     "scanline grid follow the transmit angles.",
                     key=(id(self), "polar_limits_scanline"),
                 )
-            return (float(np.min(angles)), float(np.max(angles)))
-        if value is not None or angles is None:
+            return (float(angles[0]), float(angles[-1]))
+        if value is not None:
             return value
+        return self._derived_polar_sector[0]
+
+    @cache_with_dependencies(
+        "polar_angles",
+        optional=(
+            "polar_margin",
+            "probe_geometry",
+            "zlims",
+            "focus_distances",
+            "transmit_origins",
+            "radius_of_curvature",
+            "_edge_rays",
+        ),
+    )
+    def _derived_polar_sector(self):
+        """The default :attr:`polar_limits` and the apex distance [m] behind the middle of
+        the array they are seen from, as ``(limits, apex)``. ``apex`` is ``None`` when the
+        limits are not seen from a point (no edge rays, or a fixed ``polar_margin``), and
+        both are ``None`` without transmit angles."""
+        angles = self.polar_angles
+        if angles is None:
+            return None, None
 
         low, high = float(np.min(angles)), float(np.max(angles))
         margin = self._params.get("polar_margin")
         if margin is not None:
-            return (low - float(margin), high + float(margin))
+            return (low - float(margin), high + float(margin)), None
 
         probe_geometry = self._params.get("probe_geometry")
         try:
@@ -1159,15 +1212,9 @@ class Parameters(BaseParameters):
         except MissingDependencyError:
             depth = None
         if probe_geometry is None or depth is None:
-            return (low, high)
+            return (low, high), None
 
-        points, directions = insonified_edge_rays(
-            probe_geometry,
-            self._transmit_origins_or_zeros(),
-            angles,
-            self.focus_distances,
-            element_normals=self._element_normals(),
-        )
+        points, directions = self._edge_rays
         # Seen from the apex the transmits define or, on a flat array, from the virtual apex
         # whose sector edge runs along the outermost edge ray through the array end (where
         # grid_apex places it). Without either, from the array middle.
@@ -1183,10 +1230,11 @@ class Parameters(BaseParameters):
             reached = np.concatenate([points, reached])
         edge_angles = np.arctan2(reached[:, 0], reached[:, 1] + apex)
         edge_angles = edge_angles[np.isfinite(edge_angles)]
-        return (
+        limits = (
             float(np.min(edge_angles, initial=low)),
             float(np.max(edge_angles, initial=high)),
         )
+        return limits, float(apex)
 
     @cache_with_dependencies("selected_transmits", "n_tx")
     def azimuth_angles(self):
@@ -1569,7 +1617,8 @@ class Parameters(BaseParameters):
 
     def __setattr__(self, name: str, value):
         if name in self._REMOVED_PARAMS:
-            raise ValueError(self._REMOVED_PARAMS[name])
+            self._ignore_removed(name)
+            return None
         name = self._renamed(name)
         if name == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic

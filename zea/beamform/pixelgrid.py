@@ -165,9 +165,10 @@ def polar_pixel_grid(
     zlims,
     num_radial_pixels: int,
     num_polar_pixels: int,
+    distance_to_apex=None,
+    *,
     grid_apex=(0.0, 0.0, 0.0),
     polar_angles=None,
-    distance_to_apex=None,
 ):
     """Generate a polar grid.
 

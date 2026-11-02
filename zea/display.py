@@ -10,6 +10,7 @@ from PIL import Image
 
 from zea import log
 from zea.func.tensor import translate
+from zea.internal.utils import deprecated_alias
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 # `zea.func.ultrasound.log_compress` maps zeros to 20 * log10(1e-16) = -320 dB. Such pixels
@@ -426,26 +427,16 @@ def _deprecated_distance_to_apex(distance_to_apex, grid_apex, caller):
     return (0.0, 0.0, -distance_to_apex)
 
 
-def _deprecated_alias(value, old_value, old, new, caller):
-    """Map the deprecated argument ``old`` onto its replacement ``new``."""
-    if old_value is None:
-        return value
-    if value is not None:
-        raise TypeError(f"{caller}() got both {new!r} and its deprecated alias {old!r}.")
-    log.deprecated(f"{caller}({old}=...) is deprecated, use {new}=... instead.")
-    return old_value
-
-
 def compute_scan_convert_2d_coordinates(
     image_shape,
     rlims: Tuple[float, float] | None = None,
     polar_limits: Tuple[float, float] | None = None,
     resolution: Union[float, None] = None,
     dtype: str = "float32",
-    grid_apex=None,
-    extent=None,
     distance_to_apex=None,
     *,
+    grid_apex=None,
+    extent=None,
     rho_range=None,
     theta_range=None,
 ):
@@ -482,8 +473,8 @@ def compute_scan_convert_2d_coordinates(
         ``z_lim``, ``rlims``, ``polar_limits``, ``d_rho`` and ``d_theta``.
     """
     caller = "compute_scan_convert_2d_coordinates"
-    rlims = _deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
-    polar_limits = _deprecated_alias(
+    rlims = deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
+    polar_limits = deprecated_alias(
         polar_limits, theta_range, "theta_range", "polar_limits", caller
     )
     if rlims is None or polar_limits is None:
@@ -548,10 +539,10 @@ def scan_convert_2d(
     coordinates: Union[None, np.ndarray] = None,
     fill_value: float = 0.0,
     order: int = 1,
-    grid_apex=None,
-    extent=None,
     distance_to_apex=None,
     *,
+    grid_apex=None,
+    extent=None,
     rho_range=None,
     theta_range=None,
     **kwargs,
@@ -604,8 +595,8 @@ def scan_convert_2d(
     """
     assert "float" in ops.dtype(image), "Image must be float type"
 
-    rlims = _deprecated_alias(rlims, rho_range, "rho_range", "rlims", "scan_convert_2d")
-    polar_limits = _deprecated_alias(
+    rlims = deprecated_alias(rlims, rho_range, "rho_range", "rlims", "scan_convert_2d")
+    polar_limits = deprecated_alias(
         polar_limits, theta_range, "theta_range", "polar_limits", "scan_convert_2d"
     )
     parameters = {}
@@ -663,11 +654,11 @@ def compute_scan_convert_3d_coordinates(
         phi_range (tuple, optional): Deprecated, use ``elevation_tilt_limits``.
     """
     caller = "compute_scan_convert_3d_coordinates"
-    rlims = _deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
-    lateral_tilt_limits = _deprecated_alias(
+    rlims = deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
+    lateral_tilt_limits = deprecated_alias(
         lateral_tilt_limits, theta_range, "theta_range", "lateral_tilt_limits", caller
     )
-    elevation_tilt_limits = _deprecated_alias(
+    elevation_tilt_limits = deprecated_alias(
         elevation_tilt_limits, phi_range, "phi_range", "elevation_tilt_limits", caller
     )
     if rlims is None or lateral_tilt_limits is None or elevation_tilt_limits is None:
@@ -803,11 +794,11 @@ def scan_convert_3d(
     assert "float" in ops.dtype(image), "Image must be float type"
 
     caller = "scan_convert_3d"
-    rlims = _deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
-    lateral_tilt_limits = _deprecated_alias(
+    rlims = deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
+    lateral_tilt_limits = deprecated_alias(
         lateral_tilt_limits, theta_range, "theta_range", "lateral_tilt_limits", caller
     )
-    elevation_tilt_limits = _deprecated_alias(
+    elevation_tilt_limits = deprecated_alias(
         elevation_tilt_limits, phi_range, "phi_range", "elevation_tilt_limits", caller
     )
     parameters = {}
@@ -843,10 +834,10 @@ def scan_convert(
     fill_value: float = 0.0,
     order: int = 1,
     with_batch_dim: bool = False,
-    grid_apex=None,
-    extent=None,
     distance_to_apex=None,
     *,
+    grid_apex=None,
+    extent=None,
     lateral_tilt_limits: Tuple[float, float] | None = None,
     rho_range=None,
     theta_range=None,
@@ -864,11 +855,11 @@ def scan_convert(
     ``rho_range``, ``theta_range`` and ``phi_range`` are deprecated aliases of ``rlims``,
     ``polar_limits`` and ``elevation_tilt_limits``.
     """
-    rlims = _deprecated_alias(rlims, rho_range, "rho_range", "rlims", "scan_convert")
-    polar_limits = _deprecated_alias(
+    rlims = deprecated_alias(rlims, rho_range, "rho_range", "rlims", "scan_convert")
+    polar_limits = deprecated_alias(
         polar_limits, theta_range, "theta_range", "polar_limits", "scan_convert"
     )
-    elevation_tilt_limits = _deprecated_alias(
+    elevation_tilt_limits = deprecated_alias(
         elevation_tilt_limits, phi_range, "phi_range", "elevation_tilt_limits", "scan_convert"
     )
     if len(image.shape) == 2 + int(with_batch_dim):

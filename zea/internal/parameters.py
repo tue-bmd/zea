@@ -580,8 +580,16 @@ class BaseParameters:
 
     @classmethod
     def get_properties(cls):
-        """Get all properties of the class, including those with dependencies."""
-        return [name for name, value in inspect.getmembers(cls) if isinstance(value, property)]
+        """Get all public properties of the class, including those with dependencies.
+
+        Private (``_``-prefixed) properties are implementation details, shared between
+        computed properties; they are not parameters, so e.g. :meth:`to_tensor` skips them.
+        """
+        return [
+            name
+            for name, value in inspect.getmembers(cls)
+            if isinstance(value, property) and not name.startswith("_")
+        ]
 
     @classmethod
     def get_properties_with_dependencies(cls):

@@ -978,15 +978,29 @@ def test_grid_apex_is_a_virtual_apex_for_an_overridden_sector():
 
 
 def test_distance_to_apex_is_no_longer_a_parameter():
-    with pytest.raises(ValueError, match="grid_apex"):
-        Parameters(distance_to_apex=0.01)
-    parameters = Parameters()
-    with pytest.raises(ValueError, match="grid_apex"):
-        parameters.distance_to_apex = 0.01
-    with pytest.raises(ValueError, match="grid_apex"):
-        parameters.update(distance_to_apex=0.01)
+    """Old configs that still set it load, with the value ignored."""
+    parameters = Parameters(distance_to_apex=0.01)
+    parameters.distance_to_apex = 0.01
+    parameters.update(distance_to_apex=0.01)
+    assert "distance_to_apex" not in parameters._params
+    assert "distance_to_apex" not in parameters._custom_params
     with pytest.raises(AttributeError, match="grid_apex"):
         _ = parameters.distance_to_apex
+
+
+def test_grid_apex_matches_the_derived_sector_of_unsteered_plane_waves():
+    """Unsteered plane waves on a flat array: the edge rays run straight down, so the sector
+    is seen from the array middle and spans what the waves insonify, the array width."""
+    parameters = _phased(n_tx=3, focus=np.inf, span_deg=0.0)
+    np.testing.assert_array_equal(parameters.grid_apex, (0.0, 0.0, 0.0))
+    # Not the 1.8x wider sector of a virtual apex at the imaging depth behind the array
+    assert 0.9 * HALF_APERTURE < parameters.xlims[1] <= HALF_APERTURE * (1 + 1e-5)
+
+
+def test_private_helpers_are_not_parameters():
+    """Shared private helpers (e.g. ``_edge_rays``) are not exported by ``to_tensor``."""
+    assert "_edge_rays" in vars(Parameters)
+    assert not [name for name in Parameters.get_properties() if name.startswith("_")]
 
 
 def test_renamed_scan_conversion_parameters():
@@ -1126,6 +1140,23 @@ def test_polar_scanline_rows_sit_at_one_radius_from_the_apex():
     # Columns follow the transmit axes through their origins
     angles = np.arctan2(grid[..., 0] - apex[0], grid[..., 2] - apex[2])
     np.testing.assert_allclose(angles[-1], parameters.polar_angles, atol=1e-6)
+
+
+def test_polar_scanline_limits_follow_the_transmit_order():
+    """Descending transmit angles: column 0 is the first transmit, so scan conversion must
+    place it at the first angle, not at the smallest."""
+    parameters = _phased(n_tx=9, enable_scanline=True, grid_size_z=32)
+    parameters.polar_angles = parameters.polar_angles[::-1].copy()
+    angles = parameters.polar_angles
+    assert parameters.polar_limits == pytest.approx((angles[0], angles[-1]))
+    assert parameters.grid[-1, 0, 0] > 0  # the first column is on the +x side
+
+
+def test_polar_scanline_needs_evenly_spaced_angles():
+    parameters = _phased(n_tx=9, enable_scanline=True)
+    parameters.selected_transmits = [0, 1, 2, 5, 8]
+    with pytest.raises(ValueError, match="evenly spaced"):
+        _ = parameters.grid
 
 
 @pytest.mark.parametrize("focus", [np.inf, -0.02, 0.0])

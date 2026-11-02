@@ -14,7 +14,8 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 from scipy.ndimage import zoom
 from skimage import measure
 
-from zea.display import _deprecated_alias, frustum_convert_rtp2xyz
+from zea.display import frustum_convert_rtp2xyz
+from zea.internal.utils import deprecated_alias
 
 DEFAULT_STYLE: str = str(importlib.resources.files("zea") / "zea_darkmode.mplstyle")
 
@@ -511,11 +512,11 @@ def plot_frustum_vertices(
             ... )
     """
     caller = "plot_frustum_vertices"
-    rho_lims = _deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
-    theta_lims = _deprecated_alias(
+    rho_lims = deprecated_alias(rlims, rho_range, "rho_range", "rlims", caller)
+    theta_lims = deprecated_alias(
         lateral_tilt_limits, theta_range, "theta_range", "lateral_tilt_limits", caller
     )
-    phi_lims = _deprecated_alias(
+    phi_lims = deprecated_alias(
         elevation_tilt_limits, phi_range, "phi_range", "elevation_tilt_limits", caller
     )
     if rho_lims is None or theta_lims is None or phi_lims is None:
