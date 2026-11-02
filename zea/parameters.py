@@ -1153,14 +1153,11 @@ class Parameters(BaseParameters):
         """The angles [rad] of the first and last column of a polar grid.
 
         If not explicitly provided, the range of the transmit angles (:attr:`polar_angles`),
-        widened on each side to cover what the transmits insonify down to the deepest pixel,
-        ``zlims[1]``, as seen from :attr:`grid_apex`. Each transmit's region is bounded by
-        two edge rays (see :func:`~zea.beamform.geometry.insonified_edge_rays`): a focused
-        transmit adds no margin, a plane wave adds the spread from the ends of the array,
-        and a diverging wave the spread from its virtual source through the ends of the
-        array. On a flat array whose transmits define no apex (plane or diverging waves),
-        the apex is where the outermost edge ray, traced back from its array end, crosses
-        the central axis, so the sector covers each region from the array down.
+        widened on each side to cover the region each transmit insonifies down to
+        ``zlims[1]``, as seen from :attr:`grid_apex` (see
+        :func:`~zea.beamform.geometry.insonified_edge_rays`). Focused transmits add no
+        margin. For plane or diverging waves on a flat array, neither of which defines an
+        apex, the apex is where the outermost edge ray crosses the central axis.
         Set :attr:`polar_margin` to widen by a fixed angle instead.
 
         With ``enable_scanline=True`` this is the angle of the first and the last transmit,
