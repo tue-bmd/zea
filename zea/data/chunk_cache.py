@@ -131,6 +131,7 @@ class CachedFile:
         self._file = fileobj
         self._cache = cache
         self._block = block_size or getattr(fileobj, "blocksize", None) or _HF_STREAM_BLOCK_SIZE
+        self.blocksize = self._block
         self._pos = 0
         self.size = fileobj.size
         #: Passed through: this is where the chunk fetcher reads the file's content hash from.

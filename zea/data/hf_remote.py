@@ -313,18 +313,28 @@ class RemoteFile:
         return data
 
     def read_at(self, offset: int, size: int) -> bytes:
-        """Read ``size`` bytes at ``offset`` through the block cache, without moving the file
-        position. Safe to call from several threads.
+        """Read ``size`` bytes at ``offset`` without moving the file position.
+
+        Safe to call from several threads: reads whole blocks through :class:`_SharedBlocks`,
+        not through the fsspec cache, which may keep state per read (e.g. ``"readahead"``).
         """
         end = min(self.size, offset + size)
-        if end <= offset:
-            return b""
-        return self._cache._fetch(offset, end)
+        out = bytearray()
+        pos = offset
+        while pos < end:
+            start = pos - pos % self.blocksize
+            block = self._fetch(start, min(start + self.blocksize, self.size))
+            out += block[pos - start : end - start]
+            pos = start + len(block)
+        return bytes(out)
 
     def read(self, length: int = -1) -> bytes:
         if length is None or length < 0:
             length = self.size - self._pos
-        data = self.read_at(self._pos, length)
+        end = min(self.size, self._pos + length)
+        if end <= self._pos:
+            return b""
+        data = self._cache._fetch(self._pos, end)
         self._pos += len(data)
         return data
 

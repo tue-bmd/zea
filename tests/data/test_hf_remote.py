@@ -233,3 +233,45 @@ def test_open_uses_cached_first_block(small_cdn):
     with File(HF_PATH, progress=False) as remote:
         remote[RAW].shape
     assert small_cdn.server.count == before
+
+
+def test_small_reads_of_large_chunks_stay_one_request(small_cdn):
+    """A small read whose chunk spans several blocks is one request, not one per block."""
+    with File(HF_PATH, progress=False, block_size=1024) as remote, File(small_cdn.path) as local:
+        dset = remote[RAW]
+        assert dset.id.get_chunk_info(0).size > 4 * 1024
+        before = small_cdn.server.count
+        got = chunk_reader.read(dset, 0, remote._chunk_fetcher)
+        np.testing.assert_array_equal(got, local[RAW][0])
+        assert small_cdn.server.count - before == dset.id.get_num_chunks() // dset.shape[0]
+
+
+def test_read_at_bypasses_the_fsspec_cache(small_cdn):
+    """Positional reads go through the locked shared blocks, never the per-handle fsspec
+    cache: some cache types keep state per read (e.g. "readahead"), which concurrent
+    reads would corrupt."""
+    expected = small_cdn.path.read_bytes()
+    stream = hf_remote.open_remote(HF_PATH, block_size=4096, cache_type="readahead")
+
+    def unsafe(*args):
+        raise AssertionError("read_at went through the fsspec cache")
+
+    stream._cache._fetch = unsafe
+    for offset, size in [(0, 1), (100, 5000), (4095, 2), (len(expected) - 10, 50)]:
+        assert stream.read_at(offset, size) == expected[offset : offset + size]
+
+
+def test_no_prefetch_when_nothing_keeps_the_block(small_cdn, monkeypatch):
+    """With cache_type="none" and no chunk cache, prefetching the first block on open would
+    be a request nothing reuses."""
+    calls = []
+    original = hf_remote.RemoteFile.read_at
+    monkeypatch.setattr(
+        hf_remote.RemoteFile, "read_at", lambda self, *a: calls.append(a) or original(self, *a)
+    )
+    with File(HF_PATH, progress=False, cache=False, cache_type="none") as remote:
+        remote[RAW].shape
+    assert calls == []
+    with File(HF_PATH, progress=False, cache=False) as remote:
+        remote[RAW].shape
+    assert calls == [(0, 1)]

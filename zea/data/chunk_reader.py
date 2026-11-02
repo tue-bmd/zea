@@ -495,20 +495,27 @@ class HTTPFetcher(Fetcher):
     def fetch_small(
         self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None
     ) -> list[bytes]:
-        """Serve a small read from the blocks of :attr:`blocks`, like h5py would.
+        """Serve the chunks of a small read that are smaller than a block from the blocks of
+        :attr:`blocks`, like h5py would.
 
         Small chunks are often many to a block (e.g. ~70 frames per 1 MiB), so a run of small
         reads then costs one request per block instead of one per read, and the blocks land in
-        the same in-memory and on-disk caches h5py's own reads use.
+        the same in-memory and on-disk caches h5py's own reads use. Larger chunks (e.g. one
+        transmit stored in a 7 MB chunk) go through :meth:`fetch`, as one request instead of a
+        request per block.
         """
         if self.blocks is None:
             return self.fetch(ranges, on_bytes)
-        out = []
-        for offset, size in ranges:
-            out.append(self.blocks.read_at(int(offset), int(size)))
-            if on_bytes is not None:
-                on_bytes(int(size))
-        return out
+        out: list[bytes | None] = [None] * len(ranges)
+        large = [i for i, (_, size) in enumerate(ranges) if size >= self.blocks.blocksize]
+        for i, data in zip(large, self.fetch([ranges[i] for i in large], on_bytes)):
+            out[i] = data
+        for i, (offset, size) in enumerate(ranges):
+            if out[i] is None:
+                out[i] = self.blocks.read_at(int(offset), int(size))
+                if on_bytes is not None:
+                    on_bytes(int(size))
+        return cast(list[bytes], out)
 
     def read_range(self, offset: int, size: int) -> bytes:
         """Fetch one range without the chunk cache, merging or byte counting.
