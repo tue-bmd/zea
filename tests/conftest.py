@@ -12,6 +12,13 @@ from pathlib import Path
 # test_notebooks.py, which would otherwise pick up an interactive backend from the shell.
 os.environ["MPLBACKEND"] = "Agg"
 
+# Hide the GPUs before any backend initializes CUDA: init_device("cpu") below hides them too,
+# but that is a no-op once a backend has claimed them.
+_TEST_DEVICE = os.environ.get("ZEA_TEST_DEVICE", "auto:1")
+if _TEST_DEVICE == "cpu":
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["JAX_PLATFORMS"] = "cpu"
+
 import pytest  # noqa: E402
 
 from .data import generate_example_dataset  # noqa: E402
@@ -45,7 +52,7 @@ def _gpu_available() -> bool:
 
 
 # must be before importing anything that may call init_device()
-_GPU_AVAILABLE = _gpu_available()
+_GPU_AVAILABLE = _TEST_DEVICE != "cpu" and _gpu_available()
 
 # Warm up jax's GPU backend while all GPUs are still visible. If the first init happens when
 # a test has hidden the GPUs, jax permanently falls back to CPU.
@@ -63,8 +70,7 @@ if _GPU_AVAILABLE:
 # they remain free to select their own backend. See tests/__init__.py for details.
 from zea.internal.device import init_device  # noqa: E402
 
-device = os.environ.get("ZEA_TEST_DEVICE", "auto:1")
-device = init_device(device=device, allow_preallocate=False)
+device = init_device(device=_TEST_DEVICE, allow_preallocate=False)
 
 
 from .backend_utils import (  # noqa: E402
