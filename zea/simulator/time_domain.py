@@ -127,20 +127,20 @@ def simulate_rf_td(
     spike_maps = [ops.zeros((n_ax, n_el), dtype="float32") for _ in range(n_tx)]
     for start in range(0, n_scat, chunk_size):
         stop = min(start + chunk_size, n_scat)
-        base_gain, two_way_time = _scatterer_response(
+        tx_gain, rx_gain, travel_time = _scatterer_response(
             positions[start:stop], magnitudes[start:stop], probe, medium, center_frequency
         )
         for tx in range(n_tx):
             spike_maps[tx] = spike_maps[tx] + _simulate_transmit(
-                base_gain,
-                two_way_time,
+                tx_gain,
+                rx_gain,
+                travel_time,
                 t0_delays[tx],
                 initial_times[tx],
                 tx_apodizations[tx],
                 t_peak[tx],
                 sampling_frequency,
                 n_ax,
-                n_el,
             )
 
     parts = [
@@ -151,32 +151,38 @@ def simulate_rf_td(
 
 
 def _simulate_transmit(
-    base_gain,
-    two_way_time,
+    tx_gain,
+    rx_gain,
+    travel_time,
     t0_delays,
     initial_time,
     tx_apodization,
     t_peak,
     sampling_frequency,
     n_ax,
-    n_el,
 ):
     """Build the (n_ax, n_el) spike map for a single transmit event."""
-    gain = base_gain * tx_apodization[None, :, None]
     # The pulse is zero-centered, so t_peak shifts it as in simulate_rf.
-    tau = two_way_time + t0_delays[None, :, None] - initial_time + t_peak
-    sample_positions = tau * sampling_frequency
-    return _scatter_spike_map(sample_positions, gain, n_ax, n_el)
+    tx_samples = (travel_time + t0_delays[None] - initial_time + t_peak) * sampling_frequency
+    rx_samples = travel_time * sampling_frequency
+    return _scatter_spike_map(tx_samples, tx_gain * tx_apodization[None], rx_samples, rx_gain, n_ax)
 
 
 def _scatterer_response(positions, magnitudes, probe, medium, center_frequency):
-    """Compute the transmit-independent gain and two-way travel time tensors.
+    """Compute the transmit-independent one-way gains and travel time.
+
+    Every term of a contribution factors into a transmit and a receive element part
+    (directivity, spreading and the attenuation of the two-way path), so the
+    (n_scat, n_tx_el, n_rx_el) gain is the outer product of the two and the two-way time
+    their sum; :func:`_scatter_spike_map` forms both inside its kernel.
 
     Returns:
-        base_gain (array-like): The (n_scat, n_tx_el, n_rx_el) amplitude of each
-            scatterer contribution, excluding the per-transmit apodization.
-        two_way_time (array-like): The (n_scat, n_tx_el, n_rx_el) round-trip travel
-            time [s], excluding transmit delays and initial times.
+        tx_gain (array-like): The (n_scat, n_el) amplitude from each transmit element to
+            each scatterer, excluding the per-transmit apodization.
+        rx_gain (array-like): The (n_scat, n_el) amplitude from each scatterer to each
+            receive element, including the scatterer magnitude.
+        travel_time (array-like): The (n_scat, n_el) one-way travel time [s] between each
+            scatterer and element, excluding transmit delays and initial times.
     """
     # Through a lens, the medium distance with the travel time of the refracted path.
     physical_distance = medium.sound_speed * _one_way_time(
@@ -191,19 +197,16 @@ def _scatterer_response(positions, magnitudes, probe, medium, center_frequency):
     # The attenuation keeps the physical path length, as there.
     one_way_distance = ops.maximum(physical_distance, medium.min_dist)
     travel_time = one_way_distance / medium.sound_speed
-    two_way_distance = physical_distance[:, :, None] + physical_distance[:, None, :]
 
-    element_directivity = _element_directivity(positions, probe, medium, center_frequency)
-    directivity_pair = element_directivity[:, :, None] * element_directivity[:, None, :]
-    spread_attenuation = (
-        spread(one_way_distance[:, :, None], 0.5 if probe.two_dimensional else 1.0, medium.min_dist)
-        * spread(one_way_distance[:, None, :], 1.0, medium.min_dist)
-        * attenuate(center_frequency, medium.attenuation_coef, two_way_distance)
+    # The attenuation is exponential in the distance, so that of the two-way path is the
+    # product of the one-way attenuations.
+    one_way_gain = _element_directivity(positions, probe, medium, center_frequency) * attenuate(
+        center_frequency, medium.attenuation_coef, physical_distance
     )
-
-    base_gain = magnitudes[:, None, None] * directivity_pair * spread_attenuation
-    two_way_time = travel_time[:, :, None] + travel_time[:, None, :]
-    return base_gain, two_way_time
+    tx_exponent = 0.5 if probe.two_dimensional else 1.0
+    tx_gain = one_way_gain * spread(one_way_distance, tx_exponent, medium.min_dist)
+    rx_gain = magnitudes[:, None] * one_way_gain * spread(one_way_distance, 1.0, medium.min_dist)
+    return tx_gain, rx_gain, travel_time
 
 
 def _element_directivity(positions, probe, medium, frequency):
@@ -217,38 +220,106 @@ def _element_directivity(positions, probe, medium, frequency):
     return lateral * directivity(frequency, phi, probe.element_height, medium.sound_speed)
 
 
-def _scatter_spike_map(sample_positions, weights, n_ax, n_el):
+def _scatter_spike_map(tx_samples, tx_gain, rx_samples, rx_gain, n_ax, n_replicas=16):
     """Splat weighted spikes into an (n_ax, n_el) map with linear interpolation.
 
+    Every (scatterer, transmit element, receive element) contribution lands at the
+    fractional sample ``tx_samples + rx_samples`` with amplitude ``tx_gain * rx_gain``. These
+    (n_scat, n_tx_el, n_rx_el) tensors are only formed inside this function, so they fuse
+    into the scatter (and the gather of the gradient) instead of being held in memory.
+
+    The scatter-add is bound by contention, as neighbouring scatterers land on the same
+    samples. Two rewrites reduce it without changing the result (up to the float summation
+    order): both taps of a contribution are written as one 2-vector to the same row, the
+    upper tap shifted by one sample afterwards, and the scatterers are spread round-robin
+    over ``n_replicas`` private copies of the map, summed at the end. The gradient is the
+    exact transpose, a gather of the upstream map at both taps (:func:`_gather_spike_map`),
+    as the autodiff transpose of the replicated scatter does not fuse and is ~10x slower.
+
     Args:
-        sample_positions (array-like): The fractional sample index of each
-            contribution of shape (n_scat, n_tx_el, n_rx_el).
-        weights (array-like): The amplitude of each contribution, same shape.
+        tx_samples (array-like): The (n_scat, n_tx_el) transmit part of the delay [samples].
+        tx_gain (array-like): The (n_scat, n_tx_el) transmit part of the amplitude.
+        rx_samples (array-like): The (n_scat, n_rx_el) receive part of the delay [samples].
+        rx_gain (array-like): The (n_scat, n_rx_el) receive part of the amplitude.
         n_ax (int): The number of axial samples.
-        n_el (int): The number of receive elements.
+        n_replicas (int): The number of private copies of the map, costing
+            ``n_replicas * (n_ax + 1) * n_rx_el * 2`` floats. Static under jit.
 
     Returns:
-        array-like: The spike map of shape (n_ax, n_el), summed over scatterers and
+        array-like: The spike map of shape (n_ax, n_rx_el), summed over scatterers and
         transmit elements.
+    """
+    n_el = int(ops.shape(rx_samples)[1])
+
+    def contributions(tx_samples, tx_gain, rx_samples, rx_gain):
+        sample_positions = tx_samples[:, :, None] + rx_samples[:, None, :]
+        weights = tx_gain[:, :, None] * rx_gain[:, None, :]
+        return sample_positions, weights
+
+    @ops.custom_gradient
+    def splat(tx_samples, tx_gain, rx_samples, rx_gain):
+        sample_positions, weights = contributions(tx_samples, tx_gain, rx_samples, rx_gain)
+        spike_map = _splat_replicated(sample_positions, weights, n_ax, n_el, n_replicas)
+
+        def grad(*args, upstream=None):
+            if upstream is None:
+                (upstream,) = args
+            sample_positions, weights = contributions(tx_samples, tx_gain, rx_samples, rx_gain)
+            d_positions, d_weights = _gather_spike_map(
+                sample_positions, weights, upstream, n_ax, n_el
+            )
+            return (
+                ops.sum(d_positions, axis=2),
+                ops.sum(d_weights * rx_gain[:, None, :], axis=2),
+                ops.sum(d_positions, axis=1),
+                ops.sum(d_weights * tx_gain[:, :, None], axis=1),
+            )
+
+        return spike_map, grad
+
+    return splat(tx_samples, tx_gain, rx_samples, rx_gain)
+
+
+def _splat_replicated(sample_positions, weights, n_ax, n_el, n_replicas):
+    """Forward of :func:`_scatter_spike_map` on the (n_scat, n_tx_el, n_rx_el) contributions."""
+    lower_index = ops.floor(sample_positions)
+    fractional = sample_positions - lower_index
+    # Row r holds the lower tap of sample r - 1 and the upper tap of sample r.
+    row = ops.cast(lower_index, "int32") + 1
+    n_rows = n_ax + 1
+    n_scat = int(ops.shape(sample_positions)[0])
+    replica = ops.reshape(ops.arange(n_scat, dtype="int32") % n_replicas, (-1, 1, 1))
+    rx_index = ops.reshape(ops.arange(n_el, dtype="int32"), (1, 1, n_el))
+
+    # Out-of-range rows go to one extra segment, dropped below.
+    n_segments = n_replicas * n_rows * n_el
+    valid = (row >= 0) & (row < n_rows)
+    flat_index = ops.where(valid, (replica * n_rows + row) * n_el + rx_index, n_segments)
+    taps = ops.stack([weights * (1 - fractional), weights * fractional], axis=-1)
+    buffer = ops.segment_sum(
+        ops.reshape(taps, (-1, 2)), ops.reshape(flat_index, (-1,)), num_segments=n_segments + 1
+    )
+    buffer = ops.sum(ops.reshape(buffer[:-1], (n_replicas, n_rows, n_el, 2)), axis=0)
+    return buffer[1:, :, 0] + buffer[:-1, :, 1]
+
+
+def _gather_spike_map(sample_positions, weights, upstream, n_ax, n_el):
+    """Gradient of :func:`_scatter_spike_map`: read the upstream (n_ax, n_el) map at both
+    taps of every contribution.
+
+    Returns:
+        tuple: The gradients with respect to ``sample_positions`` and ``weights``.
     """
     lower_index = ops.floor(sample_positions)
     fractional = sample_positions - lower_index
-    lower_index = ops.cast(lower_index, "int32")
+    # One zero row on either side: padded row k is sample k - 1, so out-of-range taps
+    # clip onto a zero row.
+    padded = ops.reshape(ops.pad(upstream, [[1, 1], [0, 0]]), (-1,))
+    row = ops.cast(lower_index, "int32") + 1
     rx_index = ops.reshape(ops.arange(n_el, dtype="int32"), (1, 1, n_el))
-    lower_map = _accumulate_tap(lower_index, weights * (1 - fractional), rx_index, n_ax, n_el)
-    upper_map = _accumulate_tap(lower_index + 1, weights * fractional, rx_index, n_ax, n_el)
-    return lower_map + upper_map
-
-
-def _accumulate_tap(sample_index, weight, rx_index, n_ax, n_el):
-    """Scatter-add one interpolation tap into a flattened (n_ax * n_el) buffer."""
-    valid = (sample_index >= 0) & (sample_index < n_ax)
-    weight = ops.where(valid, weight, ops.zeros_like(weight))
-    clamped_index = ops.clip(sample_index, 0, n_ax - 1)
-    flat_index = ops.reshape(clamped_index * n_el + rx_index, (-1,))
-    flat_weight = ops.reshape(weight, (-1,))
-    buffer = ops.segment_sum(flat_weight, flat_index, num_segments=n_ax * n_el)
-    return ops.reshape(buffer, (n_ax, n_el))
+    lower = ops.take(padded, ops.clip(row, 0, n_ax + 1) * n_el + rx_index)
+    upper = ops.take(padded, ops.clip(row + 1, 0, n_ax + 1) * n_el + rx_index)
+    return weights * (upper - lower), (1 - fractional) * lower + fractional * upper
 
 
 def _convolve_pulse_over_channels(spike_map, pulse):
