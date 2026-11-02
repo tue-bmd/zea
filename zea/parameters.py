@@ -511,6 +511,7 @@ class Parameters(BaseParameters):
     @cache_with_dependencies(
         "polar_limits",
         "radius_of_curvature",
+        "enable_scanline",
         optional=(
             "probe_geometry",
             "polar_angles",
@@ -533,7 +534,8 @@ class Parameters(BaseParameters):
            transmits along a curved array's normals.
         2. Unsteered diverging waves that share one virtual source: that source.
         3. A curved array: its centre of curvature (see :attr:`radius_of_curvature`).
-        4. A flat array whose :attr:`polar_limits` are derived: the apex they are seen
+        4. A flat array whose :attr:`polar_limits` are derived (not set, and not a scanline
+           grid, whose limits are its transmit angles): the apex they are seen
            from, where the outermost edge ray, traced back from its array end, crosses the
            central axis. The middle of the array when the edge rays are all parallel to it.
         5. A flat array with a sector (explicit or ``polar_margin``-widened, non-zero
@@ -544,7 +546,9 @@ class Parameters(BaseParameters):
         Missing ``transmit_origins`` count as zeros, as in the beamformer.
         """
         distance = self._transmit_or_probe_apex()
-        if distance is None and self._params.get("polar_limits") is None:
+        # A scanline grid's polar_limits are its transmit angles, not the derived sector
+        derived = self._params.get("polar_limits") is None and not self.enable_scanline
+        if distance is None and derived:
             distance = self._derived_polar_sector[1]
         if distance is None:
             limits = self.polar_limits
