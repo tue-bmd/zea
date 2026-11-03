@@ -1817,14 +1817,14 @@ class ScanSpec(Spec):
         transmit_origins: The transmit origins of the transmit beams in meters of
             shape (n_tx, 3). This is the (x, y, z) position from which the beam
             is transmitted.
-        polar_angles: The polar angle theta in radians of each transmit beam, of shape
-            (n_tx,): the angle from the +z axis (physics convention). Signed in 2D,
-            positive toward +x. See :ref:`angle-conventions`.
+        polar_angles: Polar angle theta of each transmit beam: the angle from the +z
+            axis (physics convention). Signed in 2D, positive toward +x. In radians, of
+            shape (n_tx,). See :ref:`angle-conventions`.
         time_to_next_transmit: The time in s between subsequent transmit events.
             Shape is either (n_frames, n_tx) or flat (n_frames * n_tx - 1,).
-        azimuth_angles: The azimuth angle phi in radians of each transmit beam, of
-            shape (n_tx,): the rotation around the z axis from +x (physics convention),
-            zero for 2D imaging. Not the ultrasound "azimuth" (lateral) direction. See
+        azimuth_angles: Azimuth angle phi of each transmit beam: the rotation around
+            the z axis from +x (physics convention), zero for 2D imaging. Not the
+            ultrasound "azimuth" (lateral) direction. In radians, of shape (n_tx,). See
             :ref:`angle-conventions`.
         rx_aperture_indices: Which probe element each receive channel of the channel
             data corresponds to, of shape (n_tx, n_rx) and integer dtype. Needed only
@@ -1919,12 +1919,19 @@ class ScanSpec(Spec):
         "transmit_origins": {"unit": "m", "description": "Transmit beam origins (x, y, z)."},
         "polar_angles": {
             "unit": "rad",
-            "description": "Polar angle of each transmit beam, from +z (signed in 2D).",
+            "description": (
+                "Polar angle theta of each transmit beam: the angle from the +z axis "
+                "(physics convention). Signed in 2D, positive toward +x."
+            ),
         },
         "time_to_next_transmit": {"unit": "s", "description": "Time between transmit events."},
         "azimuth_angles": {
             "unit": "rad",
-            "description": "Azimuth angle of each transmit beam, around z from +x.",
+            "description": (
+                "Azimuth angle phi of each transmit beam: the rotation around the z axis "
+                "from +x (physics convention), zero for 2D imaging. Not the ultrasound "
+                '"azimuth" (lateral) direction.'
+            ),
         },
         "rx_aperture_indices": {
             "unit": "–",
