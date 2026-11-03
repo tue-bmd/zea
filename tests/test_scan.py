@@ -960,6 +960,20 @@ def test_grid_apex_follows_transmits_spread_over_the_array():
     np.testing.assert_allclose(parameters.polar_limits, np.radians([-45, 45]), rtol=1e-5)
 
 
+def test_transmit_apex_needs_unsteered_focused_transmits_on_the_central_axis():
+    """An unsteered focused axis runs straight down from its origin, so the transmits only
+    share an apex when it starts on the central axis."""
+    from zea.beamform.geometry import transmit_apex_distance
+
+    angles = np.array([-0.3, 0.0, 0.3])
+    focus = np.full(3, 0.05)
+    origins = np.zeros((3, 3))
+    assert transmit_apex_distance(origins, angles, focus, tol=1e-4) == pytest.approx(0.0)
+
+    origins[1, 0] = 0.005
+    assert transmit_apex_distance(origins, angles, focus, tol=1e-4) is None
+
+
 def test_grid_apex_is_the_virtual_source_of_a_diverging_wave():
     """One unsteered diverging wave fans out from its virtual source, and the sector's edges
     run from there through the array ends."""

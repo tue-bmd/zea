@@ -99,7 +99,8 @@ def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol)
     Two transmit schemes define such a point:
 
     - **Steered focused transmits** whose axes (from ``transmit_origins`` along
-      ``polar_angles``) cross ``x = 0`` in one point. That is the array middle for
+      ``polar_angles``) cross ``x = 0`` in one point, next to which any unsteered focused
+      transmits start on the central axis. That is the array middle for
       transmits launched from there, a virtual apex behind the array for transmits spread
       over a flat array, and the centre of curvature for transmits along a curved array's
       normals. Steered plane and diverging waves do not fan out from their origin (it
@@ -128,6 +129,10 @@ def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol)
     if np.any(steered):
         lines = steered & is_focused(focus)
         if not np.any(lines):
+            return None
+        # An unsteered focused axis runs straight down from its origin, so it only passes
+        # through a point on the central axis when it starts there
+        if np.any(np.abs(origins[~steered & is_focused(focus), 0]) > tol):
             return None
         # Where each steered focused axis crosses x = 0, as a distance behind the array
         crossings = origins[lines, 0] / np.tan(angles[lines]) - origins[lines, 2]
