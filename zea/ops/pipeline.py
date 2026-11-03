@@ -1501,6 +1501,7 @@ class Beamform(Pipeline):
         # `with_batch_dim`): those must keep reaching Pipeline / PatchedGrid.
         pipeline_params = set(inspect.signature(Pipeline.__init__).parameters)
         beamformer_params -= pipeline_params
+        self._beamformer_params = beamformer_params
         self.beamformer_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in beamformer_params}
 
         self._beamformer = beamformer_cls(**self.beamformer_kwargs)
@@ -1579,11 +1580,9 @@ class Beamform(Pipeline):
             params["enable_aligned_apodization"] = self.enable_aligned_apodization
         if not compact or self.enable_receive_apodization:
             params["enable_receive_apodization"] = self.enable_receive_apodization
-        # Take the beamformer keywords from the beamformer's own serialization, which
-        # leaves out objects that cannot be written to a config (such as the trained
-        # model of the "able" beamformer or precomputed ADMIRE models).
+        # The beamformer serializes its own parameters, leaving out unserializable objects
         beamformer_params = self._beamformer.get_dict(compact=compact).get("params", {})
-        params.update({k: v for k, v in beamformer_params.items() if k in self.beamformer_kwargs})
+        params.update({k: v for k, v in beamformer_params.items() if k in self._beamformer_params})
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))

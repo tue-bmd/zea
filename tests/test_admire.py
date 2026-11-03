@@ -483,10 +483,15 @@ def test_beamform_admire_serializes(iq_models):
     restored = pipeline_from_json(ops.Pipeline([beamform]).to_json()).operations[0]
     assert ADMIREConfig(**restored._beamformer.config) == config.replace(roi_x=(-0.4, 0.02, 0.4))
 
+    # Settings taken from the models survive the round trip, the models themselves do not
     _, models = iq_models
+    models = dataclasses.replace(models, config=models.config.replace(alpha=0.5))
     with_models = ops.Beamform(beamformer="admire", models=models)
     assert "models" not in with_models.get_dict()["params"]
-    ops.Pipeline([with_models]).to_json()
+    restored = pipeline_from_json(ops.Pipeline([with_models]).to_json()).operations[0]
+    assert restored._beamformer.models is None
+    assert restored._beamformer.n_elements == models.n_elements
+    assert ADMIREConfig(**restored._beamformer.config) == models.config
 
 
 def test_admire_rejects_models_for_another_geometry():
