@@ -311,10 +311,6 @@ and 3D data keeps :math:`\phi` in :math:`(-\pi/2, \pi/2]` so that the sign of
    angle toward ``x``. "Elevation" means the same in both: ``elevation_limits`` is the
    angle toward ``y``.
 
-The former names ``rho_range``, ``theta_range`` and ``phi_range`` (for ``rlims``,
-``polar_limits`` and ``elevation_limits``) and ``azimuth_limits`` (for
-``elevation_limits``) still work, with a deprecation warning.
-
 
 ----------------------------
 API reference
