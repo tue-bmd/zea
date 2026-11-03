@@ -474,12 +474,6 @@ def set_memory_growth_tf():
         print(e)
 
 
-# Maps init_device arguments -> (resolved device, CUDA_VISIBLE_DEVICES we set).
-# Device selection is process-global side effects, so repeating it is both slow
-# (two nvidia-smi calls) and pointless.
-_INIT_DEVICE_CACHE = {}
-
-
 def init_device(
     device: Union[str, int, list] = "auto:1",
     backend: Union[str, None] = "auto",
@@ -527,19 +521,7 @@ def init_device(
             a list of device strings (e.g. ``['gpu:0', 'gpu:1']``) when
             multiple GPUs were selected.  Returns ``'cpu'`` when no GPU is
             available or ``device='cpu'`` was requested.
-
-    Note:
-        The result is cached per argument combination, so scripts that import
-        modules which also call ``init_device`` at module level only pay for
-        the device query once. The cache is invalidated whenever
-        ``CUDA_VISIBLE_DEVICES`` no longer matches what the cached call set.
     """
-    cache_key = (repr(device), backend, repr(hide_devices), hide_others, allow_preallocate)
-    if cache_key in _INIT_DEVICE_CACHE:
-        cached_device, cached_cuda_visible = _INIT_DEVICE_CACHE[cache_key]
-        if os.environ.get("CUDA_VISIBLE_DEVICES") == cached_cuda_visible:
-            return cached_device
-
     if hide_devices is not None:
         hide_gpus(hide_devices)
 
@@ -559,13 +541,9 @@ def init_device(
     else:
         raise ValueError(f"Unknown backend ({backend}).")
 
-    def _cache_and_return(resolved):
-        _INIT_DEVICE_CACHE[cache_key] = (resolved, os.environ.get("CUDA_VISIBLE_DEVICES"))
-        return resolved
-
     # Early exit if device is CPU
     if device == "cpu":
-        return _cache_and_return(device)
+        return device
 
     # Set if jax and tensorflow should preallocate memory
     if not allow_preallocate:
@@ -581,4 +559,4 @@ def init_device(
         )
         device = "cpu"
 
-    return _cache_and_return(device)
+    return device
