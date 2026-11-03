@@ -384,6 +384,8 @@ def search_file_tree(
         relative (bool, optional): If True, yields file paths relative to the
             root directory. Defaults to False.
 
+    Hidden files and directories (name starting with ``.``) below ``directory`` are skipped.
+
     Yields:
         Path: Paths of files matching the specified file types.
     """
@@ -391,8 +393,12 @@ def search_file_tree(
     if verbose:
         log.info(f"Searching {log.yellow(directory)} for {filetypes} files...")
 
-    for dirpath, _, filenames in os.walk(directory):
+    for dirpath, dirnames, filenames in os.walk(directory):
+        # Prune in place so os.walk does not descend into hidden directories
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for file in filenames:
+            if file.startswith("."):
+                continue
             # Append to file_paths if it is a filetype file
             if filetypes is None or Path(file).suffix in filetypes:
                 file_path = Path(dirpath) / file
