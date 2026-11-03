@@ -277,12 +277,12 @@ class Parameters(BaseParameters):
       phased-array or curved-array geometry): the polar grid with one column per
       transmit angle, fanning out from :attr:`grid_apex`. :attr:`polar_limits` are the
       angles of the first and the last transmit.
-
-    Both grids lie in the x-z plane, so the columns follow the transmit angles projected
-    onto it, ``atan(x / z)`` (see :ref:`angle-conventions`).
     - ``grid_type="cartesian"`` for unsteered, parallel lines (linear-scan geometry):
       a vertical column under each transmit (see
       :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`).
+
+    Both grids lie in the x-z plane, so the columns follow the transmit angles projected
+    onto it, ``atan(x / z)`` (see :ref:`angle-conventions`).
 
     Any other combination raises a ``ValueError`` when the grid is built.
 
