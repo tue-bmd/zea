@@ -275,8 +275,11 @@ class Parameters(BaseParameters):
 
     - ``grid_type="polar"`` for steered lines whose axes meet in one point (sector /
       phased-array or curved-array geometry): the polar grid with one column per
-      transmit angle, fanning out from :attr:`grid_apex`. :attr:`polar_limits` is the
-      range of the transmit angles.
+      transmit angle, fanning out from :attr:`grid_apex`. :attr:`polar_limits` are the
+      angles of the first and the last transmit.
+
+    Both grids lie in the x-z plane, so the columns follow the transmit angles projected
+    onto it, ``atan(x / z)`` (see :ref:`angle-conventions`).
     - ``grid_type="cartesian"`` for unsteered, parallel lines (linear-scan geometry):
       a vertical column under each transmit (see
       :func:`~zea.beamform.pixelgrid.scanline_pixel_grid`).
@@ -458,11 +461,10 @@ class Parameters(BaseParameters):
         projected onto the x-z plane, of shape (n_tx,), as the grid's polar angles are (see
         :ref:`angle-conventions`). Equal to :attr:`polar_angles` without
         ``azimuth_angles``. ``None`` without ``polar_angles``.
-
-        The presence check uses the raw parameter to avoid triggering the
-        :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
         """
         polar = self.polar_angles
+        # The presence check uses the raw parameter to avoid triggering the
+        # :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
         if polar is None or self._params.get("azimuth_angles") is None:
             return polar
         polar = np.asarray(polar, dtype=np.float64)
@@ -617,13 +619,13 @@ class Parameters(BaseParameters):
                     grid_apex=self.grid_apex,
                     polar_angles=polar_angles,
                 )
+            # No azimuth_angles: the angles are already projected onto the x-z plane
             return scanline_pixel_grid(
                 self.transmit_origins,
                 self.focus_distances,
                 polar_angles,
                 self.zlims,
                 self.grid_size_z,
-                azimuth_angles=self.azimuth_angles,
                 grid_type="cartesian",
             )
         elif self.grid_type == "polar":
@@ -661,8 +663,9 @@ class Parameters(BaseParameters):
             )
 
     def _scanline_polar_angles(self):
-        """The transmit angles the columns of a scanline grid follow, after checking that
-        the transmits suit scanline imaging (see :attr:`enable_scanline`)."""
+        """The transmit angles the columns of a scanline grid follow, projected onto the x-z
+        plane (see :attr:`_xz_polar_angles`), after checking that the transmits suit
+        scanline imaging (see :attr:`enable_scanline`)."""
         if self.grid_type not in ("cartesian", "polar"):
             raise ValueError(
                 f"Unsupported grid type: {self.grid_type}. Supported types are "
@@ -676,7 +679,7 @@ class Parameters(BaseParameters):
                 "and diverging waves insonify more than one line; image them with a regular "
                 "grid (enable_scanline=False)."
             )
-        polar_angles = self.polar_angles
+        polar_angles = self._xz_polar_angles
         if polar_angles is None:
             log.warning_once(
                 "No ``polar_angles`` provided, using zeros",
@@ -869,6 +872,7 @@ class Parameters(BaseParameters):
             "polar_limits",
             "grid_apex",
             "polar_angles",
+            "_xz_polar_angles",
             "focus_distances",
             "transmit_origins",
             "_edge_rays",
@@ -905,7 +909,7 @@ class Parameters(BaseParameters):
 
         if self.enable_scanline:
             focus_distances = self.focus_distances
-            polar_angles = self.polar_angles
+            polar_angles = self._xz_polar_angles
             if polar_angles is None:
                 polar_angles = np.zeros_like(focus_distances)
             focus = np.where(np.isfinite(focus_distances), focus_distances, 0.0)
@@ -1181,7 +1185,11 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("polar_angles", "enable_scanline", optional=("_derived_polar_sector",))
+    @cache_with_dependencies(
+        "polar_angles",
+        "enable_scanline",
+        optional=("_xz_polar_angles", "_derived_polar_sector"),
+    )
     def polar_limits(self):
         """The polar angle ``atan(x / z)`` [rad] of the first and last column of a polar grid,
         signed, positive toward +x. In 3D it is the angle of the projection onto the x-z
@@ -1197,10 +1205,11 @@ class Parameters(BaseParameters):
         Set :attr:`polar_margin` to widen by a fixed angle instead.
 
         With ``enable_scanline=True`` this is the angle of the first and the last transmit,
-        since the columns are the transmits in order; an explicit value is ignored there.
+        projected onto the x-z plane like the default, since the columns are the transmits in
+        order; an explicit value is ignored there.
         """
         value = self._params.get("polar_limits")
-        angles = self.polar_angles
+        angles = self._xz_polar_angles
         if self.enable_scanline and angles is not None:
             if value is not None:
                 log.warning_once(

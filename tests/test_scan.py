@@ -1220,6 +1220,22 @@ def test_polar_scanline_limits_follow_the_transmit_order():
     assert parameters.grid[-1, 0, 0] > 0  # the first column is on the +x side
 
 
+def test_polar_scanline_follows_the_transmit_angles_in_the_xz_plane():
+    """The same directions in the unsigned spherical form (theta >= 0, phi = pi toward -x)
+    give the same scanline grid as the signed form zea writes."""
+    signed = _phased(n_tx=9, enable_scanline=True, grid_size_z=32)
+    angles = signed.polar_angles
+    unsigned = _phased(
+        n_tx=9,
+        enable_scanline=True,
+        grid_size_z=32,
+        polar_angles=np.abs(angles),
+        azimuth_angles=np.where(angles < 0, np.pi, 0.0),
+    )
+    np.testing.assert_allclose(unsigned.polar_limits, signed.polar_limits, atol=1e-6)
+    np.testing.assert_allclose(unsigned.grid, signed.grid, atol=1e-6)
+
+
 def test_polar_scanline_needs_evenly_spaced_angles():
     parameters = _phased(n_tx=9, enable_scanline=True)
     parameters.selected_transmits = [0, 1, 2, 5, 8]
