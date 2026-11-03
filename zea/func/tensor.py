@@ -1885,7 +1885,8 @@ def normalize(data, output_range, input_range=None):
 
     Args:
         data (ops.Tensor): Input data to normalize.
-        output_range (tuple): Range to which data should be mapped, e.g., (0, 1).
+        output_range (tuple): ``(min, max)`` range to which data should be mapped,
+            e.g., (0, 1).
         input_range (tuple, optional): Range of input data.
             If None, the range will be computed from the data.
             Defaults to None.
@@ -1898,8 +1899,7 @@ def normalize(data, output_range, input_range=None):
     if maxval is None:
         maxval = ops.max(data)
     normalized_data = translate(data, (minval, maxval), output_range)
-    lo, hi = output_range
-    return ops.clip(normalized_data, ops.minimum(lo, hi), ops.maximum(lo, hi))
+    return ops.clip(normalized_data, output_range[0], output_range[1])
 
 
 def split_into_windows(
