@@ -9,6 +9,10 @@ a variety of basic tensor operations. Lastly, all existing Keras operations (see
     A tutorial notebook where the usage of operations and pipelines is demonstrated:
     :doc:`../notebooks/pipeline/zea_pipeline_example`.
 
+The pipeline can also start without data: :class:`Simulate` generates RF data from point
+scatterers, so that a phantom goes in and an image comes out. See the :doc:`simulator
+<../simulator>` page.
+
 Stand-alone usage of operations
 -------------------------------
 
