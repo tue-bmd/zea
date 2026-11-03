@@ -593,8 +593,13 @@ class BaseParameters:
 
     @classmethod
     def get_properties_with_dependencies(cls):
-        """Get all properties of the class that have dependencies."""
-        return [name for name in cls.get_properties() if cls._is_property_with_dependencies(name)]
+        """Get all properties of the class that have dependencies, including private ones,
+        since they are part of the dependency graph."""
+        return [
+            name
+            for name, value in inspect.getmembers(cls)
+            if isinstance(value, property) and cls._is_property_with_dependencies(name)
+        ]
 
     def to_tensor(
         self,

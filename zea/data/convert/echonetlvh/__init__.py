@@ -449,7 +449,7 @@ class LVHProcessor:
         polar_limits = _cone_polar_limits(cone_params)
 
         return polar_to_cartesian_matrix(
-            image_polar, cartesian_shape, tip, r_max, polar_limits, order=order
+            image_polar, cartesian_shape, tip, r_max, polar_limits=polar_limits, order=order
         )
 
     def load(self, avi_file: Path):

@@ -192,6 +192,20 @@ def test_scan_convert_deprecated_range_names():
     with pytest.raises(TypeError, match="deprecated alias 'theta_range'"):
         display.cartesian_to_polar_matrix(cart, polar_limits=(-0.3, 0.6), theta_range=(-0.3, 0.6))
 
+    # Old code passed theta_range by position; it keeps its slot, so it is still mirrored.
+    new = display.cartesian_to_polar_matrix(cart, polar_limits=(-0.6, 0.3))
+    old = display.cartesian_to_polar_matrix(cart, 0.0, None, None, None, (-0.3, 0.6))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.polar_to_cartesian_matrix(cart, (40, 50), polar_limits=(-0.6, 0.3))
+    old = display.polar_to_cartesian_matrix(cart, (40, 50), None, None, (0.6, -0.3))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.polar_to_cartesian_coordinates((40, 50), 40, 50, polar_limits=(-0.6, 0.3))
+    old = display.polar_to_cartesian_coordinates((40, 50), 40, 50, None, None, (0.6, -0.3))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.inverse_scan_convert_2d(cart, polar_limits=(-0.6, 0.3), **kwargs)
+    old = display.inverse_scan_convert_2d(cart, 0.0, (-0.3, 0.6), **kwargs)
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+
 
 def test_cartesian_to_polar_matrix_angles_are_positive_toward_plus_x():
     """Column ``j`` of the polar image samples at the polar angle ``atan(x / z)`` of

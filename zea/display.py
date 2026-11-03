@@ -971,9 +971,10 @@ def cartesian_to_polar_matrix(
     polar_shape=None,
     tip=None,
     r_max=None,
-    polar_limits=None,
-    interpolation_order=1,
     theta_range=None,
+    interpolation_order=1,
+    *,
+    polar_limits=None,
 ):
     """
     Convert a Cartesian image matrix to a polar coordinate representation.
@@ -1058,11 +1059,12 @@ def polar_to_cartesian_matrix(
     cartesian_shape: Tuple[int, int],
     tip: Union[Tuple[float, float], None] = None,
     r_max: Union[float, None] = None,
-    polar_limits: Union[Tuple[float, float], None] = None,
+    theta_range=None,
     pitch: float = 1.0,
     fill_value: float = 0.0,
     order: int = 1,
-    theta_range=None,
+    *,
+    polar_limits: Union[Tuple[float, float], None] = None,
 ):
     """Resample a polar image onto a fixed Cartesian canvas with the apex at a chosen pixel.
 
@@ -1125,10 +1127,11 @@ def polar_to_cartesian_coordinates(
     n_polar: int,
     tip: Union[Tuple[float, float], None] = None,
     r_max: Union[float, None] = None,
-    polar_limits: Union[Tuple[float, float], None] = None,
+    theta_range=None,
     pitch: float = 1.0,
     dtype: str = "float32",
-    theta_range=None,
+    *,
+    polar_limits: Union[Tuple[float, float], None] = None,
 ):
     """(radius, polar angle) sampling grid that pins a polar cone's apex at pixel ``tip``.
 
@@ -1184,12 +1187,13 @@ def polar_to_cartesian_coordinates(
 def inverse_scan_convert_2d(
     cartesian_image,
     fill_value=0.0,
-    polar_limits=None,
+    theta_range=None,
     output_size=None,
     interpolation_order=1,
     find_scan_cone=True,
     image_range: tuple | None = None,
-    theta_range=None,
+    *,
+    polar_limits=None,
 ):
     """
     Convert a Cartesian-format ultrasound image to a polar representation.
