@@ -10,7 +10,7 @@ from PIL import Image
 
 from zea import log
 from zea.func.tensor import translate
-from zea.internal.utils import deprecated_alias
+from zea.internal.utils import deprecated, deprecated_alias
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 # `zea.func.ultrasound.log_compress` maps zeros to 20 * log10(1e-16) = -320 dB. Such pixels
@@ -409,14 +409,41 @@ def _polar_sampling_coordinates(x_vec, z_vec, rho, theta):
     theta_max = ops.maximum(theta_start, theta_end)
 
     z_grid, x_grid = ops.meshgrid(z_vec, x_vec)
-    rho_grid_interp, theta_grid_interp = frustum_convert_xz2rt(
-        x_grid, z_grid, theta_limits=[theta_min, theta_max]
+    rho_grid_interp, theta_grid_interp = xz_to_frustum(
+        x_grid, z_grid, polar_limits=[theta_min, theta_max]
     )
 
     n_rho, n_theta = ops.shape(rho)[0], ops.shape(theta)[0]
     rho_idx = (rho_grid_interp - rho_start) / (rho_end - rho_start) * (n_rho - 1)
     theta_idx = (theta_grid_interp - theta_start) / (theta_end - theta_start) * (n_theta - 1)
     return ops.stack([rho_idx, theta_idx], axis=0)
+
+
+def _deprecated_mirrored_theta_range(polar_limits, theta_range, caller, reverse):
+    """Map the deprecated ``theta_range`` of the Cartesian <-> polar matrix helpers onto
+    ``polar_limits``.
+
+    These helpers used to measure angles positive toward -x, the mirror image of zea's
+    ``polar_limits``, so the angles change sign. ``reverse`` also swaps them, for the
+    helpers that laid out their columns from ``theta_range[1]`` to ``theta_range[0]``.
+    Either way the result gives the same image as ``theta_range`` did.
+    """
+    if theta_range is None:
+        return polar_limits
+    if polar_limits is not None:
+        raise TypeError(
+            f"{caller}() got both 'polar_limits' and its deprecated alias 'theta_range'."
+        )
+    if reverse:
+        mirrored, rule = (-theta_range[1], -theta_range[0]), "(-b, -a)"
+    else:
+        mirrored, rule = (-theta_range[0], -theta_range[1]), "(-a, -b)"
+    log.deprecated(
+        f"{caller}(theta_range=...) is deprecated, use polar_limits=... instead. theta_range "
+        "measured angles positive toward -x, polar_limits measures them toward +x as in the "
+        f"rest of zea: theta_range=(a, b) is polar_limits={rule}."
+    )
+    return mirrored
 
 
 def _deprecated_distance_to_apex(distance_to_apex, grid_apex, caller):
@@ -442,10 +469,11 @@ def compute_scan_convert_2d_coordinates(
 ):
     """Precompute coordinates for 2d scan conversion from polar coordinates.
 
-    The polar image has one row per radius ``rho`` and one column per angle ``theta``.
-    ``rho`` is measured from ``grid_apex``, the point the polar grid fans out from (see
-    :attr:`zea.Parameters.grid_apex`), and ``theta`` is the angle from the z-axis in the
-    x-z plane, positive towards +x. The returned coordinates index the polar image, so
+    The polar image has one row per radius and one column per polar angle. The radius is
+    measured from ``grid_apex``, the point the polar grid fans out from (see
+    :attr:`zea.Parameters.grid_apex`), and the polar angle is ``atan(x / z)``, from the
+    z-axis in the x-z plane, positive towards +x. The returned coordinates index the polar
+    image, so
     they live in that apex frame; ``grid_apex`` only moves the output window into the
     transducer frame, where the reported ``x_lim`` and ``z_lim`` are given (matching
     :attr:`zea.Parameters.extent`).
@@ -497,7 +525,7 @@ def compute_scan_convert_2d_coordinates(
 
     rho_grid, theta_grid = ops.meshgrid(rho, theta, indexing="ij")
 
-    x_grid, z_grid = frustum_convert_rt2xz(rho_grid, theta_grid)
+    x_grid, z_grid = frustum_to_xz(rho_grid, theta_grid)
 
     # Output window in the apex frame
     if extent is None:
@@ -550,15 +578,15 @@ def scan_convert_2d(
 ):
     """
     Perform scan conversion on a 2D ultrasound image from polar coordinates
-    (rho, theta) to Cartesian coordinates (x, z).
+    (radius, polar angle) to Cartesian coordinates (x, z).
 
     Args:
         image (ndarray): The input 2D ultrasound image in polar coordinates.
-            Has dimensions (n_rho, n_theta) with optional batch.
+            Has dimensions (n_radius, n_polar) with optional batch.
         rlims (tuple): Radius ``(rho_min, rho_max)`` of the first and last row,
             measured from ``grid_apex``. In the same unit as the output grid.
-        polar_limits (tuple): Angle ``(theta_min, theta_max)`` of the first and last
-            column [rad], from the z-axis in the x-z plane, positive towards +x.
+        polar_limits (tuple): Polar angle ``atan(x / z)`` of the first and last column
+            [rad], from the z-axis in the x-z plane, positive towards +x.
         resolution (float, optional): The resolution for the Cartesian grid.
             If None, it is calculated based on the input image. In units of ``rlims``
             per pixel.
@@ -569,7 +597,7 @@ def scan_convert_2d(
             outside the input image ranges. Defaults to 0.0. When set to NaN,
             no interpolation at the edges will happen.
         order (int, optional): The order of the spline interpolation. Defaults to 1.
-        grid_apex (array-like, optional): The point ``(x, y, z)`` that ``rho`` is
+        grid_apex (array-like, optional): The point ``(x, y, z)`` that the radius is
             measured from, in the transducer frame (see
             :attr:`zea.Parameters.grid_apex`). Moves the reported ``x_lim`` and ``z_lim``
             into the transducer frame. Defaults to the origin.
@@ -638,16 +666,19 @@ def compute_scan_convert_3d_coordinates(
 ):
     """Precompute coordinates for 3d scan conversion from frustum coordinates.
 
-    The volume is indexed by radius ``rho``, the polar angle ``theta = atan(x / z)`` and
-    the elevation angle ``phi = atan(y / z)`` (see :func:`frustum_convert_rtp2xyz`). Both
-    angles are projections onto the x-z and y-z planes, not spherical coordinates; at
-    ``phi = 0`` the volume reduces to the 2D sector of :func:`scan_convert_2d`.
+    The volume is indexed by radius, the polar angle ``atan(x / z)`` and the elevation
+    angle ``atan(y / z)`` (see :func:`frustum_to_xyz`). Both angles are
+    projections onto the x-z and y-z planes, not the spherical ``polar_angles`` and
+    ``azimuth_angles`` of the transmits; at elevation 0 the volume reduces to the 2D sector
+    of :func:`scan_convert_2d`.
 
     Args:
-        image_shape (tuple): Shape of the volume, ``(..., n_rho, n_theta, n_phi)``.
-        rlims (tuple): Radius of the first and last sample along ``rho``.
-        polar_limits (tuple): Polar angle of the first and last ``theta`` [rad].
-        elevation_limits (tuple): Elevation angle of the first and last ``phi`` [rad].
+        image_shape (tuple): Shape of the volume, ``(..., n_radius, n_polar, n_elevation)``.
+        rlims (tuple): Radius of the first and last sample along the radius axis.
+        polar_limits (tuple): Polar angle ``atan(x / z)`` of the first and last sample
+            along the polar axis [rad].
+        elevation_limits (tuple): Elevation angle ``atan(y / z)`` of the first and last
+            sample along the elevation axis [rad].
         resolution (float, optional): Output voxel size. Derived from the volume when
             not given.
         dtype (str, optional): Dtype of the coordinates. Defaults to ``"float32"``.
@@ -676,7 +707,7 @@ def compute_scan_convert_3d_coordinates(
 
     rho_grid, theta_grid, phi_grid = ops.meshgrid(rho, theta, phi, indexing="ij")
 
-    x_grid, y_grid, z_grid = frustum_convert_rtp2xyz(rho_grid, theta_grid, phi_grid)
+    x_grid, y_grid, z_grid = frustum_to_xyz(rho_grid, theta_grid, phi_grid)
 
     x_lim = [ops.min(x_grid), ops.max(x_grid)]
     y_lim = [ops.min(y_grid), ops.max(y_grid)]
@@ -700,12 +731,12 @@ def compute_scan_convert_3d_coordinates(
 
     z_grid, x_grid, y_grid = ops.meshgrid(z_vec, x_vec, y_vec)
 
-    rho_grid_interp, theta_grid_interp, phi_grid_interp = frustum_convert_xyz2rtp(
+    rho_grid_interp, theta_grid_interp, phi_grid_interp = xyz_to_frustum(
         x_grid,
         y_grid,
         z_grid,
-        theta_limits=[theta[0], theta[-1]],
-        phi_limits=[phi[0], phi[-1]],
+        polar_limits=[theta[0], theta[-1]],
+        elevation_limits=[phi[0], phi[-1]],
     )
 
     # return volume
@@ -749,18 +780,20 @@ def scan_convert_3d(
 ):
     """
     Perform scan conversion on a 3D ultrasound image from frustum coordinates
-    (rho, theta, phi) to Cartesian coordinates (z, x, y).
+    (radius, polar angle, elevation angle) to Cartesian coordinates (z, x, y).
 
-    ``theta = atan(x / z)`` and ``phi = atan(y / z)`` are the polar and elevation angle
-    (see :func:`frustum_convert_rtp2xyz`): projections onto the x-z and y-z planes, not
-    spherical coordinates.
+    The polar angle ``atan(x / z)`` and the elevation angle ``atan(y / z)`` (see
+    :func:`frustum_to_xyz`) are projections onto the x-z and y-z planes, not the
+    spherical ``polar_angles`` and ``azimuth_angles`` of the transmits.
 
     Args:
         image (ndarray): The input 3D ultrasound image in frustum coordinates.
-            Has dimensions (n_rho, n_theta, n_phi) with optional batch.
+            Has dimensions (n_radius, n_polar, n_elevation) with optional batch.
         rlims (tuple): Radius ``(rho_min, rho_max)`` of the first and last sample.
-        polar_limits (tuple): Polar angle ``(theta_min, theta_max)`` [rad].
-        elevation_limits (tuple): Elevation angle ``(phi_min, phi_max)`` [rad].
+        polar_limits (tuple): Polar angle ``atan(x / z)`` of the first and last sample
+            [rad].
+        elevation_limits (tuple): Elevation angle ``atan(y / z)`` of the first and last
+            sample [rad].
         resolution (float, optional): The resolution for the Cartesian grid.
             If None, it is calculated based on the input image. In units of ``rlims``
             per pixel.
@@ -962,12 +995,14 @@ def cartesian_to_polar_matrix(
             transformation (typically the probe tip). Defaults to the center-top of the image.
         r_max (float, optional): Maximum radius to consider in the polar transform.
             Defaults to the height of the input image.
-        polar_limits (tuple, optional): ``(theta_min, theta_max)`` angular extent of the polar
-            grid in radians, allowing asymmetric cones. Use this when the left and right
-            cone boundaries do not have equal half-angles. Defaults to (-45, 45) degrees.
+        polar_limits (tuple, optional): Polar angle ``atan(x / z)`` [rad] of the first and
+            last column of the polar output, positive toward +x (increasing column index of
+            the Cartesian image), as in :func:`scan_convert_2d`. Unequal magnitudes describe
+            an asymmetric cone. Defaults to (-45, 45) degrees.
         interpolation_order (int): Order of interpolation to use (0 = nearest-neighbor,
             1 = linear, 2+ = spline). Matches the convention of `scipy.ndimage.map_coordinates`.
-        theta_range (tuple, optional): Deprecated, use ``polar_limits``.
+        theta_range (tuple, optional): Deprecated, use ``polar_limits``. It measured angles
+            toward -x, so ``theta_range=(a, b)`` is ``polar_limits=(-b, -a)``.
 
     Returns:
         polar_matrix (Array): The image re-sampled in polar coordinates with shape
@@ -977,13 +1012,11 @@ def cartesian_to_polar_matrix(
     """
     assert "float" in ops.dtype(cartesian_matrix), "Input image must be float type"
 
-    polar_limits = deprecated_alias(
-        polar_limits, theta_range, "theta_range", "polar_limits", "cartesian_to_polar_matrix"
+    polar_limits = _deprecated_mirrored_theta_range(
+        polar_limits, theta_range, "cartesian_to_polar_matrix", reverse=True
     )
     if polar_limits is None:
-        theta_min, theta_max = -np.deg2rad(45), np.deg2rad(45)
-    else:
-        theta_min, theta_max = polar_limits
+        polar_limits = (-np.deg2rad(45), np.deg2rad(45))
 
     # Assume that polar grid is same shape as cartesian grid unless specified
     cartesian_rows, cartesian_cols = ops.shape(cartesian_matrix)
@@ -1004,16 +1037,15 @@ def cartesian_to_polar_matrix(
 
     center_x, center_y = tip
 
-    # Polar sampling grid: rows are radius (0..r_max), columns are angle. The columns run from
-    # theta_max down to theta_min so the lateral axis of the polar image keeps the same
-    # left-right orientation as the Cartesian image.
+    # Polar sampling grid: rows are radius (0..r_max), columns are angle, from polar_limits[0]
+    # to polar_limits[1] as in the polar grid of zea.
     r = ops.linspace(0, r_max, polar_rows, dtype="float32")
-    theta = ops.linspace(theta_max, theta_min, polar_cols, dtype="float32")
+    theta = ops.linspace(polar_limits[0], polar_limits[1], polar_cols, dtype="float32")
     r_grid, theta_grid = ops.meshgrid(r, theta, indexing="ij")
 
     # Cartesian pixel each (r, theta) samples from. The probe images "downwards" (+depth = +y),
-    # so depth = center_y + r cos(theta) and lateral = center_x - r sin(theta).
-    xq = center_x - r_grid * ops.sin(theta_grid)
+    # so depth = center_y + r cos(theta) and lateral = center_x + r sin(theta).
+    xq = center_x + r_grid * ops.sin(theta_grid)
     yq = center_y + r_grid * ops.cos(theta_grid)
     coords_for_interp = ops.stack([ops.ravel(yq), ops.ravel(xq)])
 
@@ -1056,16 +1088,16 @@ def polar_to_cartesian_matrix(
             Defaults to the centre-top ``(cols / 2, 0)``.
         r_max (float, optional): Radius spanned by the polar image, in the same units as
             ``pitch`` (pixels by default). Defaults to ``rows``.
-        polar_limits (tuple, optional): angular extent in radians. The *order* is significant:
-            it must match the column order of ``polar_matrix``. :func:`cartesian_to_polar_matrix`
-            lays its columns out from the larger to the smaller angle, so to invert it pass the
-            range reversed, i.e. ``(theta_max, theta_min)`` -- which is exactly what
-            :func:`polar_geometry_from_coords_for_interp` returns. Defaults to (45, -45) degrees.
+        polar_limits (tuple, optional): Polar angle ``atan(x / z)`` [rad] of the first and
+            last column of ``polar_matrix``, positive toward +x (increasing column index of
+            the output). Pass the ``polar_limits`` given to :func:`cartesian_to_polar_matrix`
+            to invert it. Defaults to (-45, 45) degrees.
         pitch (float, optional): Output units per pixel (radial units of ``r_max``).
             Defaults to 1.0, i.e. ``tip`` and ``r_max`` are in pixels.
         fill_value (float, optional): Value for pixels outside the polar domain.
         order (int, optional): Spline interpolation order. Defaults to 1.
-        theta_range (tuple, optional): Deprecated, use ``polar_limits``.
+        theta_range (tuple, optional): Deprecated, use ``polar_limits``. It measured angles
+            toward -x, so ``theta_range=(a, b)`` is ``polar_limits=(-a, -b)``.
 
     Returns:
         cartesian_matrix (Array): The polar image resampled onto the Cartesian canvas, with
@@ -1073,8 +1105,8 @@ def polar_to_cartesian_matrix(
     """
     assert "float" in ops.dtype(polar_matrix), "Input image must be float type"
 
-    polar_limits = deprecated_alias(
-        polar_limits, theta_range, "theta_range", "polar_limits", "polar_to_cartesian_matrix"
+    polar_limits = _deprecated_mirrored_theta_range(
+        polar_limits, theta_range, "polar_to_cartesian_matrix", reverse=False
     )
     dtype = ops.dtype(polar_matrix)
     n_r, n_polar = ops.shape(polar_matrix)[-2], ops.shape(polar_matrix)[-1]
@@ -1106,7 +1138,7 @@ def polar_to_cartesian_coordinates(
     dtype: str = "float32",
     theta_range=None,
 ):
-    """(rho, theta) sampling grid that pins a polar cone's apex at pixel ``tip``.
+    """(radius, polar angle) sampling grid that pins a polar cone's apex at pixel ``tip``.
 
     Shared core of :func:`polar_to_cartesian_matrix`: builds the fractional index grid that
     resamples an ``(n_r, n_polar)`` polar image onto a ``cartesian_shape`` canvas, with the
@@ -1114,7 +1146,7 @@ def polar_to_cartesian_coordinates(
     :func:`scan_convert_2d` (or the :class:`~zea.ops.ScanConvert` operation) to run the same
     resampling inside a pipeline. Unlike :func:`compute_scan_convert_2d_coordinates`, this uses
     the ``arctan2`` mapping in :func:`_polar_sampling_coordinates`, so it covers a full circle
-    rather than only a narrow (``|theta| < pi/2``) sector.
+    rather than only a narrow (polar angle within ``pi/2``) sector.
 
     Args:
         cartesian_shape (tuple): Output ``(rows, cols)`` = ``(n_z, n_x)``.
@@ -1124,12 +1156,14 @@ def polar_to_cartesian_coordinates(
             Defaults to the centre-top ``(cols / 2, 0)``.
         r_max (float, optional): Radius spanned by the polar image, in the same units as
             ``pitch`` (pixels by default). Defaults to ``rows``.
-        polar_limits (tuple, optional): angular extent in radians; the order must match the
-            column order of the polar image. Defaults to (45, -45) degrees.
+        polar_limits (tuple, optional): Polar angle ``atan(x / z)`` [rad] of the first and
+            last column of the polar image, positive toward +x (increasing column index of
+            the output). Defaults to (-45, 45) degrees.
         pitch (float, optional): Output units per pixel (radial units of ``r_max``).
             Defaults to 1.0, i.e. ``tip`` and ``r_max`` are in pixels.
         dtype (str, optional): Compute dtype for the axes. Defaults to ``"float32"``.
-        theta_range (tuple, optional): Deprecated, use ``polar_limits``.
+        theta_range (tuple, optional): Deprecated, use ``polar_limits``. It measured angles
+            toward -x, so ``theta_range=(a, b)`` is ``polar_limits=(-a, -b)``.
 
     Returns:
         coords (Array): ``(2, cols, rows)`` stack of ``[rho_idx, theta_idx]`` sampling indices.
@@ -1139,17 +1173,17 @@ def polar_to_cartesian_coordinates(
         tip = (cart_cols / 2, 0.0)
     if r_max is None:
         r_max = cart_rows
-    polar_limits = deprecated_alias(
-        polar_limits, theta_range, "theta_range", "polar_limits", "polar_to_cartesian_coordinates"
+    polar_limits = _deprecated_mirrored_theta_range(
+        polar_limits, theta_range, "polar_to_cartesian_coordinates", reverse=False
     )
     if polar_limits is None:
-        polar_limits = (np.deg2rad(45), -np.deg2rad(45))
+        polar_limits = (-np.deg2rad(45), np.deg2rad(45))
 
     tip_x, tip_y = tip
     rho = ops.linspace(0.0, r_max, n_r, dtype=dtype)
     theta = ops.linspace(polar_limits[0], polar_limits[1], n_polar, dtype=dtype)
 
-    x_vec = (tip_x - ops.cast(ops.arange(cart_cols), dtype)) * pitch
+    x_vec = (ops.cast(ops.arange(cart_cols), dtype) - tip_x) * pitch
     z_vec = (ops.cast(ops.arange(cart_rows), dtype) - tip_y) * pitch
 
     return _polar_sampling_coordinates(x_vec, z_vec, rho, theta)
@@ -1176,8 +1210,9 @@ def inverse_scan_convert_2d(
         cartesian_image (tensor): 2D image array in Cartesian coordinates of type float.
         fill_value (float): Value used to fill regions outside the original image
             during interpolation.
-        polar_limits (tuple, optional): ``(theta_min, theta_max)`` angular extent of the polar
-            grid in radians, allowing asymmetric cones. Defaults to (-45, 45) degrees.
+        polar_limits (tuple, optional): Polar angle ``atan(x / z)`` [rad] of the first and
+            last column of the polar image, positive toward +x, as in :func:`scan_convert_2d`.
+            Unequal magnitudes describe an asymmetric cone. Defaults to (-45, 45) degrees.
         output_size (tuple, optional): Shape (rows, cols) of the resulting polar image.
             If None, the shape of the input image is used.
         interpolation_order (int): Order of interpolation used in resampling
@@ -1188,13 +1223,14 @@ def inverse_scan_convert_2d(
             and centered.
         image_range (tuple, optional): Tuple (vmin, vmax) for display scaling
             when detecting the scan cone.
-        theta_range (tuple, optional): Deprecated, use ``polar_limits``.
+        theta_range (tuple, optional): Deprecated, use ``polar_limits``. It measured angles
+            toward -x, so ``theta_range=(a, b)`` is ``polar_limits=(-b, -a)``.
 
     Returns:
         polar_image (Array): 2D image in polar coordinates (sector-shaped scan).
     """
-    polar_limits = deprecated_alias(
-        polar_limits, theta_range, "theta_range", "polar_limits", "inverse_scan_convert_2d"
+    polar_limits = _deprecated_mirrored_theta_range(
+        polar_limits, theta_range, "inverse_scan_convert_2d", reverse=True
     )
 
     if find_scan_cone:
@@ -1211,126 +1247,155 @@ def inverse_scan_convert_2d(
     return polar_image
 
 
-def frustum_convert_rtp2xyz(rho, theta, phi):
-    """Convert coordinates from (rho, theta, phi) space to (X,Y,Z) space using
-    the frustum coordinate conversion.
+def frustum_to_xyz(radius, polar, elevation):
+    """Convert frustum coordinates (radius, polar angle, elevation angle) to (x, y, z).
 
-    ``theta = atan(x / z)`` is the polar angle and ``phi = atan(y / z)`` the elevation
-    angle: projections onto the x-z and y-z planes, not the spherical polar and azimuth
-    angles of the transmits. Angles are defined in radians.
+    The polar angle ``atan(x / z)`` and the elevation angle ``atan(y / z)`` are projections
+    onto the x-z and y-z planes, not the spherical ``polar_angles`` and ``azimuth_angles``
+    of the transmits (see :ref:`angle-conventions`). Angles are defined in radians.
 
     Args:
-        rho (ndarray): Radial coordinates of the points to convert.
-        theta (ndarray): Polar angles ``atan(x / z)`` of the points to convert.
-        phi (ndarray): Elevation angles ``atan(y / z)`` of the points to convert.
+        radius (ndarray): Radial coordinates of the points to convert.
+        polar (ndarray): Polar angles ``atan(x / z)`` of the points to convert.
+        elevation (ndarray): Elevation angles ``atan(y / z)`` of the points to convert.
 
     Returns:
         x (ndarray): X coordinates of the converted points.
         y (ndarray): Y coordinates of the converted points.
         z (ndarray): Z coordinates of the converted points.
     """
-    if ops.size(rho) != ops.size(theta) or ops.size(rho) != ops.size(phi):
-        raise ValueError("Number of elements in rho, theta, and phi should be the same")
+    if ops.size(radius) != ops.size(polar) or ops.size(radius) != ops.size(elevation):
+        raise ValueError("Number of elements in radius, polar and elevation should be the same")
 
-    z = rho / ops.sqrt(1 + ops.tan(theta) ** 2 + ops.tan(phi) ** 2)
-    x = z * ops.tan(theta)
-    y = z * ops.tan(phi)
+    z = radius / ops.sqrt(1 + ops.tan(polar) ** 2 + ops.tan(elevation) ** 2)
+    x = z * ops.tan(polar)
+    y = z * ops.tan(elevation)
 
     return x, y, z
 
 
-def frustum_convert_rt2xz(rho, theta):
-    """Convert coordinates from (rho, theta) space to (X,Z) space using
-    the frustum coordinate conversion.
+def frustum_to_xz(radius, polar):
+    """Convert polar coordinates (radius, polar angle) to (x, z): the 2D case of
+    :func:`frustum_to_xyz`, at elevation 0.
 
-    ``theta = atan(x / z)`` is the signed polar angle. Angles are defined in radians.
+    The polar angle ``atan(x / z)`` is signed, positive toward +x. Angles are defined in
+    radians.
 
     Args:
-        rho (ndarray): Radial coordinates of the points to convert.
-        theta (ndarray): Polar angles ``atan(x / z)`` of the points to convert.
+        radius (ndarray): Radial coordinates of the points to convert.
+        polar (ndarray): Polar angles ``atan(x / z)`` of the points to convert.
 
     Returns:
         x (ndarray): X coordinates of the converted points.
         z (ndarray): Z coordinates of the converted points.
     """
-    if ops.size(rho) != ops.size(theta):
-        raise ValueError("Number of elements in rho and theta should be the same")
+    if ops.size(radius) != ops.size(polar):
+        raise ValueError("Number of elements in radius and polar should be the same")
 
-    z = rho / ops.sqrt(1 + ops.tan(theta) ** 2)
-    x = z * ops.tan(theta)
+    z = radius / ops.sqrt(1 + ops.tan(polar) ** 2)
+    x = z * ops.tan(polar)
 
     return x, z
 
 
-def frustum_convert_xz2rt(x, z, theta_limits):
-    """Convert coordinates from (X,Z) space to (rho, theta) space using
-    the frustum coordinate conversion.
+def xz_to_frustum(x, z, polar_limits):
+    """Convert (x, z) to polar coordinates (radius, polar angle), the inverse of
+    :func:`frustum_to_xz`.
 
-    ``theta = atan(x / z)`` is the signed polar angle. Angles are defined in radians.
+    The polar angle ``atan(x / z)`` is signed, positive toward +x. Angles are defined in
+    radians.
 
     Args:
         x (ndarray): X coordinates of the points to convert.
         z (ndarray): Z coordinates of the points to convert.
-        theta_limits (list): Polar angle limits of the original volume. Any
+        polar_limits (list): Polar angle limits of the original image. Any
             point that resides outside of these limits is potentially
             undefined, and therefore, the radial value for these points is
             made to be -1.
 
     Returns:
-        rho (ndarray): Radial coordinates of the converted points.
-        theta (ndarray): Polar angles ``atan(x / z)`` of the converted points.
+        radius (ndarray): Radial coordinates of the converted points.
+        polar (ndarray): Polar angles ``atan(x / z)`` of the converted points.
     """
     if ops.size(x) != ops.size(z):
         raise ValueError("Number of elements in x and z should be the same")
 
-    rho = ops.sqrt(x**2 + z**2)
-    theta = ops.arctan2(x, z)
+    radius = ops.sqrt(x**2 + z**2)
+    polar = ops.arctan2(x, z)
 
-    rho = ops.where(
-        (rho < 0) | (theta < theta_limits[0]) | (theta > theta_limits[1]),
+    radius = ops.where(
+        (radius < 0) | (polar < polar_limits[0]) | (polar > polar_limits[1]),
         -1,
-        rho,
+        radius,
     )
 
-    return rho, theta
+    return radius, polar
 
 
-def frustum_convert_xyz2rtp(x, y, z, theta_limits, phi_limits):
-    """Convert coordinates from (X,Y,Z) space to (rho, theta, phi) space using
-    the frustum coordinate conversion.
+def xyz_to_frustum(x, y, z, polar_limits, elevation_limits):
+    """Convert (x, y, z) to frustum coordinates (radius, polar angle, elevation angle), the
+    inverse of :func:`frustum_to_xyz`.
 
-    Angles are defined in radians.
+    The polar angle ``atan(x / z)`` and the elevation angle ``atan(y / z)`` are projections
+    onto the x-z and y-z planes (see :ref:`angle-conventions`). Angles are defined in
+    radians.
 
     Args:
         x (ndarray): X coordinates of the points to convert.
         y (ndarray): Y coordinates of the points to convert.
         z (ndarray): Z coordinates of the points to convert.
-        theta_limits, phi_limits:
+        polar_limits, elevation_limits:
             Polar and elevation angle limits, respectively, of the original volume. Any
             point that resides outside of these limits is potentially
             undefined, and therefore, the radial value for these points is
             made to be -1.
 
     Returns:
-        rho (ndarray): Radial coordinates of the converted points.
-        theta (ndarray): Polar angles ``atan(x / z)`` of the converted points.
-        phi (ndarray): Elevation angles ``atan(y / z)`` of the converted points.
+        radius (ndarray): Radial coordinates of the converted points.
+        polar (ndarray): Polar angles ``atan(x / z)`` of the converted points.
+        elevation (ndarray): Elevation angles ``atan(y / z)`` of the converted points.
     """
     if ops.size(x) != ops.size(y) or ops.size(x) != ops.size(z):
         raise ValueError("Number of elements in x, y, and z should be the same")
 
-    rho = ops.sqrt(x**2 + y**2 + z**2)
-    theta = ops.arctan2(x, z)
-    phi = ops.arctan2(y, z)
+    radius = ops.sqrt(x**2 + y**2 + z**2)
+    polar = ops.arctan2(x, z)
+    elevation = ops.arctan2(y, z)
 
-    rho = ops.where(
-        (rho < 0)
-        | (theta < theta_limits[0])
-        | (theta > theta_limits[1])
-        | (phi < phi_limits[0])
-        | (phi > phi_limits[1]),
+    radius = ops.where(
+        (radius < 0)
+        | (polar < polar_limits[0])
+        | (polar > polar_limits[1])
+        | (elevation < elevation_limits[0])
+        | (elevation > elevation_limits[1]),
         -1,
-        rho,
+        radius,
     )
 
-    return rho, theta, phi
+    return radius, polar, elevation
+
+
+@deprecated(replacement="frustum_to_xyz")
+def frustum_convert_rtp2xyz(rho, theta, phi):
+    """Deprecated, use :func:`frustum_to_xyz` (``theta`` is its ``polar`` and ``phi`` its
+    ``elevation`` angle)."""
+    return frustum_to_xyz(rho, theta, phi)
+
+
+@deprecated(replacement="frustum_to_xz")
+def frustum_convert_rt2xz(rho, theta):
+    """Deprecated, use :func:`frustum_to_xz` (``theta`` is its ``polar`` angle)."""
+    return frustum_to_xz(rho, theta)
+
+
+@deprecated(replacement="xz_to_frustum")
+def frustum_convert_xz2rt(x, z, theta_limits):
+    """Deprecated, use :func:`xz_to_frustum` (``theta_limits`` is its ``polar_limits``)."""
+    return xz_to_frustum(x, z, theta_limits)
+
+
+@deprecated(replacement="xyz_to_frustum")
+def frustum_convert_xyz2rtp(x, y, z, theta_limits, phi_limits):
+    """Deprecated, use :func:`xyz_to_frustum` (``theta_limits`` is its ``polar_limits`` and
+    ``phi_limits`` its ``elevation_limits``)."""
+    return xyz_to_frustum(x, y, z, theta_limits, phi_limits)

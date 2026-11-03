@@ -372,6 +372,15 @@ def load_cone_parameters(csv_path):
     return cone_params
 
 
+def _cone_polar_limits(cone_params):
+    """The polar angles ``atan(x / z)`` [rad] of the left and right edge of the scan cone.
+
+    The fitted edges run ``x = intercept + slope * y`` with depth ``y``, so each edge's
+    angle is ``atan(slope)``: negative on the left, positive on the right.
+    """
+    return math.atan(cone_params["left_slope"]), math.atan(cone_params["right_slope"])
+
+
 class LVHProcessor:
     """Processor for EchoNet-LVH dataset."""
 
@@ -399,11 +408,11 @@ class LVHProcessor:
 
         self.cart2pol_batched = jit(
             vmap(
-                lambda matrix, tip_x, tip_y, r_max, theta_min, theta_max: cartesian_to_polar_matrix(
+                lambda matrix, tip_x, tip_y, r_max, polar_min, polar_max: cartesian_to_polar_matrix(
                     matrix,
                     tip=(tip_x, tip_y),
                     r_max=r_max,
-                    polar_limits=(theta_min, theta_max),
+                    polar_limits=(polar_min, polar_max),
                     polar_shape=polar_shape,  # fixed
                 ),
                 in_axes=(0, None, None, None, None, None),
@@ -437,9 +446,7 @@ class LVHProcessor:
 
         r_max = cone_params["circle_radius"]
 
-        theta_max = -math.atan(cone_params["right_slope"])
-        theta_min = -math.atan(cone_params["left_slope"])
-        polar_limits = (theta_min, theta_max)
+        polar_limits = _cone_polar_limits(cone_params)
 
         return polar_to_cartesian_matrix(
             image_polar, cartesian_shape, tip, r_max, polar_limits, order=order
@@ -498,16 +505,15 @@ class LVHProcessor:
         sequence_processed = ops.cast(ops.convert_to_tensor(payload["sequence_np"]), "float32")
 
         # Polar conversion runs on the uncropped frame using apex coordinates in
-        # original-image space; theta_min/theta_max come from the fitted slopes
-        # (polar +theta lands on the left after the 90° rotation in
-        # cartesian_to_polar_matrix, so right_slope → theta_min).
+        # original-image space; the polar limits come from the fitted slopes.
+        polar_min, polar_max = _cone_polar_limits(cone_params)
         polar_im_set = self.cart2pol_batched(
             sequence_processed,
             ops.convert_to_tensor(cone_params["apex_x"]),
             ops.convert_to_tensor(cone_params["apex_y"]),
             ops.convert_to_tensor(cone_params["circle_radius"]),
-            ops.convert_to_tensor(-math.atan(cone_params["right_slope"])),
-            ops.convert_to_tensor(-math.atan(cone_params["left_slope"])),
+            ops.convert_to_tensor(polar_min),
+            ops.convert_to_tensor(polar_max),
         )
 
         polar_im_set = ops.cast(ops.floor(polar_im_set + 0.5), "uint8")

@@ -106,6 +106,43 @@ def test_scan_convert_in_process_smoke():
     assert np.asarray(out3d).ndim == 3
 
 
+def test_frustum_conversions():
+    """frustum_to_xyz takes the polar angle atan(x / z) and the elevation angle
+    atan(y / z), and xyz_to_frustum inverts it; the 2D pair is the case elevation = 0."""
+    radius, polar, elevation = np.array([2.0]), np.array([0.3]), np.array([-0.2])
+    x, y, z = display.frustum_to_xyz(radius=radius, polar=polar, elevation=elevation)
+    np.testing.assert_allclose(np.arctan2(x, z), polar)
+    np.testing.assert_allclose(np.arctan2(y, z), elevation)
+    np.testing.assert_allclose(np.sqrt(x**2 + y**2 + z**2), radius)
+    back = display.xyz_to_frustum(x, y, z, polar_limits=(-0.5, 0.5), elevation_limits=(-0.5, 0.5))
+    np.testing.assert_allclose(np.concatenate(back), [2.0, 0.3, -0.2])
+
+    x2, z2 = display.frustum_to_xz(radius=radius, polar=polar)
+    x3, _, z3 = display.frustum_to_xyz(radius, polar, np.zeros(1))
+    np.testing.assert_allclose(np.concatenate([x2, z2]), np.concatenate([x3, z3]))
+    back = display.xz_to_frustum(x2, z2, polar_limits=(-0.5, 0.5))
+    np.testing.assert_allclose(np.concatenate(back), [2.0, 0.3])
+
+
+def test_frustum_convert_deprecated_names():
+    """The old frustum_convert_* functions keep their signatures and call the new ones."""
+    radius, polar, elevation = np.array([2.0]), np.array([0.3]), np.array([-0.2])
+    x, y, z = display.frustum_to_xyz(radius, polar, elevation)
+    old = display.frustum_convert_rtp2xyz(rho=radius, theta=polar, phi=elevation)
+    np.testing.assert_array_equal(np.concatenate(old), np.concatenate([x, y, z]))
+    old = display.frustum_convert_xyz2rtp(x, y, z, theta_limits=(-0.5, 0.5), phi_limits=(-0.5, 0.5))
+    new = display.xyz_to_frustum(x, y, z, (-0.5, 0.5), (-0.5, 0.5))
+    np.testing.assert_array_equal(np.concatenate(old), np.concatenate(new))
+    old = display.frustum_convert_rt2xz(rho=radius, theta=polar)
+    np.testing.assert_array_equal(
+        np.concatenate(old), np.concatenate(display.frustum_to_xz(radius, polar))
+    )
+    old = display.frustum_convert_xz2rt(x, z, theta_limits=(-1, 1))
+    np.testing.assert_array_equal(
+        np.concatenate(old), np.concatenate(display.xz_to_frustum(x, z, (-1, 1)))
+    )
+
+
 def test_scan_convert_deprecated_range_names():
     """``rho_range``, ``theta_range`` and ``phi_range`` still work as aliases."""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
@@ -127,18 +164,66 @@ def test_scan_convert_deprecated_range_names():
     with pytest.raises(TypeError, match="deprecated alias 'rho_range'"):
         display.scan_convert_2d(img2d, rlims=(0, 1), rho_range=(0, 1), polar_limits=(-0.5, 0.5))
 
-    # The polar round-trip helpers take the same alias
+    # The polar round-trip helpers take the same alias. theta_range measured angles toward
+    # -x, so it maps onto mirrored polar_limits that give the same image.
     cart = rng.random((40, 50)).astype(np.float32)
-    new = display.cartesian_to_polar_matrix(cart, polar_limits=(-0.3, 0.6))
+    new = display.cartesian_to_polar_matrix(cart, polar_limits=(-0.6, 0.3))
     old = display.cartesian_to_polar_matrix(cart, theta_range=(-0.3, 0.6))
     np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
-    new = display.polar_to_cartesian_matrix(cart, (40, 50), polar_limits=(0.6, -0.3))
+    new = display.polar_to_cartesian_matrix(cart, (40, 50), polar_limits=(-0.6, 0.3))
     old = display.polar_to_cartesian_matrix(cart, (40, 50), theta_range=(0.6, -0.3))
     np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
     kwargs = dict(output_size=(40, 50), find_scan_cone=False)
-    new = display.inverse_scan_convert_2d(cart, polar_limits=(-0.3, 0.6), **kwargs)
+    new = display.inverse_scan_convert_2d(cart, polar_limits=(-0.6, 0.3), **kwargs)
     old = display.inverse_scan_convert_2d(cart, theta_range=(-0.3, 0.6), **kwargs)
     np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    with pytest.raises(TypeError, match="deprecated alias 'theta_range'"):
+        display.cartesian_to_polar_matrix(cart, polar_limits=(-0.3, 0.6), theta_range=(-0.3, 0.6))
+
+
+def test_cartesian_to_polar_matrix_angles_are_positive_toward_plus_x():
+    """Column ``j`` of the polar image samples at the polar angle ``atan(x / z)`` of
+    ``linspace(*polar_limits)[j]``, positive toward +x, as in :func:`scan_convert_2d`."""
+    height, width, apex_x = 120, 241, 120.0
+    xx = np.broadcast_to(np.arange(width, dtype=np.float32), (height, width))
+    lateral = xx - apex_x  # each pixel holds its signed x
+    polar_limits = (-0.2, 0.8)  # asymmetric: wider on the +x side
+    polar = np.asarray(
+        display.cartesian_to_polar_matrix(
+            lateral,
+            tip=(apex_x, 0.0),
+            r_max=100.0,
+            polar_limits=polar_limits,
+            polar_shape=(101, 11),
+        )
+    )
+    r = np.linspace(0, 100, 101)[:, None]
+    theta = np.linspace(*polar_limits, 11)[None, :]
+    np.testing.assert_allclose(polar, r * np.sin(theta), atol=1e-3)
+
+
+def test_cartesian_to_polar_matrix_inverts_scan_convert_2d():
+    """With the same asymmetric polar_limits, cartesian_to_polar_matrix undoes
+    scan_convert_2d: both lay out the columns from polar_limits[0] toward +x."""
+    rlims, polar_limits = (0.0, 100.0), (-0.3, 0.7)
+    n_r, n_polar = 101, 41
+    theta = np.linspace(*polar_limits, n_polar, dtype=np.float32)
+    polar = np.broadcast_to(theta, (n_r, n_polar)).copy()  # each column holds its angle
+
+    cart, info = display.scan_convert_2d(
+        polar, rlims, polar_limits, resolution=0.5, fill_value=np.nan
+    )
+    resolution = float(info["resolution"])
+    apex_column = -float(info["x_lim"][0]) / resolution
+    back = display.cartesian_to_polar_matrix(
+        np.nan_to_num(np.asarray(cart)),
+        tip=(apex_column, 0.0),
+        r_max=rlims[1] / resolution,
+        polar_limits=polar_limits,
+        polar_shape=(n_r, n_polar),
+    )
+    # Away from the apex and the cone edges, where interpolation mixes in the fill value
+    np.testing.assert_allclose(np.asarray(back)[20:90, 2:-2], polar[20:90, 2:-2], atol=0.02)
 
 
 def create_radial_pattern(size):
@@ -267,9 +352,7 @@ def test_polar_to_cartesian_matrix_roundtrip():
     Unlike scan_convert_2d (which fits the cone bounding box into the output), it pins the
     apex at ``tip`` on a full-size canvas, so a forward/inverse round-trip reconstructs the
     original frame at its original position and scale. Uses an *asymmetric* polar_limits to
-    guard against an angular shift: the inverse is obtained by passing polar_limits in the
-    reversed order (matching cartesian_to_polar_matrix's rot90 column ordering, which is what
-    polar_geometry_from_coords_for_interp returns).
+    guard against an angular shift or a mirror: both directions take the same polar_limits.
     """
     from keras import ops
 
@@ -278,9 +361,9 @@ def test_polar_to_cartesian_matrix_roundtrip():
     height, width = 220, 300
     yy, xx = np.meshgrid(np.arange(height), np.arange(width), indexing="ij")
     apex_x, apex_y = 170.0, 30.0
-    # cartesian_to_polar_matrix convention: theta = arctan2(-(x - apex_x), y - apex_y).
+    # The polar angle atan(x / z), positive toward +x (increasing column index).
     r = np.sqrt((xx - apex_x) ** 2 + (yy - apex_y) ** 2)
-    theta = np.arctan2(-(xx - apex_x), yy - apex_y)
+    theta = np.arctan2(xx - apex_x, yy - apex_y)
     theta_min, theta_max = -0.3, 0.6  # asymmetric cone
     mask = (theta > theta_min) & (theta < theta_max) & (r < 180)
     blob = np.exp(-(((xx - 150) / 12) ** 2 + ((yy - 150) / 12) ** 2))  # off-centre marker
@@ -292,13 +375,12 @@ def test_polar_to_cartesian_matrix_roundtrip():
         r_max=180.0,
         polar_limits=(theta_min, theta_max),
     )
-    # Invert: polar_limits reversed to match the polar image's column order.
     back = display.polar_to_cartesian_matrix(
         polar,
         (height, width),
         tip=(apex_x, apex_y),
         r_max=180.0,
-        polar_limits=(theta_max, theta_min),
+        polar_limits=(theta_min, theta_max),
     )
     back = np.nan_to_num(ops.convert_to_numpy(back))
 

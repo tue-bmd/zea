@@ -14,7 +14,7 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 from scipy.ndimage import zoom
 from skimage import measure
 
-from zea.display import frustum_convert_rtp2xyz
+from zea.display import frustum_to_xyz
 from zea.internal.utils import deprecated_alias
 
 DEFAULT_STYLE: str = str(importlib.resources.files("zea") / "zea_darkmode.mplstyle")
@@ -438,37 +438,45 @@ def plot_frustum_vertices(
     polar_limits=None,
     elevation_limits=None,
     num_points=20,
-    phi_plane=None,
-    theta_plane=None,
-    rho_plane=None,
+    elevation_plane=None,
+    polar_plane=None,
+    radius_plane=None,
     fig=None,
     ax=None,
     frustum_style=None,
-    phi_style=None,
-    theta_style=None,
-    rho_style=None,
+    elevation_style=None,
+    polar_style=None,
+    radius_style=None,
     *,
     rho_range=None,
     theta_range=None,
     phi_range=None,
+    phi_plane=None,
+    theta_plane=None,
+    rho_plane=None,
+    phi_style=None,
+    theta_style=None,
+    rho_style=None,
 ):
     """
     Plots the vertices of a frustum and highlights specified planes.
 
-    The frustum is spanned by radius ``rho``, polar angle ``theta = atan(x / z)`` and
-    elevation angle ``phi = atan(y / z)``, as in :func:`zea.display.scan_convert_3d`.
+    The frustum is spanned by the radius, the polar angle ``atan(x / z)`` and the
+    elevation angle ``atan(y / z)``, as in :func:`zea.display.scan_convert_3d`.
 
     Args:
         rlims (tuple): Radius ``(rho_min, rho_max)``.
-        polar_limits (tuple): Polar angle ``(theta_min, theta_max)`` [rad].
-        elevation_limits (tuple): Elevation angle ``(phi_min, phi_max)`` [rad].
+        polar_limits (tuple): Polar angle ``atan(x / z)`` of the first and last sample
+            [rad].
+        elevation_limits (tuple): Elevation angle ``atan(y / z)`` of the first and last
+            sample [rad].
         num_points (int, optional): Number of points to generate along each edge.
             Defaults to 20.
-        phi_plane (float or list, optional): Elevation angle(s) at which to plot plane(s).
+        elevation_plane (float or list, optional): Elevation angle(s) at which to plot
+            plane(s). Defaults to None.
+        polar_plane (float or list, optional): Polar angle(s) at which to plot plane(s).
             Defaults to None.
-        theta_plane (float or list, optional): Polar angle(s) at which to plot plane(s).
-            Defaults to None.
-        rho_plane (float or list, optional): Value(s) of rho at which to plot plane(s).
+        radius_plane (float or list, optional): Radius (radii) at which to plot plane(s).
             Defaults to None.
         fig (matplotlib.figure.Figure, optional): Figure object to plot on.
             Defaults to None. Can be used to reuse the figure in a loop.
@@ -477,24 +485,29 @@ def plot_frustum_vertices(
         frustum_style (dict, optional): Style dictionary for frustum edges. Can include
             'color', 'linestyle', 'linewidth', 'alpha', etc.
             Defaults to {'color': 'blue', 'linestyle': '-', 'linewidth': 2}.
-        phi_style (dict, optional): Style dictionary for phi plane(s). Can include
-            'color', 'linestyle', 'linewidth', 'alpha', etc.
+        elevation_style (dict, optional): Style dictionary for elevation plane(s). Can
+            include 'color', 'linestyle', 'linewidth', 'alpha', etc.
             Defaults to {'color': 'yellow', 'linestyle': '-'}.
-        theta_style (dict, optional): Style dictionary for theta plane(s). Can include
+        polar_style (dict, optional): Style dictionary for polar plane(s). Can include
             'color', 'linestyle', 'linewidth', 'alpha', etc.
             Defaults to {'color': 'green', 'linestyle': '--'}.
-        rho_style (dict, optional): Style dictionary for rho plane(s). Can include
+        radius_style (dict, optional): Style dictionary for radius plane(s). Can include
             'color', 'linestyle', 'linewidth', 'alpha', etc.
             Defaults to {'color': 'red', 'linestyle': '--'}.
         rho_range (tuple, optional): Deprecated, use ``rlims``.
         theta_range (tuple, optional): Deprecated, use ``polar_limits``.
         phi_range (tuple, optional): Deprecated, use ``elevation_limits``.
+        phi_plane, theta_plane, rho_plane (optional): Deprecated, use
+            ``elevation_plane``, ``polar_plane`` and ``radius_plane``.
+        phi_style, theta_style, rho_style (dict, optional): Deprecated, use
+            ``elevation_style``, ``polar_style`` and ``radius_style``.
 
     Returns:
         tuple: A tuple containing the figure and axes objects (fig, ax).
 
     Raises:
-        ValueError: If no plane is specified (phi_plane, theta_plane, or rho_plane).
+        ValueError: If no plane is specified (elevation_plane, polar_plane, or
+            radius_plane).
 
     Example:
         .. doctest::
@@ -504,10 +517,10 @@ def plot_frustum_vertices(
             ...     rlims=[0.1e-3, 10e-3],  # in m
             ...     polar_limits=[-0.6, 0.6],  # in rad
             ...     elevation_limits=[-0.6, 0.6],  # in rad
-            ...     phi_plane=0,
-            ...     phi_style={"color": "red", "linestyle": "--", "linewidth": 2},
-            ...     theta_plane=0.2,
-            ...     theta_style={"color": "green", "linestyle": ":", "alpha": 0.7},
+            ...     elevation_plane=0,
+            ...     elevation_style={"color": "red", "linestyle": "--", "linewidth": 2},
+            ...     polar_plane=0.2,
+            ...     polar_style={"color": "green", "linestyle": ":", "alpha": 0.7},
             ...     frustum_style={"color": "blue", "linewidth": 1.5},
             ... )
     """
@@ -519,6 +532,13 @@ def plot_frustum_vertices(
     )
     if rho_lims is None or theta_lims is None or phi_lims is None:
         raise ValueError("rlims, polar_limits and elevation_limits are required.")
+    # Below, theta, phi and rho stand for the polar angle, the elevation angle and the radius.
+    phi_plane = deprecated_alias(elevation_plane, phi_plane, "phi_plane", "elevation_plane", caller)
+    theta_plane = deprecated_alias(polar_plane, theta_plane, "theta_plane", "polar_plane", caller)
+    rho_plane = deprecated_alias(radius_plane, rho_plane, "rho_plane", "radius_plane", caller)
+    phi_style = deprecated_alias(elevation_style, phi_style, "phi_style", "elevation_style", caller)
+    theta_style = deprecated_alias(polar_style, theta_style, "theta_style", "polar_style", caller)
+    rho_style = deprecated_alias(radius_style, rho_style, "rho_style", "radius_style", caller)
 
     # Convert single values to lists
     phi_plane = [phi_plane] if isinstance(phi_plane, (int, float)) else phi_plane
@@ -571,7 +591,7 @@ def plot_frustum_vertices(
     all_points = []
     for edge in edges:
         rho_pts, theta_pts, phi_pts = generate_edge_points(edge[0], edge[1], num_points)
-        x, y, z = frustum_convert_rtp2xyz(rho_pts, theta_pts, phi_pts)
+        x, y, z = frustum_to_xyz(rho_pts, theta_pts, phi_pts)
         all_points.extend(zip(x, y, -z))  # Flip z-axis
 
     all_points = np.array(all_points)
@@ -589,7 +609,7 @@ def plot_frustum_vertices(
     def _plot_edges(edges, **kwargs):
         for edge in edges:
             rho_pts, theta_pts, phi_pts = generate_edge_points(edge[0], edge[1], num_points)
-            x, y, z = frustum_convert_rtp2xyz(rho_pts, theta_pts, phi_pts)
+            x, y, z = frustum_to_xyz(rho_pts, theta_pts, phi_pts)
             ax3d.plot(x, y, -z, **kwargs)
 
     # Plot frustum edges
