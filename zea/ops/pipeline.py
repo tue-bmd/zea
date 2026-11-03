@@ -102,6 +102,30 @@ def _summarize_inputs(inputs: Dict[str, Any]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
+def _stale_derived_keys(override_keys) -> set:
+    """Keys :class:`~zea.Parameters` derives from values that ``override_keys`` replace.
+
+    Scan conversion takes ``grid_apex``, ``extent`` and ``coordinates`` from Parameters,
+    which derives them from its own limits and resolution. When the caller overrides those
+    inputs, the derived values describe a different image and must not be passed along.
+    """
+    from zea.parameters import Parameters
+
+    overridden = {Parameters._RENAMED_PARAMS.get(key, key) for key in override_keys}
+    stale = set()
+    if "rlims" in overridden:
+        # Overridden radii describe a polar image of their own, so the apex they are
+        # measured from, the output window and the sampling coordinates do not apply.
+        stale |= {"grid_apex", "extent", "coordinates"}
+    elif overridden & {"polar_limits", "elevation_limits"}:
+        # The rows are still this grid's, whose rlims are measured from grid_apex, so keep
+        # the apex; only the window and coordinates of its sector change.
+        stale |= {"extent", "coordinates"}
+    if "resolution" in overridden:
+        stale.add("coordinates")
+    return stale
+
+
 @ops_registry("pipeline")
 class Pipeline:
     """Pipeline class for processing ultrasound data through a series of
@@ -1020,17 +1044,10 @@ class Pipeline:
         if parameters is not None:
             if not isinstance(parameters, Parameters):
                 raise TypeError(f"Expected an instance of `zea.Parameters`, got {type(parameters)}")
-            # Only convert keys the pipeline needs and that are not overridden,
-            # so we avoid deriving unnecessary parameters.
-            needs_keys = self.needs_keys - override_keys
-            overridden = {Parameters._RENAMED_PARAMS.get(key, key) for key in override_keys}
-            if overridden & {"rlims", "polar_limits", "elevation_limits"}:
-                # Overridden scan-conversion limits describe a polar image of their own,
-                # so the apex, output window and sampling coordinates derived for this
-                # grid do not apply.
-                needs_keys -= {"grid_apex", "extent", "coordinates"}
-            if "resolution" in overridden:
-                needs_keys -= {"coordinates"}
+            # Only convert keys the pipeline needs and that are not overridden (directly,
+            # or through the values they are derived from), so we avoid deriving
+            # unnecessary or mismatched parameters.
+            needs_keys = self.needs_keys - override_keys - _stale_derived_keys(override_keys)
             with backend.device(_device):
                 params_dict = parameters.to_tensor(
                     include=list(needs_keys), keep_as_is=self.static_params
