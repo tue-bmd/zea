@@ -2260,6 +2260,35 @@ class ADMIRE(Operation):
             )
         return pitch
 
+    @staticmethod
+    def _check_models(models, depths, pitch, sound_speed, center_frequency, f_number):
+        """Raise if precomputed models were generated for a different geometry.
+
+        Models from before the geometry was recorded on them are only checked for
+        their pitch.
+        """
+        mismatches = []
+        if not np.allclose(np.diff(models.element_positions), pitch, rtol=1e-3, atol=0):
+            mismatches.append("pitch")
+        if models.depths is not None and (
+            models.depths.shape != depths.shape
+            or not np.allclose(models.depths, depths, rtol=0, atol=1e-3 * np.diff(depths).mean())
+        ):
+            mismatches.append("depths (grid z-axis)")
+        for name, value, expected in [
+            ("sound_speed", models.sound_speed, sound_speed),
+            ("center_frequency", models.center_frequency, center_frequency),
+            ("f_number", models.f_number, f_number),
+        ]:
+            if value is not None and not np.isclose(value, expected, rtol=1e-5, atol=0):
+                mismatches.append(name)
+        if mismatches:
+            raise ValueError(
+                "The precomputed ADMIRE models were generated for a different "
+                f"{', '.join(mismatches)} than the current inputs. Regenerate them with "
+                "zea.beamform.admire.generate_admire_models, or leave out `models`."
+            )
+
     def _get_models(
         self, depths, pitch, n_elements, sound_speed, center_frequency, f_number, analytic
     ):
@@ -2267,6 +2296,7 @@ class ADMIRE(Operation):
         from zea.beamform.admire import ADMIREConfig, generate_admire_models
 
         if self.models is not None:
+            self._check_models(self.models, depths, pitch, sound_speed, center_frequency, f_number)
             return self.models
         config = ADMIREConfig(**(self.config or {}))
         key = (

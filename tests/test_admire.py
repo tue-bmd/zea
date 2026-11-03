@@ -487,3 +487,22 @@ def test_beamform_admire_serializes(iq_models):
     with_models = ops.Beamform(beamformer="admire", models=models)
     assert "models" not in with_models.get_dict()["params"]
     ops.Pipeline([with_models]).to_json()
+
+
+def test_admire_rejects_models_for_another_geometry():
+    """Precomputed models must match the geometry they are applied to."""
+    from zea import ops
+
+    data, params = _admire_inputs()
+    depths = params["grid"][:, 0, 2].astype(float)
+    with cache_disabled():
+        models = generate_admire_models(
+            depths, SOUND_SPEED, CENTER_FREQUENCY, PITCH, 9, f_number=2.0, analytic=True
+        )
+    ops.ADMIRE(models=models, with_batch_dim=True)(data=data, **params)
+    for name, value in [("sound_speed", 1.1 * SOUND_SPEED), ("f_number", 1.0)]:
+        with pytest.raises(ValueError, match=name):
+            ops.ADMIRE(models=models, with_batch_dim=True)(data=data, **{**params, name: value})
+    shifted = dataclasses.replace(models, depths=depths + 1e-3)
+    with pytest.raises(ValueError, match="depths"):
+        ops.ADMIRE(models=shifted, with_batch_dim=True)(data=data, **params)

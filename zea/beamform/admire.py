@@ -226,6 +226,13 @@ class ADMIREModels:
             only the band around the center frequency is present, or for real RF
             data, where negative frequencies mirror the positive ones.
         config (ADMIREConfig): Settings used to generate the models.
+        depths (np.ndarray, optional): Depths (m) the models were generated for.
+        sound_speed (float, optional): Speed of sound (m/s) the models were
+            generated for.
+        center_frequency (float, optional): Center frequency (Hz) the models were
+            generated for.
+        f_number (float, optional): F-number of aperture growth the models were
+            generated for.
     """
 
     models: np.ndarray
@@ -239,6 +246,10 @@ class ADMIREModels:
     element_positions: np.ndarray
     analytic: bool
     config: ADMIREConfig = field(default_factory=ADMIREConfig)
+    depths: np.ndarray | None = None
+    sound_speed: float | None = None
+    center_frequency: float | None = None
+    f_number: float | None = None
 
     @property
     def n_windows(self) -> int:
@@ -740,6 +751,10 @@ def generate_admire_models(
         element_positions=element_positions,
         analytic=analytic,
         config=config,
+        depths=depths,
+        sound_speed=float(sound_speed),
+        center_frequency=float(center_frequency),
+        f_number=float(f_number),
     )
 
 
