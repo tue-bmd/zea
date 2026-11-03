@@ -1204,6 +1204,15 @@ def test_extent_of_a_flat_array_starts_at_zlims():
     assert parameters.extent[4] == pytest.approx(parameters.zlims[0])
 
 
+@pytest.mark.parametrize("origins", ["middle", "spread"])
+def test_extent_of_a_flat_array_starts_at_a_set_zlims(origins):
+    """A set zlims[0] is where the image starts: the parts of the first rows that reach
+    above it at the sector edges are cropped, also when they lie in front of the array."""
+    parameters = _phased(origins=origins, zlims=(0.01, 0.1), grid_size_x=64, grid_size_z=128)
+    assert 0 < parameters.grid[..., 2].min() < parameters.zlims[0]
+    assert parameters.extent[4] == pytest.approx(parameters.zlims[0])
+
+
 def test_extent_of_a_curved_array_follows_the_sector():
     """A curved array's sector follows the array, so its image may start above zlims[0]."""
     parameters = Parameters(

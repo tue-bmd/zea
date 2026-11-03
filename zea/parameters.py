@@ -964,9 +964,12 @@ class Parameters(BaseParameters):
 
         - ``x`` spans :attr:`xlims`, which defaults to the width of the sector; an explicit
           value crops or pads the image.
-        - ``z`` spans the grid, except that on a flat array it starts at ``zlims[0]``. That
-          crops the pixels a virtual apex places behind the array. A curved array needs no
-          crop, since its sector follows the array.
+        - ``z`` spans the grid, except that on a flat array it starts at ``zlims[0]``, the
+          depth the image was asked to start at. The rows of a polar grid are arcs around
+          :attr:`grid_apex`, so at the sector edges the first rows reach above that depth
+          (or, with a virtual apex, behind the array); those parts are cropped. A curved
+          array needs no crop, since its rows already lie at a constant distance below
+          the array surface, the first one at ``zlims[0]``.
         """
         # self.grid holds transducer-frame coordinates for every grid type (polar grids
         # fan out from grid_apex), so this needs no correction.
