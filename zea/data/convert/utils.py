@@ -1,5 +1,7 @@
+import atexit
 import json
 import os
+import shutil
 import tempfile
 import urllib.request
 import zipfile
@@ -173,6 +175,8 @@ def unzip_beside(src: Path) -> Path:
     # A fresh private dir each run, as reusing a predictable path in the shared temp dir
     # would let another user plant a forged extraction.
     tmp_dir = Path(tempfile.mkdtemp(prefix="zea_unzipped_"))
+    # Registered before extracting, so a failed or partial extraction is removed too.
+    atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
     log.warning(f"{src.parent} is not writable, unzipping to {tmp_dir} instead.")
     return unzip(src, tmp_dir)
 
