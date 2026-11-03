@@ -80,6 +80,8 @@ def test_probe_repr():
     assert "\n" not in r
     assert "name=" in r
     assert "MHz" in r
+    assert "element_width=" in r
+    assert "pitch=" not in r
 
 
 def test_file_create_probe_wrong_type():
