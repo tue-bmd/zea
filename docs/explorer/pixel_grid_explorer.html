@@ -486,8 +486,10 @@ function resolve(s) {
   // Parameters.polar_limits
   let polarLimits;
   if (scanline) {
-    polarLimits = [lo, hi];
-    src.polar_limits = "scanline: min / max of polar_angles, the columns' own angles";
+    // First and last transmit, not min / max: scan conversion places the columns, which are
+    // the transmits in order, evenly from polar_limits[0] to polar_limits[1].
+    polarLimits = [tx.angles[0], tx.angles[tx.angles.length - 1]];
+    src.polar_limits = "scanline: first / last of polar_angles, the columns' own angles in transmit order";
   } else if (s.polar_limits) { polarLimits = s.polar_limits.map(f32); src.polar_limits = "override"; }
   else {
     polarLimits = [lo - polarMargin.left, hi + polarMargin.right];
