@@ -920,7 +920,7 @@ class Parameters(BaseParameters):
         return (float(np.min(x)), float(np.max(x)))
 
     @cache_with_dependencies(
-        "zlims", "grid_type", "elevation_limits", "probe_geometry", "grid_apex"
+        "zlims", "grid_type", "elevation_limits", "probe_geometry", optional=("grid_apex",)
     )
     def ylims(self):
         """The y-limits of the beamforming grid [m]. If not explicitly set, it is computed based
@@ -931,13 +931,13 @@ class Parameters(BaseParameters):
             return ylims
 
         # If ylims not set, compute based on elevation limits and probe geometry
-        radius = max(self.zlims) - float(self.grid_apex[2])
         limits = self.elevation_limits
-        ylims_elevation = (
-            (0.0, 0.0)
-            if limits is None or limits[0] == limits[1]
-            else (radius * np.sin(limits[0]), radius * np.sin(limits[1]))
-        )
+        if limits is None or limits[0] == limits[1]:
+            ylims_elevation = (0.0, 0.0)
+        else:
+            # Only an elevation range needs the apex, which the radius is measured from
+            radius = max(self.zlims) - float(self.grid_apex[2])
+            ylims_elevation = (radius * np.sin(limits[0]), radius * np.sin(limits[1]))
         ylims_plane = (min(self.probe_geometry[:, 1]), max(self.probe_geometry[:, 1]))
         ylims = (
             min(ylims_elevation[0], ylims_plane[0]),

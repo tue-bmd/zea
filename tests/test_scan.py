@@ -1061,6 +1061,22 @@ def test_elevation_limits_from_spherical_transmit_angles():
     assert Parameters(n_tx=3, polar_angles=np.zeros(3)).elevation_limits is None
 
 
+def test_ylims_of_a_2d_grid_skip_the_apex():
+    """Without an elevation range ylims follow the probe alone, so they do not fit the
+    transmit apex or derive the polar sector."""
+    from zea.probes import create_probe_geometry
+
+    parameters = Parameters(
+        probe_geometry=create_probe_geometry(n_el=128, pitch=0.3e-3),
+        grid_type="cartesian",
+        zlims=(0.0, 0.05),
+        n_tx=3,
+        polar_angles=np.zeros(3),
+    )
+    assert parameters.ylims == (0.0, 0.0)
+    assert not {"grid_apex", "_transmit_apex", "_derived_polar_sector"} & set(parameters._cache)
+
+
 def test_elevation_limits_follow_a_later_azimuth_angles():
     """Setting azimuth_angles after elevation_limits was read recomputes it."""
     parameters = Parameters(n_tx=2, polar_angles=np.array([-0.3, 0.3]))
