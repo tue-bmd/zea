@@ -1380,7 +1380,7 @@ def test_unzip_rejects_path_traversal(tmp_path):
 
 
 def test_unzip_beside(tmp_path, monkeypatch):
-    """unzip_beside extracts next to the zip, or into the temp dir if that is read-only."""
+    """unzip_beside extracts next to the zip, or into a fresh temp dir if that is read-only."""
     src = tmp_path / "archive.zip"
     with zipfile.ZipFile(src, "w") as zipf:
         zipf.writestr("dummy.txt", "This is a test.")
@@ -1391,31 +1391,12 @@ def test_unzip_beside(tmp_path, monkeypatch):
     tmp_dir = tmp_path / "tmp"
     tmp_dir.mkdir()
     monkeypatch.setattr(os, "access", lambda *args: False)
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_dir))
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_dir))
     out = unzip_beside(src)
-    cache_root = tmp_dir / (
-        f"zea_unzipped_{os.getuid()}" if hasattr(os, "getuid") else "zea_unzipped"
-    )
-    assert out.parent == cache_root
-    assert out.name.startswith("archive_")
+    assert out.parent == tmp_dir
     assert (out / "dummy.txt").exists()
-    if hasattr(os, "getuid"):
-        assert cache_root.stat().st_mode & 0o077 == 0
-    # Reruns reuse the same directory
-    assert unzip_beside(src) == out
-
-    # An archive with the same stem elsewhere gets its own directory
-    other = tmp_path / "other" / "archive.zip"
-    other.parent.mkdir()
-    shutil.copy(src, other)
-    assert unzip_beside(other).parent == cache_root
-    assert unzip_beside(other) != out
-
-    # A cache root other users can write to is rejected
-    if hasattr(os, "getuid"):
-        cache_root.chmod(0o777)
-        with pytest.raises(PermissionError):
-            unzip_beside(src)
+    # Each run gets its own directory
+    assert unzip_beside(src) != out
 
 
 def _write_zip(path, names):
