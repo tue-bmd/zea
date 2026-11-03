@@ -3,6 +3,7 @@
 import numpy as np
 
 from zea import log
+from zea.internal.utils import deprecated_distance_to_apex
 
 eps = 1e-10
 
@@ -197,11 +198,7 @@ def polar_pixel_grid(
         in Cartesian coordinates (x, y, z)
     """
     assert len(zlims) == 2, "zlims must be a tuple of length 2."
-    if distance_to_apex is not None:
-        log.deprecated(
-            "polar_pixel_grid(distance_to_apex=d) is deprecated, use grid_apex=(0, 0, -d)."
-        )
-        grid_apex = (0.0, 0.0, -distance_to_apex)
+    grid_apex = deprecated_distance_to_apex(distance_to_apex, grid_apex, "polar_pixel_grid")
 
     if polar_angles is None:
         assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."

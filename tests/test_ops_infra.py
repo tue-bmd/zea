@@ -755,10 +755,22 @@ def test_scan_convert_deprecated_inputs_override_the_current_names():
     np.testing.assert_allclose(out["polar_limits"], (-0.5, 0.5))
 
 
+def test_scan_convert_deprecated_distance_to_apex_moves_the_window():
+    """An old config's distance_to_apex reaches ScanConvert as grid_apex=(0, 0, -d)."""
+    img = keras.ops.ones((4, 8), dtype="float32")
+    scan_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
+    limits = {"rlims": (0.0, 1.0), "polar_limits": (-0.3, 0.3)}
+    new = scan_op(data=img, grid_apex=(0.0, 0.0, -0.05), **limits)
+    old = scan_op(data=img, distance_to_apex=0.05, **limits)
+    np.testing.assert_allclose(old["z_lim"], new["z_lim"])
+    np.testing.assert_allclose(old["z_lim"][0], -0.05, atol=1e-6)
+
+
 @pytest.mark.parametrize("override", ["rlims", "rho_range", "polar_limits", "theta_range"])
 def test_prepare_parameters_drops_the_derived_window_for_overridden_limits(override):
     """Overridden scan-conversion limits (also under their old names) describe a polar
-    image of their own, so the grid_apex and extent derived by Parameters are not passed."""
+    image of their own, so the grid_apex, extent and coordinates derived by Parameters are
+    not passed."""
     from zea.probes import create_curved_probe_geometry
 
     parameters = Parameters(
@@ -773,9 +785,10 @@ def test_prepare_parameters_drops_the_derived_window_for_overridden_limits(overr
         n_ax=4096,
     )
     pipeline = ops.Pipeline(operations=[ops.ScanConvert(jit_compile=False)])
-    assert {"grid_apex", "extent"} <= set(pipeline.prepare_parameters(parameters))
+    derived = {"grid_apex", "extent", "coordinates"}
+    assert derived <= set(pipeline.prepare_parameters(parameters))
     inputs = pipeline.prepare_parameters(parameters, **{override: (0.0, 1.0)})
-    assert "grid_apex" not in inputs and "extent" not in inputs
+    assert not derived & set(inputs)
 
 
 """Pipeline build from config / json tests"""

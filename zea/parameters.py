@@ -114,6 +114,7 @@ from zea.beamform.geometry import (
     is_plane_wave,
     rays_at_depth,
     transmit_apex_distance,
+    virtual_apex_distance,
 )
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
@@ -577,9 +578,8 @@ class Parameters(BaseParameters):
             limits = self.polar_limits
             max_angle = 0.0 if limits is None else float(np.max(np.abs(limits)))
             probe_geometry = self._params.get("probe_geometry")
-            if probe_geometry is not None and 0 < max_angle < np.pi / 2:
-                half_aperture = float(np.ptp(probe_geometry[:, 0])) / 2
-                distance = half_aperture / np.tan(max_angle)
+            if probe_geometry is not None:
+                distance = virtual_apex_distance(probe_geometry, max_angle)
             else:
                 distance = 0.0
         # Adding 0.0 turns -0.0 (from negating a zero distance) into 0.0
@@ -1264,8 +1264,7 @@ class Parameters(BaseParameters):
         apex = self._transmit_or_probe_apex()
         if apex is None:
             max_angle = float(np.max(np.abs(np.arctan2(directions[:, 0], directions[:, 1]))))
-            half_aperture = float(np.ptp(probe_geometry[:, 0])) / 2
-            apex = half_aperture / np.tan(max_angle) if 0 < max_angle < np.pi / 2 else 0.0
+            apex = virtual_apex_distance(probe_geometry, max_angle)
         reached = rays_at_depth(points, directions, depth)
         if apex > 0:
             # The start points bound the near field; from the array middle itself they

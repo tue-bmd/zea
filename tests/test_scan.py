@@ -977,6 +977,13 @@ def test_grid_apex_is_a_virtual_apex_for_an_overridden_sector():
     np.testing.assert_allclose(parameters.grid_apex, (0.0, 0.0, -HALF_APERTURE), rtol=1e-5)
 
 
+def test_grid_apex_ignores_a_sector_of_float_noise():
+    """Limits within the steering tolerance of 0 are no sector: the apex stays at the array
+    middle instead of ``(aperture / 2) / tan(1e-8)`` behind it."""
+    parameters = _phased(n_tx=1, focus=np.inf, polar_limits=(-1e-8, 1e-8))
+    np.testing.assert_array_equal(parameters.grid_apex, (0.0, 0.0, 0.0))
+
+
 def test_distance_to_apex_is_no_longer_a_parameter():
     """Old configs that still set it load, with the value ignored."""
     parameters = Parameters(distance_to_apex=0.01)

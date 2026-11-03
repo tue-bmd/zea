@@ -106,6 +106,19 @@ def deprecated_alias(value, old_value, old, new, caller):
     return old_value
 
 
+def deprecated_distance_to_apex(distance_to_apex, grid_apex, caller):
+    """Map the deprecated ``distance_to_apex`` argument onto ``grid_apex``.
+
+    Returns:
+        ``(0, 0, -distance_to_apex)`` (with a deprecation warning) when given, else
+        ``grid_apex``.
+    """
+    if distance_to_apex is None:
+        return grid_apex
+    log.deprecated(f"{caller}(distance_to_apex=d) is deprecated, use grid_apex=(0, 0, -d).")
+    return (0.0, 0.0, -distance_to_apex)
+
+
 def deprecated(replacement=None):
     """Decorator to mark a function, method, or attribute as deprecated.
 

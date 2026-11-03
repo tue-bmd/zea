@@ -10,7 +10,7 @@ from PIL import Image
 
 from zea import log
 from zea.func.tensor import translate
-from zea.internal.utils import deprecated, deprecated_alias
+from zea.internal.utils import deprecated, deprecated_alias, deprecated_distance_to_apex
 from zea.tools.fit_scan_cone import fit_and_crop_around_scan_cone
 
 # `zea.func.ultrasound.log_compress` maps zeros to 20 * log10(1e-16) = -320 dB. Such pixels
@@ -446,14 +446,6 @@ def _deprecated_mirrored_theta_range(polar_limits, theta_range, caller, reverse)
     return mirrored
 
 
-def _deprecated_distance_to_apex(distance_to_apex, grid_apex, caller):
-    """Map the deprecated ``distance_to_apex`` argument onto ``grid_apex``."""
-    if distance_to_apex is None:
-        return grid_apex
-    log.deprecated(f"{caller}(distance_to_apex=d) is deprecated, use grid_apex=(0, 0, -d).")
-    return (0.0, 0.0, -distance_to_apex)
-
-
 def compute_scan_convert_2d_coordinates(
     image_shape,
     rlims: Tuple[float, float] | None = None,
@@ -511,7 +503,7 @@ def compute_scan_convert_2d_coordinates(
     assert len(rlims) == 2, "rlims should be a tuple of length 2"
     assert len(polar_limits) == 2, "polar_limits should be a tuple of length 2"
     assert rlims[0] < rlims[1], "rlims[0] should be less than rlims[1]"
-    grid_apex = _deprecated_distance_to_apex(distance_to_apex, grid_apex, caller)
+    grid_apex = deprecated_distance_to_apex(distance_to_apex, grid_apex, caller)
     if grid_apex is None:
         apex_x = apex_z = 0.0
     else:
@@ -539,8 +531,8 @@ def compute_scan_convert_2d_coordinates(
     d_theta = theta[1] - theta[0]
 
     if resolution is None:
-        # arc length along the polar direction at 1/4 depth
-        sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
+        # arc length along the polar direction at 1/4 depth; the angles may run either way
+        sRT = 0.25 * (rho[0] + rho[-1]) * ops.abs(d_theta)
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, d_rho])  # mm per pixel
 
@@ -640,7 +632,7 @@ def scan_convert_2d(
             polar_limits,
             resolution,
             dtype=image.dtype,
-            grid_apex=_deprecated_distance_to_apex(distance_to_apex, grid_apex, "scan_convert_2d"),
+            grid_apex=deprecated_distance_to_apex(distance_to_apex, grid_apex, "scan_convert_2d"),
             extent=extent,
         )
 
@@ -718,10 +710,10 @@ def compute_scan_convert_3d_coordinates(
     d_phi = phi[1] - phi[0]
 
     if resolution is None:
-        # arc length along constant phi at 1/4 depth
-        sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
+        # arc length along constant phi at 1/4 depth; the angles may run either way
+        sRT = 0.25 * (rho[0] + rho[-1]) * ops.abs(d_theta)
         # arc length along constant theta at 1/4 depth
-        sRP = 0.25 * (rho[0] + rho[-1]) * d_phi
+        sRP = 0.25 * (rho[0] + rho[-1]) * ops.abs(d_phi)
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, sRP, d_rho])  # mm per pixel
 
@@ -898,7 +890,7 @@ def scan_convert(
             coordinates,
             fill_value,
             order,
-            grid_apex=_deprecated_distance_to_apex(distance_to_apex, grid_apex, "scan_convert"),
+            grid_apex=deprecated_distance_to_apex(distance_to_apex, grid_apex, "scan_convert"),
             extent=extent,
         )
     elif len(image.shape) == 3 + int(with_batch_dim):

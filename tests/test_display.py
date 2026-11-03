@@ -67,6 +67,18 @@ def test_scan_conversion(size, resolution, order):
     return out
 
 
+def test_descending_polar_limits_mirror_the_image_at_the_same_resolution():
+    """A scanline grid with transmits steered from +x to -x has descending polar_limits.
+    The resolution estimate must not turn negative for them, which gave an empty image."""
+    shape, rlims = (64, 64), (0.0, 0.07)
+    up, up_params = display.compute_scan_convert_2d_coordinates(shape, rlims, (-0.6, 0.6))
+    down, down_params = display.compute_scan_convert_2d_coordinates(shape, rlims, (0.6, -0.6))
+    assert float(down_params["resolution"]) == pytest.approx(float(up_params["resolution"]))
+    up, down = np.asarray(up), np.asarray(down)
+    assert down.shape == up.shape
+    np.testing.assert_allclose(down[1], shape[1] - 1 - up[1], atol=1e-3)
+
+
 def test_scan_convert_in_process_smoke():
     """In-process smoke test for scan_convert_2d / scan_convert_3d.
 

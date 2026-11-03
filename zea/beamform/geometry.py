@@ -144,6 +144,24 @@ def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol)
     return None
 
 
+def virtual_apex_distance(probe_geometry, max_angle):
+    """Distance [m] behind the middle of a flat array of the point whose sector edges, at
+    ``+-max_angle``, pass through the ends of the array: ``(aperture / 2) / tan(max_angle)``.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions of shape ``(n_el, 3)``.
+        max_angle (float): Half-angle of the sector [rad].
+
+    Returns:
+        float: The distance, or ``0.0`` (the array middle) for a sector no wider than
+        :data:`STEERING_TOLERANCE`, or of ``pi / 2`` or more.
+    """
+    if not STEERING_TOLERANCE < max_angle < np.pi / 2:
+        return 0.0
+    half_aperture = float(np.ptp(np.asarray(probe_geometry)[:, 0])) / 2
+    return half_aperture / np.tan(max_angle)
+
+
 def insonified_edge_rays(
     probe_geometry, transmit_origins, polar_angles, focus_distances, element_normals=None
 ):

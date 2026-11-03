@@ -29,7 +29,7 @@ from zea.internal.core import (
     DataTypes,
 )
 from zea.internal.registry import ops_registry
-from zea.internal.utils import deprecated
+from zea.internal.utils import deprecated, deprecated_distance_to_apex
 from zea.ops.base import Filter, Operation
 from zea.simulator import apply_receive_chain, elevation_slab_bucket, simulate_rf
 from zea.simulator_time_domain import simulate_rf_td
@@ -516,6 +516,9 @@ class ScanConvert(Operation):
             if kwargs.get(old) is not None:
                 log.deprecated(f"ScanConvert input `{old}` is deprecated, use `{new}` instead.")
                 limits[new] = kwargs[old]
+        grid_apex = deprecated_distance_to_apex(
+            kwargs.get("distance_to_apex"), grid_apex, "ScanConvert"
+        )
 
         data_out, parameters = scan_convert(
             data,
