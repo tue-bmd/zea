@@ -456,6 +456,36 @@ def test_rx_aperture_indices_follows_transmit_selection():
     np.testing.assert_array_equal(parameters.rx_aperture_indices, indices)
 
 
+def test_waveforms_follow_transmit_selection():
+    """Waveforms are stored over the full transmit axis, so a selection slices them."""
+    n_tx = scan_args["n_tx"]
+    # A distinct waveform per transmit, so the selected rows can be identified.
+    one_way = np.arange(n_tx)[:, None] + np.zeros((1, 64))
+    two_way = -np.arange(n_tx)[:, None] + np.zeros((1, 128))
+    parameters = Parameters(
+        **{**scan_args, "waveforms_one_way": one_way, "waveforms_two_way": two_way}
+    )
+    assert parameters.n_waveforms == n_tx
+
+    selection = [1, 3, 7]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.waveforms_one_way, one_way[selection])
+    np.testing.assert_array_equal(parameters.waveforms_two_way, two_way[selection])
+    assert parameters.n_waveforms == parameters.n_tx == len(selection)
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.waveforms_one_way, one_way)
+    assert parameters.n_waveforms == n_tx
+
+
+def test_waveforms_absent_stay_none_under_selection():
+    args = {k: v for k, v in scan_args.items() if not k.startswith("waveforms_")}
+    parameters = Parameters(**args)
+    parameters.set_transmits(3)
+    assert parameters.waveforms_one_way is None
+    assert parameters.waveforms_two_way is None
+
+
 def test_flat_aligned_apodization_derived():
     """Derived: None, unless scanline mode, where it is the one-hot transmit mask."""
     assert Parameters(**scan_args).flat_aligned_apodization is None
