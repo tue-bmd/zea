@@ -808,6 +808,25 @@ def test_prepare_parameters_drops_the_derived_window_for_overridden_limits(overr
     assert derived - dropped <= inputs
 
 
+def test_prepare_parameters_explicit_rlims_skip_the_grid_window():
+    """Explicit rlims on Parameters describe a polar image of their own (as in
+    Parameters.coordinates_2d), so when ScanConvert computes its own coordinates it must not
+    move that image into this grid's apex frame and output window."""
+    parameters = _curved_polar_parameters()
+    parameters.rlims = (0.0, 0.1)
+    pipeline = ops.Pipeline(operations=[ops.ScanConvert(jit_compile=False)], jit_options=None)
+    inputs = pipeline.prepare_parameters(parameters)
+    assert "coordinates" in inputs
+    assert not {"grid_apex", "extent"} & set(inputs)
+
+    inputs = pipeline.prepare_parameters(parameters, resolution=2e-4)
+    assert not {"grid_apex", "extent", "coordinates"} & set(inputs)
+    data = keras.ops.ones((1, parameters.grid_size_z, parameters.grid_size_x), dtype="float32")
+    out = pipeline(data=data, **inputs)
+    # Up to the half-column the sampled angles miss the central axis by
+    np.testing.assert_allclose(out["z_lim"], (0.0, 0.1), atol=1e-4)
+
+
 def test_prepare_parameters_overridden_angles_keep_the_depth_axis():
     """The derived rlims are measured from grid_apex, so overriding only the angles must
     still report depths below the transducer, not radii from the apex."""

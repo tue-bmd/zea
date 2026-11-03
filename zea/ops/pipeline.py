@@ -102,26 +102,28 @@ def _summarize_inputs(inputs: Dict[str, Any]) -> str:
     return "{" + ", ".join(parts) + "}"
 
 
-def _stale_derived_keys(override_keys) -> set:
-    """Keys :class:`~zea.Parameters` derives from values that ``override_keys`` replace.
+def _stale_derived_keys(parameters, override_keys) -> set:
+    """Keys of ``parameters`` that do not match the scan conversion ``override_keys`` ask for.
 
     Scan conversion takes ``grid_apex``, ``extent`` and ``coordinates`` from Parameters,
-    which derives them from its own limits and resolution. When the caller overrides those
-    inputs, the derived values describe a different image and must not be passed along.
+    which derives them from this grid's limits and resolution. When those describe a
+    different image, the derived values must not be passed along.
     """
     from zea.parameters import Parameters
 
     overridden = {Parameters._RENAMED_PARAMS.get(key, key) for key in override_keys}
+    explicit_rlims = "rlims" in parameters and parameters["rlims"] is not None
     stale = set()
-    if "rlims" in overridden:
-        # Overridden radii describe a polar image of their own, so the apex they are
-        # measured from, the output window and the sampling coordinates do not apply.
-        stale |= {"grid_apex", "extent", "coordinates"}
+    if "rlims" in overridden or explicit_rlims:
+        # Explicit radii describe a polar image of their own rather than this grid (as in
+        # Parameters.coordinates_2d), so the apex and output window of the grid do not apply.
+        stale |= {"grid_apex", "extent"}
     elif overridden & {"polar_limits", "elevation_limits"}:
         # The rows are still this grid's, whose rlims are measured from grid_apex, so keep
-        # the apex; only the window and coordinates of its sector change.
-        stale |= {"extent", "coordinates"}
-    if "resolution" in overridden:
+        # the apex; only the output window of its sector changes.
+        stale.add("extent")
+    if overridden & {"rlims", "polar_limits", "elevation_limits", "resolution"}:
+        # Parameters computed the coordinates from the values these replace
         stale.add("coordinates")
     return stale
 
@@ -1047,7 +1049,9 @@ class Pipeline:
             # Only convert keys the pipeline needs and that are not overridden (directly,
             # or through the values they are derived from), so we avoid deriving
             # unnecessary or mismatched parameters.
-            needs_keys = self.needs_keys - override_keys - _stale_derived_keys(override_keys)
+            needs_keys = (
+                self.needs_keys - override_keys - _stale_derived_keys(parameters, override_keys)
+            )
             with backend.device(_device):
                 params_dict = parameters.to_tensor(
                     include=list(needs_keys), keep_as_is=self.static_params
