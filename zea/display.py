@@ -668,9 +668,9 @@ def compute_scan_convert_3d_coordinates(
         image_shape (tuple): Shape of the volume, ``(..., n_radius, n_polar, n_elevation)``.
         rlims (tuple): Radius of the first and last sample along the radius axis.
         polar_limits (tuple): Polar angle ``atan(x / z)`` of the first and last sample
-            along the polar axis [rad].
+            along the polar axis [rad], ascending.
         elevation_limits (tuple): Elevation angle ``atan(y / z)`` of the first and last
-            sample along the elevation axis [rad].
+            sample along the elevation axis [rad], ascending.
         resolution (float, optional): Output voxel size. Derived from the volume when
             not given.
         dtype (str, optional): Dtype of the coordinates. Defaults to ``"float32"``.
@@ -692,6 +692,11 @@ def compute_scan_convert_3d_coordinates(
     assert len(polar_limits) == 2, "polar_limits should be a tuple of length 2"
     assert len(elevation_limits) == 2, "elevation_limits should be a tuple of length 2"
     assert rlims[0] < rlims[1], "rlims[0] should be less than rlims[1]"
+    # Unlike 2D, the 3D masking and indexing assume ascending angles
+    assert polar_limits[0] < polar_limits[1], "polar_limits[0] should be less than [1]"
+    assert elevation_limits[0] < elevation_limits[1], (
+        "elevation_limits[0] should be less than elevation_limits[1]"
+    )
 
     rho = ops.linspace(rlims[0], rlims[1], image_shape[-3], dtype=dtype)
     theta = ops.linspace(polar_limits[0], polar_limits[1], image_shape[-2], dtype=dtype)
@@ -710,10 +715,10 @@ def compute_scan_convert_3d_coordinates(
     d_phi = phi[1] - phi[0]
 
     if resolution is None:
-        # arc length along constant phi at 1/4 depth; the angles may run either way
-        sRT = 0.25 * (rho[0] + rho[-1]) * ops.abs(d_theta)
+        # arc length along constant phi at 1/4 depth
+        sRT = 0.25 * (rho[0] + rho[-1]) * d_theta
         # arc length along constant theta at 1/4 depth
-        sRP = 0.25 * (rho[0] + rho[-1]) * ops.abs(d_phi)
+        sRP = 0.25 * (rho[0] + rho[-1]) * d_phi
         # average of arc lengths and radial step
         resolution = ops.mean([sRT, sRP, d_rho])  # mm per pixel
 
