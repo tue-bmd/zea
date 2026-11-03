@@ -148,6 +148,17 @@ def test_resolve_element_width_invalid_geometry():
         _resolve_element_width(np.zeros((1, 3), dtype=np.float32), None)
 
 
+def test_resolve_element_width_curved_and_coinciding_geometry():
+    """The pitch is measured along the array, so a curved array gets an estimate too;
+    coinciding elements have no pitch to estimate from."""
+    from zea.probes import create_curved_probe_geometry
+
+    curved = create_curved_probe_geometry(n_el=64, pitch=0.3e-3, radius=0.05)
+    assert _resolve_element_width(curved, None) == pytest.approx(0.27e-3, rel=1e-3)
+    with pytest.raises(ValueError, match="automatic estimation failed"):
+        _resolve_element_width(np.zeros((4, 3), dtype=np.float32), None)
+
+
 def test_resolve_element_width_unconvertible_geometry():
     """Inference from geometry that cannot be converted to numpy raises a helpful error."""
     with patch("zea.probes.ops.convert_to_numpy", side_effect=RuntimeError("traced")):

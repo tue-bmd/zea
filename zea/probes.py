@@ -148,6 +148,7 @@ parameters will also work:
 import numpy as np
 from keras import ops
 
+from zea.beamform.geometry import element_pitch
 from zea.data.spec import ProbeSpec
 from zea.internal.core import dict_to_tensor
 from zea.internal.registry import probe_registry
@@ -398,15 +399,14 @@ def _resolve_element_width(probe_geometry, element_width):
             "mode). Please provide `element_width` explicitly in the scan/probe parameters."
         ) from exc
 
-    try:
-        pitch = Probe.get_pitch(geometry)
-    except (ValueError, IndexError, AttributeError) as exc:
+    # Measured along the array, so this also works for curved arrays
+    pitch = element_pitch(geometry)
+    if not pitch > 0:  # nan for a single element, 0 when the elements coincide
         raise ValueError(
             "Element width is not provided and automatic estimation failed from probe "
-            "geometry. Please provide `element_width` explicitly or ensure the probe "
-            "geometry is a 1-D uniformly spaced linear array. "
-            f"Details: {exc}"
-        ) from exc
+            "geometry, which needs at least 2 distinct element positions. Please provide "
+            "`element_width` explicitly."
+        )
     return pitch * 0.9  # 90% of the pitch
 
 

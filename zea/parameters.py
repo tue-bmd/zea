@@ -129,7 +129,7 @@ from zea.display import compute_scan_convert_2d_coordinates
 from zea.func.ultrasound import compute_time_to_peak
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
-from zea.probes import Probe, fit_curved_probe_radius
+from zea.probes import Probe, _resolve_element_width, fit_curved_probe_radius
 
 
 class Parameters(BaseParameters):
@@ -854,9 +854,7 @@ class Parameters(BaseParameters):
         center_frequency = self._params.get("center_frequency")
         if probe_geometry is None or center_frequency is None or len(probe_geometry) < 2:
             return 1.0
-        element_width = self._params.get("element_width")
-        if element_width is None:
-            element_width = 0.9 * element_pitch(probe_geometry)
+        element_width = _resolve_element_width(probe_geometry, self._params.get("element_width"))
         wavelength = float(self.sound_speed) / float(np.mean(center_frequency))
         angle = element_acceptance_angle(float(element_width), wavelength)
         if angle >= np.pi / 2:
