@@ -244,14 +244,6 @@ def scanline_pixel_grid(
     :class:`~zea.ops.AlignedApodization`) to zero out every transmit except
     the one whose column each pixel belongs to.
 
-    .. note::
-        :class:`zea.Parameters` uses this only for cartesian scanline grids. Its polar
-        scanline grid is :func:`polar_pixel_grid` with one column per transmit angle,
-        fanning out from :attr:`zea.Parameters.grid_apex`, so that every row sits at one
-        radius and scan conversion places it correctly. Here, polar columns start at
-        their own transmit origin instead, which staggers the rows whenever the origins
-        lie at different distances from the apex.
-
     Args:
         transmit_origins (np.ndarray): Beam origins ``(n_tx, 3)`` in meters.
         focus_distances (np.ndarray): Focus distances ``(n_tx,)`` in meters.
