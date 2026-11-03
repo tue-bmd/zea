@@ -95,6 +95,7 @@ tests = [
     "ipywidgets",
     "pre-commit",
     "pytest-cov",
+    "pymust>=0.1.9",
     "zea[app]",
 ]
 docs = [
@@ -299,6 +300,13 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
 invalid-method-override = "ignore"
+
+# torch declares nn.Module.forward as a writable Callable attribute, so ty flags
+# every forward() method as an invalid override; torch dispatches via __call__.
+[[tool.ty.overrides]]
+include = ["zea/models/speckle2self.py"]
+[tool.ty.overrides.rules]
+invalid-mutable-override = "ignore"
 
 
 [tool.pytest.ini_options]

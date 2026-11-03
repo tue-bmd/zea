@@ -13,12 +13,16 @@ from zea.beamform import phantoms
 from zea.beamform.delays import compute_t0_delays_planewave
 from zea.metrics import psnr
 from zea.simulator import (
+    apply_receive_chain,
     elevation_slab_bucket,
     select_elevation_slab,
     simulate_rf,
+    transmit_pulse,
 )
 from zea.ops import Simulate
-from zea.simulator_time_domain import get_pulse_waveform, simulate_rf_td
+from zea.ops.ultrasound import simulator_settings
+from zea.probes import create_curved_probe_geometry, create_probe_geometry, curved_probe_normals
+from zea.simulator_time_domain import _scattered_waveform, simulate_rf_td
 
 N_EL = 80
 APERTURE = 32e-3
@@ -32,23 +36,12 @@ DYNAMIC_RANGE = (-50.0, 0.0)
 
 def test_time_domain_scatter_exponent_weights_pulse_spectrum():
     """The time-domain approximation applies scatter frequency dependence to its pulse."""
-    n_samples = 129
-    unweighted = np.asarray(
-        keras.ops.convert_to_numpy(
-            get_pulse_waveform(CENTER_FREQUENCY, CENTER_FREQUENCY * 4, n_samples=n_samples)
-        )
+    pulse = transmit_pulse(CENTER_FREQUENCY, CENTER_FREQUENCY * 4)
+    unweighted, weighted = (
+        np.asarray(keras.ops.convert_to_numpy(_scattered_waveform(pulse, CENTER_FREQUENCY, e)))
+        for e in (0.0, 2.0)
     )
-    weighted = np.asarray(
-        keras.ops.convert_to_numpy(
-            get_pulse_waveform(
-                CENTER_FREQUENCY,
-                CENTER_FREQUENCY * 4,
-                n_samples=n_samples,
-                scatter_exponent=2.0,
-            )
-        )
-    )
-    frequencies = np.fft.rfftfreq(n_samples, 1 / (CENTER_FREQUENCY * 4))
+    frequencies = np.fft.rfftfreq(len(unweighted), 1 / (CENTER_FREQUENCY * 4))
     expected = np.fft.rfft(unweighted) * (frequencies / CENTER_FREQUENCY) ** 2
     np.testing.assert_allclose(np.fft.rfft(weighted), expected, rtol=2e-5, atol=2e-5)
 
@@ -189,7 +182,7 @@ def test_elevation_lens_prunes_out_of_plane_scatterers():
         "attenuation_coef": 0.0,
         "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
         "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        "elevation_lens": True,
+        "elevation_slab_2d": True,
         "element_height": element_height,
     }
 
@@ -244,7 +237,7 @@ def test_elevation_slab_bucket_rounds_up_and_is_a_noop_when_inapplicable():
     kwargs = {
         "probe_geometry": probe_geometry,
         "element_height": element_height,
-        "elevation_lens": True,
+        "elevation_slab_2d": True,
     }
 
     for n_inside in (5000, 7000):
@@ -256,7 +249,7 @@ def test_elevation_slab_bucket_rounds_up_and_is_a_noop_when_inapplicable():
         assert int((out["scatterer_magnitudes"] > 0).sum()) == n_inside
 
     positions, magnitudes = _slab_cloud(100, 900, element_height)
-    no_lens = {**kwargs, "elevation_lens": False}
+    no_lens = {**kwargs, "elevation_slab_2d": False}
     no_height = {**kwargs, "element_height": None}
     lensless_bucket = elevation_slab_bucket(
         scatterer_positions=positions, scatterer_magnitudes=magnitudes, **no_lens
@@ -300,7 +293,7 @@ def test_elevation_slab_bucket_matches_unpruned_simulation():
         "attenuation_coef": 0.0,
         "tx_apodizations": np.ones((1, n_el), dtype=np.float32),
         "t_peak": np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        "elevation_lens": True,
+        "elevation_slab_2d": True,
         "element_height": element_height,
     }
 
@@ -343,13 +336,77 @@ def test_simulate_op_prunes_elevation_slab_without_leaking_pruned_cloud():
         attenuation_coef=0.0,
         tx_apodizations=np.ones((1, n_el), dtype=np.float32),
         t_peak=np.full(1, 1 / CENTER_FREQUENCY, dtype=np.float32),
-        elevation_lens=True,
+        elevation_slab_2d=True,
         element_height=element_height,
     )
 
     assert np.abs(keras.ops.convert_to_numpy(outputs[op.output_key])).max() > 0
     assert outputs["scatterer_positions"].shape == positions.shape
     assert outputs["scatterer_magnitudes"].shape == magnitudes.shape
+
+
+@pytest.mark.parametrize("method", list(simulator_settings))
+def test_simulate_op_runs_every_method(method):
+    """The op hands options that only the frequency-domain simulators take to those alone."""
+    n_el = 8
+    probe_geometry = np.stack(
+        [np.linspace(-4e-3, 4e-3, n_el), np.zeros(n_el), np.zeros(n_el)], axis=1
+    ).astype(np.float32)
+    op = Simulate(jit_compile=False, with_batch_dim=False)
+    outputs = op(
+        scatterer_positions=np.array([[0.0, 0.0, 15e-3]], dtype=np.float32),
+        scatterer_magnitudes=np.ones(1, dtype=np.float32),
+        probe_geometry=probe_geometry,
+        apply_lens_correction=False,
+        lens_thickness=1e-3,
+        lens_sound_speed=1000.0,
+        sound_speed=SOUND_SPEED,
+        n_ax=512,
+        center_frequency=CENTER_FREQUENCY,
+        sampling_frequency=CENTER_FREQUENCY * 4,
+        t0_delays=np.zeros((1, n_el), dtype=np.float32),
+        initial_times=np.zeros(1, dtype=np.float32),
+        element_width=1e-3,
+        attenuation_coef=0.0,
+        tx_apodizations=np.ones((1, n_el), dtype=np.float32),
+        t_peak=np.zeros(1, dtype=np.float32),
+        method=method,
+    )
+    assert np.abs(keras.ops.convert_to_numpy(outputs[op.output_key])).max() > 0
+
+
+def test_parameters_derive_element_normals_from_probe_geometry():
+    curved = create_curved_probe_geometry(N_EL, 0.4e-3, 40e-3)
+    # One-sided differences tilt the end elements by half the angular pitch (5 mrad here).
+    np.testing.assert_allclose(
+        Parameters(probe_geometry=curved).element_normals, curved_probe_normals(curved), atol=1e-2
+    )
+    flat = create_probe_geometry(N_EL, 0.4e-3)
+    z_normals = np.tile(np.array([0.0, 0.0, 1.0], np.float32), (N_EL, 1))
+    np.testing.assert_array_equal(Parameters(probe_geometry=flat).element_normals, z_normals)
+    # A virtual apex behind a flat array does not tilt its elements.
+    with_apex = Parameters(probe_geometry=flat, distance_to_apex=20e-3)
+    np.testing.assert_array_equal(with_apex.element_normals, z_normals)
+    tilted = np.tile(np.array([0.5, 0.0, np.sqrt(0.75)], np.float32), (N_EL, 1))
+    np.testing.assert_array_equal(
+        Parameters(probe_geometry=flat, element_normals=tilted).element_normals, tilted
+    )
+
+
+def test_pipeline_simulates_curved_probe_in_its_element_frames():
+    """The Simulate op gets a curved probe's normals from Parameters, not the flat +z frame."""
+    probe_geometry = create_curved_probe_geometry(N_EL, APERTURE / N_EL, 40e-3)
+    pipeline = zea.Pipeline([Simulate()], with_batch_dim=False, jit_options=None)
+    inputs = pipeline.prepare_parameters(_parameters(probe_geometry))
+    normals = keras.ops.convert_to_numpy(inputs["element_normals"])
+    np.testing.assert_allclose(normals, curved_probe_normals(probe_geometry), atol=1e-2)
+
+    inputs["scatterer_positions"] = np.array([[-12e-3, 0, 20e-3], [10e-3, 0, 25e-3]], np.float32)
+    inputs["scatterer_magnitudes"] = np.ones(2, np.float32)
+    curved = pipeline(**inputs)[pipeline.output_key]
+    flat = pipeline(**{**inputs, "element_normals": None})[pipeline.output_key]
+    curved, flat = keras.ops.convert_to_numpy(curved), keras.ops.convert_to_numpy(flat)
+    assert np.linalg.norm(curved - flat) > 0.05 * np.linalg.norm(curved)
 
 
 def test_record_length_gate_keeps_in_record_pairs_without_aliasing():
@@ -397,7 +454,8 @@ def test_record_length_gate_keeps_in_record_pairs_without_aliasing():
 
 def _receive_chain_image(fish_scan, simulator, **receive_chain_kwargs):
     _, simulation_args, beamform = fish_scan
-    return beamform(simulator(**simulation_args, noise_seed=0, **receive_chain_kwargs))
+    rf = simulator(**simulation_args)
+    return beamform(apply_receive_chain(rf, noise_seed=0, **receive_chain_kwargs))
 
 
 @pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td], ids=["exact", "fast"])
@@ -487,17 +545,14 @@ def test_batched_receive_chain_matches_unbatched(fish_scan):
     positions = np.asarray(simulation_args["scatterer_positions"], dtype=np.float32)[:16]
 
     batched = _batched_rf(simulation_args, 2, noise_level_db=None, tgc_max_db=50.0)
-    single = keras.ops.convert_to_numpy(
-        simulate_rf(
-            **{
-                **simulation_args,
-                "scatterer_positions": positions,
-                "scatterer_magnitudes": np.ones(len(positions), dtype=np.float32),
-            },
-            noise_level_db=None,
-            tgc_max_db=50.0,
-        )
+    single = simulate_rf(
+        **{
+            **simulation_args,
+            "scatterer_positions": positions,
+            "scatterer_magnitudes": np.ones(len(positions), dtype=np.float32),
+        }
     )
+    single = keras.ops.convert_to_numpy(apply_receive_chain(single, tgc_max_db=50.0))
 
     # ops.map reduces in a different order, so compare against the RF peak.
     scale = np.abs(single).max()
@@ -556,7 +611,7 @@ def _td_args(n_el=16, **overrides):
 def test_time_domain_elevation_lens_prunes_out_of_plane_scatterers():
     """The time-domain simulator drops scatterers outside the elevation slab."""
     element_height = 5e-3
-    args = _td_args(elevation_lens=True, element_height=element_height)
+    args = _td_args(elevation_slab_2d=True, element_height=element_height)
     args["scatterer_magnitudes"] = np.ones(1, dtype=np.float32)
 
     inside = np.array([[0.0, 0.5 * element_height, 30e-3]], dtype=np.float32)
