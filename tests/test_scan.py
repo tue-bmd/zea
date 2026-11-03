@@ -1040,6 +1040,26 @@ def test_elevation_limits_from_spherical_transmit_angles():
     assert Parameters(n_tx=3, polar_angles=np.zeros(3)).elevation_limits is None
 
 
+def test_polar_sector_uses_the_transmit_angles_in_the_x_z_plane():
+    """Tilting a sector of transmits in elevation keeps their angles in the x-z plane, so
+    it leaves the derived polar sector unchanged."""
+    flat = _phased(n_tx=5, span_deg=20.0, focus=-0.02)
+
+    # The same x-z angles, all tilted 0.2 rad toward +y, as signed spherical angles with
+    # the azimuth in (-pi/2, pi/2]
+    x, y = np.tan(flat.polar_angles), np.tan(0.2)
+    polar, azimuth = np.arctan(np.hypot(x, y)), np.arctan2(y, x)
+    flip = azimuth > np.pi / 2
+    polar, azimuth = np.where(flip, -polar, polar), np.where(flip, azimuth - np.pi, azimuth)
+    tilted = _phased(n_tx=5, span_deg=20.0, focus=-0.02, polar_angles=polar, azimuth_angles=azimuth)
+
+    # Parameters stores the angles as float32
+    np.testing.assert_allclose(tilted._xz_polar_angles, flat.polar_angles, atol=1e-6)
+    np.testing.assert_allclose(tilted.polar_limits, flat.polar_limits, atol=1e-6)
+    np.testing.assert_allclose(tilted.grid_apex, flat.grid_apex, atol=1e-9)
+    np.testing.assert_allclose(tilted.xlims, flat.xlims, atol=1e-9)
+
+
 def test_elevation_margin_replaces_the_automatic_margin():
     """``elevation_margin`` widens the default elevation_limits by a fixed angle, like
     polar_margin, and leaves explicit limits alone."""

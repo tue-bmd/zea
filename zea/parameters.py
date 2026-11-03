@@ -452,15 +452,33 @@ class Parameters(BaseParameters):
             return np.zeros((self.n_tx, 3))
         return self.transmit_origins
 
+    @cache_with_dependencies("polar_angles", optional=("azimuth_angles",))
+    def _xz_polar_angles(self):
+        """The transmits' polar angles ``atan2(sin(theta) cos(phi), cos(theta))`` [rad]
+        projected onto the x-z plane, of shape (n_tx,), as the grid's polar angles are (see
+        :ref:`angle-conventions`). Equal to :attr:`polar_angles` without
+        ``azimuth_angles``. ``None`` without ``polar_angles``.
+
+        The presence check uses the raw parameter to avoid triggering the
+        :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
+        """
+        polar = self.polar_angles
+        if polar is None or self._params.get("azimuth_angles") is None:
+            return polar
+        polar = np.asarray(polar, dtype=np.float64)
+        azimuth = np.asarray(self.azimuth_angles, dtype=np.float64)
+        return np.arctan2(np.sin(polar) * np.cos(azimuth), np.cos(polar))
+
     @cache_with_dependencies(
-        "polar_angles", optional=("probe_geometry", "focus_distances", "transmit_origins")
+        "polar_angles",
+        optional=("azimuth_angles", "probe_geometry", "focus_distances", "transmit_origins"),
     )
     def _transmit_apex(self):
         """Distance [m] behind the middle of the array of the point the transmits fan out
         from. ``None`` when they define none. See
         :func:`~zea.beamform.geometry.transmit_apex_distance`.
         """
-        angles = self.polar_angles
+        angles = self._xz_polar_angles
         probe_geometry = self._params.get("probe_geometry")
         if angles is None or probe_geometry is None:
             return None
@@ -485,13 +503,13 @@ class Parameters(BaseParameters):
     @cache_with_dependencies(
         "probe_geometry",
         "radius_of_curvature",
-        optional=("polar_angles", "focus_distances", "transmit_origins"),
+        optional=("polar_angles", "azimuth_angles", "focus_distances", "transmit_origins"),
     )
     def _edge_rays(self):
         """The ``(points, directions)`` of the rays bounding what each transmit insonifies
-        (see :func:`~zea.beamform.geometry.insonified_edge_rays`). Missing polar angles
-        count as zeros."""
-        polar_angles = self.polar_angles
+        in the x-z plane (see :func:`~zea.beamform.geometry.insonified_edge_rays`). Missing
+        polar angles count as zeros."""
+        polar_angles = self._xz_polar_angles
         if polar_angles is None:
             polar_angles = np.zeros_like(self.focus_distances)
         return insonified_edge_rays(
@@ -1169,9 +1187,10 @@ class Parameters(BaseParameters):
         signed, positive toward +x. In 3D it is the angle of the projection onto the x-z
         plane, next to :attr:`elevation_limits` for the y-z plane.
 
-        If not explicitly provided, the range of the transmit angles (:attr:`polar_angles`),
-        widened on each side to cover the region each transmit insonifies down to
-        ``zlims[1]``, as seen from :attr:`grid_apex` (see
+        If not explicitly provided, the range of the transmit angles (:attr:`polar_angles`,
+        projected onto the x-z plane when :attr:`azimuth_angles` is given), widened on each
+        side to cover the region each transmit insonifies down to ``zlims[1]``, as seen from
+        :attr:`grid_apex` (see
         :func:`~zea.beamform.geometry.insonified_edge_rays`). Focused transmits add no
         margin. For plane or diverging waves on a flat array, neither of which defines an
         apex, the apex is where the outermost edge ray crosses the central axis.
@@ -1197,6 +1216,7 @@ class Parameters(BaseParameters):
     @cache_with_dependencies(
         "polar_angles",
         optional=(
+            "azimuth_angles",
             "polar_margin",
             "probe_geometry",
             "zlims",
@@ -1211,7 +1231,7 @@ class Parameters(BaseParameters):
         the array they are seen from, as ``(limits, apex)``. ``apex`` is ``None`` when the
         limits are not seen from a point (no edge rays, or a fixed ``polar_margin``), and
         both are ``None`` without transmit angles."""
-        angles = self.polar_angles
+        angles = self._xz_polar_angles
         if angles is None:
             return None, None
 
