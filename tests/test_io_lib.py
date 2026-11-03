@@ -4,7 +4,14 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from zea.io_lib import load_image, load_video, save_image, save_video
+from zea.io_lib import (
+    compute_global_palette_by_histogram,
+    load_image,
+    load_video,
+    save_image,
+    save_to_gif,
+    save_video,
+)
 
 from . import DEFAULT_TEST_SEED
 
@@ -251,6 +258,33 @@ def test_color_palette(tmp_path):
     save_video(frames, gif_path_with_palette, fps=10, shared_color_palette=True)
     loaded_with_palette_gif = load_video(gif_path_with_palette, mode="L")
     assert loaded_with_palette_gif.shape == (n_frames, height, width)
+
+
+def test_global_palette_keeps_exact_colors():
+    """A histogram bin holding a single color is represented by exactly that color."""
+    colors = np.array([[0, 0, 0], [255, 255, 255], [130, 40, 200]], dtype=np.uint8)
+    image = Image.fromarray(np.repeat(colors[None], 4, axis=0))
+
+    palette = compute_global_palette_by_histogram([image], bits_per_channel=5, palette_size=3)
+    entries = np.array(palette.getpalette(), dtype=np.uint8).reshape(-1, 3)[:3]
+
+    assert set(map(tuple, entries.tolist())) == set(map(tuple, colors.tolist()))
+
+
+def test_save_to_gif_keeps_black_black(tmp_path):
+    """A black background stays exactly black with a shared color palette."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    frames = np.zeros((4, 16, 16, 3), dtype=np.uint8)
+    # random foreground so black is not the only color
+    frames[:, 4:12, 4:12] = rng.integers(0, 255, (4, 8, 8, 3), dtype=np.uint8)
+
+    path = tmp_path / "black_background.gif"
+    save_to_gif(frames, path, fps=10, shared_color_palette=True)
+
+    loaded = load_video(path, mode="RGB")
+    background = np.concatenate([loaded[:, :4].ravel(), loaded[:, 12:].ravel()])
+    assert background.max() == 0
+    assert loaded[:, 4:12, 4:12].max() > 0
 
 
 def test_animate_images_parameters_without_extent(tmp_path):
