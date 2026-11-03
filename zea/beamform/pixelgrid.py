@@ -510,10 +510,6 @@ def check_for_aliasing(
         log.warning_once(message, key=message)
     return messages
 
-    for message in messages:
-        log.warning_once(message, key=message)
-    return messages
-
 
 def cartesian_pixel_grid(
     xlims,
