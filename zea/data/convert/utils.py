@@ -1,5 +1,7 @@
+import hashlib
 import json
 import os
+import stat
 import tempfile
 import urllib.request
 import zipfile
@@ -170,8 +172,24 @@ def unzip_beside(src: Path) -> Path:
     if os.access(src.parent, os.W_OK):
         return unzip(src, src.with_suffix(""))
 
-    # Deterministic name so a completed extraction is reused on the next run.
-    tmp_dir = Path(tempfile.gettempdir()) / f"zea_unzipped_{src.stem}"
+    # The temp dir is shared between users, so extract into a cache root only we can
+    # write to; otherwise another user could plant a ".fully_unzipped" with forged files.
+    getuid = getattr(os, "getuid", None)  # None on Windows, whose temp dir is per-user
+    cache_root = Path(tempfile.gettempdir()) / (
+        f"zea_unzipped_{getuid()}" if getuid else "zea_unzipped"
+    )
+    cache_root.mkdir(mode=0o700, exist_ok=True)
+    st = cache_root.lstat()
+    if not stat.S_ISDIR(st.st_mode) or (getuid and (st.st_uid != getuid() or st.st_mode & 0o077)):
+        raise PermissionError(
+            f"Refusing to unzip into {cache_root}: it must be a directory owned by the "
+            "current user and not accessible to others."
+        )
+
+    # Stable per archive so a completed extraction is reused on the next run, with a
+    # path hash so archives sharing a stem do not collide.
+    digest = hashlib.sha256(str(src.resolve()).encode()).hexdigest()[:16]
+    tmp_dir = cache_root / f"{src.stem}_{digest}"
     log.warning(f"{src.parent} is not writable, unzipping to {tmp_dir} instead.")
     return unzip(src, tmp_dir)
 

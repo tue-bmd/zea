@@ -1392,8 +1392,30 @@ def test_unzip_beside(tmp_path, monkeypatch):
     tmp_dir.mkdir()
     monkeypatch.setattr(os, "access", lambda *args: False)
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_dir))
-    assert unzip_beside(src) == tmp_dir / "zea_unzipped_archive"
-    assert (tmp_dir / "zea_unzipped_archive" / "dummy.txt").exists()
+    out = unzip_beside(src)
+    cache_root = tmp_dir / (
+        f"zea_unzipped_{os.getuid()}" if hasattr(os, "getuid") else "zea_unzipped"
+    )
+    assert out.parent == cache_root
+    assert out.name.startswith("archive_")
+    assert (out / "dummy.txt").exists()
+    if hasattr(os, "getuid"):
+        assert cache_root.stat().st_mode & 0o077 == 0
+    # Reruns reuse the same directory
+    assert unzip_beside(src) == out
+
+    # An archive with the same stem elsewhere gets its own directory
+    other = tmp_path / "other" / "archive.zip"
+    other.parent.mkdir()
+    shutil.copy(src, other)
+    assert unzip_beside(other).parent == cache_root
+    assert unzip_beside(other) != out
+
+    # A cache root other users can write to is rejected
+    if hasattr(os, "getuid"):
+        cache_root.chmod(0o777)
+        with pytest.raises(PermissionError):
+            unzip_beside(src)
 
 
 def _write_zip(path, names):
