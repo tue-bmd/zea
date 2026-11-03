@@ -1298,7 +1298,9 @@ class Parameters(BaseParameters):
         return value[self.selected_transmits]
 
     @cache_with_dependencies(
-        "selected_transmits", "n_tx", optional=("polar_angles", "elevation_margin")
+        "selected_transmits",
+        "n_tx",
+        optional=("polar_angles", "azimuth_angles", "elevation_margin"),
     )
     def elevation_limits(self):
         """Elevation angle ``atan(y / z)`` [rad] of the first and last sample in elevation,

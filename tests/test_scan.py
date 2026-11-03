@@ -1047,6 +1047,15 @@ def test_elevation_limits_from_spherical_transmit_angles():
     assert Parameters(n_tx=3, polar_angles=np.zeros(3)).elevation_limits is None
 
 
+def test_elevation_limits_follow_a_later_azimuth_angles():
+    """Setting azimuth_angles after elevation_limits was read recomputes it."""
+    parameters = Parameters(n_tx=2, polar_angles=np.array([-0.3, 0.3]))
+    assert parameters.elevation_limits is None
+
+    parameters.azimuth_angles = np.full(2, np.pi / 2)
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3 * 1.3, 0.3 * 1.3))
+
+
 def test_polar_sector_uses_the_transmit_angles_in_the_x_z_plane():
     """Tilting a sector of transmits in elevation keeps their angles in the x-z plane, so
     it leaves the derived polar sector unchanged."""
