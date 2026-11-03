@@ -1,21 +1,29 @@
 """The pixel grid explorer in the docs must reproduce zea's grid geometry.
 
 ``docs/explorer/pixel_grid_explorer.html`` re-implements the default grid of
-:class:`zea.Parameters` in JavaScript. This runs that code in QuickJS against reference
+:class:`zea.Parameters` in JavaScript. This runs that code in Node.js against reference
 values computed by the current zea, so a change to the geometry that is not carried over
-to the page fails here. Skipped when the ``quickjs`` package is not installed.
+to the page fails here. Skipped when ``node`` is not installed, unless
+``ZEA_REQUIRE_NODE`` is set, as it is in CI.
 """
 
 import importlib.util
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-quickjs = pytest.importorskip("quickjs")
-
 EXPLORER = Path(__file__).parents[1] / "docs" / "explorer"
+
+NODE = shutil.which("node")
+if NODE is None:
+    if os.environ.get("ZEA_REQUIRE_NODE"):
+        raise RuntimeError("ZEA_REQUIRE_NODE is set, but node is not installed")
+    pytest.skip("node is not installed", allow_module_level=True)
 
 COMPARE = r"""
 function compare(reference) {
@@ -63,7 +71,7 @@ function compare(reference) {
     }
     if (bad.length) failures.push(`${label}: ${bad.join("; ")}`);
   });
-  return JSON.stringify(failures);
+  return failures;
 }
 """
 
@@ -82,10 +90,22 @@ def _page_script():
     return scripts[0]
 
 
+def _run_node(source):
+    """Run ``source`` in Node.js and return the JSON it prints."""
+    result = subprocess.run(
+        [NODE, "-"], input=source, capture_output=True, text=True, timeout=60, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
 def test_explorer_script_parses():
-    context = quickjs.Context()
-    context.set("SRC", _page_script())
-    assert context.eval("try { new Function(SRC); 'ok' } catch (e) { String(e) }") == "ok"
+    source = (
+        f"const SRC = {json.dumps(_page_script())};\n"
+        "try { new Function(SRC); console.log('\"ok\"'); }\n"
+        "catch (e) { console.log(JSON.stringify(String(e))); }\n"
+    )
+    assert _run_node(source) == "ok"
 
 
 def test_explorer_matches_zea():
@@ -94,8 +114,6 @@ def test_explorer_matches_zea():
     port = script[script.index("const f32") : script.index("/* ======================= end of")]
     reference = _load_reference_module().reference()
 
-    context = quickjs.Context()
-    context.eval(port + COMPARE)
-    context.set("REFERENCE", json.dumps(reference))
-    failures = json.loads(context.eval("compare(JSON.parse(REFERENCE))"))
+    source = port + COMPARE + f"console.log(JSON.stringify(compare({json.dumps(reference)})));\n"
+    failures = _run_node(source)
     assert not failures, "\n".join(failures)
