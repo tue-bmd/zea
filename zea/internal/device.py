@@ -112,23 +112,6 @@ def _visible_to_physical_ids(visible_ids):
     return [physical_ids[i] for i in visible_ids if i < len(physical_ids)]
 
 
-def _visible_to_physical_ids(visible_ids):
-    """Translate visible (positional) GPU ids to physical ids.
-
-    ``CUDA_VISIBLE_DEVICES`` renumbers the GPUs it exposes 0..N-1, so a
-    positional id only means a physical id when the variable is unset. Without
-    this translation, hiding GPUs twice in one process would map e.g. visible
-    id 0 back onto physical GPU 0 instead of the GPU actually selected.
-
-    Falls back to returning ``visible_ids`` unchanged when the variable is
-    unset or holds no integer tokens (e.g. GPU UUIDs).
-    """
-    physical_ids = list(_iter_cuda_device_ids())
-    if not physical_ids:
-        return visible_ids
-    return [physical_ids[i] for i in visible_ids if i < len(physical_ids)]
-
-
 def _cuda_visible_devices_disables_gpus():
     """Check if CUDA_VISIBLE_DEVICES is set to a value that disables all GPUs.
 
