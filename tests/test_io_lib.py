@@ -261,28 +261,21 @@ def test_color_palette(tmp_path):
 
 
 def test_global_palette_keeps_exact_colors():
-    """A histogram bin holding a single color is represented by exactly that color.
-
-    The palette entry is the mean of the colors in the bin, not the bin's center: a
-    center would round pure black to (4, 4, 4) at the default 5 bits per channel,
-    which is visibly not black wherever a plot's background is meant to be.
-    """
+    """A histogram bin holding a single color is represented by exactly that color."""
     colors = np.array([[0, 0, 0], [255, 255, 255], [130, 40, 200]], dtype=np.uint8)
     image = Image.fromarray(np.repeat(colors[None], 4, axis=0))
 
-    palette = compute_global_palette_by_histogram([image], bits_per_channel=5)
-    entries = np.array(palette.getpalette(), dtype=np.uint8).reshape(-1, 3)
+    palette = compute_global_palette_by_histogram([image], bits_per_channel=5, palette_size=3)
+    entries = np.array(palette.getpalette(), dtype=np.uint8).reshape(-1, 3)[:3]
 
-    for color in colors:
-        assert (entries == color).all(axis=1).any(), f"{color} is not in the palette"
+    assert set(map(tuple, entries.tolist())) == set(map(tuple, colors.tolist()))
 
 
 def test_save_to_gif_keeps_black_black(tmp_path):
-    """A black background survives the shared-palette quantization as exactly 0."""
+    """A black background stays exactly black with a shared color palette."""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     frames = np.zeros((4, 16, 16, 3), dtype=np.uint8)
-    # Something for the palette to spend its other entries on, so black is not the
-    # only color and has to survive alongside the rest.
+    # random foreground so black is not the only color
     frames[:, 4:12, 4:12] = rng.integers(0, 255, (4, 8, 8, 3), dtype=np.uint8)
 
     path = tmp_path / "black_background.gif"
@@ -291,6 +284,7 @@ def test_save_to_gif_keeps_black_black(tmp_path):
     loaded = load_video(path, mode="RGB")
     background = np.concatenate([loaded[:, :4].ravel(), loaded[:, 12:].ravel()])
     assert background.max() == 0
+    assert loaded[:, 4:12, 4:12].max() > 0
 
 
 def test_animate_images_parameters_without_extent(tmp_path):
