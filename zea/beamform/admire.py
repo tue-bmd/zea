@@ -655,7 +655,7 @@ def generate_admire_models(
         ADMIREModels: The models of every STFT window and selected frequency.
     """
     config = ADMIREConfig() if config is None else config
-    depths = np.asarray(depths, dtype=float)
+    depths = np.array(depths, dtype=float)
     if depths.ndim != 1 or depths.size < 2:
         raise ValueError("`depths` must be a 1D array with at least two depths.")
     spacing = np.diff(depths)
