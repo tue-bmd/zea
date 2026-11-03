@@ -40,6 +40,9 @@ if TYPE_CHECKING:
 # does not exist until an initializer runs, but declaring it here gives the
 # ``global COUNTER`` statement a module-scope declaration to rebind.
 COUNTER: "Synchronized[int]"
+# The worker's H5Processor, bound once per worker process by ``count_init``, so the
+# split it holds is not pickled again for every file.
+PROCESSOR: "H5Processor"
 
 
 def segment(tensor, number_erasing=0, min_clip=0):
@@ -370,7 +373,7 @@ def load_split(split_path):
     return splits, frames
 
 
-def count_init(shared_counter):
+def count_init(shared_counter, processor=None):
     """
     Initialize the module-level shared counter used by worker processes.
 
@@ -378,9 +381,16 @@ def count_init(shared_counter):
         shared_counter (multiprocessing.Value): A process-shared integer Value that
             will be assigned to the module-global COUNTER for coordinated counting
             across processes.
+        processor (H5Processor, optional): Processor that :func:`_process_file` runs
+            in this worker.
     """
-    global COUNTER
+    global COUNTER, PROCESSOR
     COUNTER = shared_counter
+    PROCESSOR = processor
+
+
+def _process_file(avi_file):
+    return PROCESSOR(avi_file)
 
 
 class H5Processor:
@@ -684,8 +694,10 @@ def convert_echonet(args):
 
     if not args.no_hyperthreading:
         shared_counter = Value("i", 0)
-        with ProcessPoolExecutor(initializer=count_init, initargs=(shared_counter,)) as executor:
-            futures = {executor.submit(processor, file): file for file in h5_files}
+        with ProcessPoolExecutor(
+            initializer=count_init, initargs=(shared_counter, processor)
+        ) as executor:
+            futures = {executor.submit(_process_file, file): file for file in h5_files}
             for future in tqdm(as_completed(futures), total=len(futures)):
                 collect(futures[future], future.result)
     else:
