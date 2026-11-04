@@ -99,6 +99,7 @@ def test_release_leaves_rest_of_file_unchanged(changelog_file):
     [
         pytest.param("", id="empty"),
         pytest.param("..\n   - A commented-out draft entry", id="only-comments"),
+        pytest.param("  .. draft\n     - An indented commented-out entry", id="indented-comment"),
     ],
 )
 def test_release_refuses_without_entries(changelog_file, current_fixed):
@@ -163,3 +164,11 @@ def test_check_requires_a_new_entry_under_current(changelog_file, tmp_path):
 
     # A base branch without a changelog counts as an empty one.
     changelog.check(tmp_path / "missing.rst")
+
+    # Rewording an entry already under Current is not a new entry; adding one is.
+    base.write_text(make_changelog(ENTRY))
+    changelog_file.write_text(make_changelog(ENTRY.replace("clips", "now clips")))
+    with pytest.raises(SystemExit, match="no new entry"):
+        changelog.check(base)
+    changelog_file.write_text(make_changelog(f"{ENTRY}\n- Another fix (:gh:`700` by :user:`b`)"))
+    changelog.check(base)

@@ -168,7 +168,9 @@ jobs:
           # Maintainers fix the release notes by editing the changelog on this
           # branch. Never force-push over such edits: only replace a branch that
           # holds nothing but this workflow's own commit.
+          remote_sha=""
           if git fetch --quiet origin "refs/heads/${BRANCH}" 2>/dev/null; then
+            remote_sha=$(git rev-parse FETCH_HEAD)
             others=$(git log --format='%H %ae' origin/main..FETCH_HEAD | grep -v ' 41898282+github-actions\[bot\]@users.noreply.github.com$' || true)
             if [ -n "${others}" ]; then
               echo "::error::${BRANCH} has commits that are not from this workflow (e.g. changelog edits); merge or close its pull request and delete the branch before re-running"
@@ -177,8 +179,10 @@ jobs:
             fi
           fi
           # Force so a re-run after a failed attempt replaces the stale branch
-          # rather than erroring out.
-          git push --force origin "${BRANCH}"
+          # rather than erroring out. The lease only replaces the commit checked
+          # above: a push made since, or a branch the fetch failed to see (empty
+          # lease: "must not exist"), makes the push fail instead.
+          git push --force-with-lease="refs/heads/${BRANCH}:${remote_sha}" origin "${BRANCH}"
 
       - name: Open pull request
         env:

@@ -34,23 +34,22 @@ jobs:
           done
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      # The default checkout is the PR merged into the tip of the base branch, so
-      # comparing with that tip shows exactly the entries this PR adds.
+      # The default checkout is the PR merged into its base branch. The first parent
+      # of that merge commit is the base it merged against, so comparing with it
+      # shows exactly the entries this PR adds.
       - name: Checkout repository
         if: steps.labels.outputs.skip == 'false'
         uses: actions/checkout@v7
         with:
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Check for a new entry under Current
         if: steps.labels.outputs.skip == 'false'
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          git fetch --quiet --depth=1 origin "${BASE_REF}"
           # Empty when the base branch has no changelog yet.
-          git show FETCH_HEAD:docs/source/changelog.rst > "${RUNNER_TEMP}/base.rst" 2>/dev/null || true
+          git show HEAD^1:docs/source/changelog.rst > "${RUNNER_TEMP}/base.rst" 2>/dev/null || true
 
           if ! python3 .github/scripts/changelog.py check "${RUNNER_TEMP}/base.rst"; then
             echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."

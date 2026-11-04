@@ -111,14 +111,16 @@ def drop_empty_subsections(body):
 
 def strip_comments(body):
     """Remove RST comments, e.g. commented-out draft entries, which never render."""
-    kept, in_comment = [], False
+    kept, comment_indent = [], None
     for line in body.splitlines():
-        if COMMENT.fullmatch(line):
-            in_comment = True
-        elif in_comment and (not line.strip() or line[0].isspace()):
+        indent = len(line) - len(line.lstrip())
+        # A comment runs on over blank lines and lines indented deeper than its "..".
+        if comment_indent is not None and (not line.strip() or indent > comment_indent):
             continue
+        if COMMENT.fullmatch(line.strip()):
+            comment_indent = indent
         else:
-            in_comment = False
+            comment_indent = None
             kept.append(line)
     return "\n".join(kept)
 
@@ -263,8 +265,11 @@ def check(base_path):
         find_section(split_sections(base)[1], CURRENT) if base.strip() else (None, None)
     )
 
-    added = set(entries(current or "")) - set(entries(base_current or ""))
-    if not added:
+    current_entries = entries(current or "")
+    base_entries = entries(base_current or "")
+    added = set(current_entries) - set(base_entries)
+    # Rewording an existing entry is not a new one, so the count has to go up too.
+    if not added or len(current_entries) <= len(base_entries):
         sys.exit(f"no new entry under {CURRENT!r} in {CHANGELOG.name}")
     print(f"new entries under {CURRENT!r}:")
     for entry in sorted(added):
