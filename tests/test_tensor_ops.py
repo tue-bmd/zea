@@ -752,6 +752,22 @@ def test_translate(range_from, range_to):
     return result
 
 
+def test_normalize_stays_in_output_range():
+    """Values clipped to an input bound map exactly onto the output bound.
+
+    Clipping before the affine map is not enough: in float32 `lo + 1 * (hi - lo)`
+    lands 7.6e-6 above `hi` for this `output_range`. With `(0, 1)` the same rounding
+    happens under JIT on GPU, where `LogCompress` turns it into a positive dB that
+    `zea.File` rejects.
+    """
+    import zea
+
+    output_range = (np.float32(-45.6375), np.float32(93.50724))
+    data = np.array([20.0, 10.0, 5.0, 0.0, -1.0], np.float32)
+    out = np.asarray(zea.func.normalize(data, output_range, (0.0, 10.0)))
+    assert np.all((out >= output_range[0]) & (out <= output_range[1])), out
+
+
 @pytest.mark.parametrize(
     "num_taps, f1, f2, sampling_frequency",
     [
