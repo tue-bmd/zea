@@ -20,11 +20,18 @@ from zea.data.spec import Spec, check_dtype
 from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
 
-def cache_with_dependencies(*deps):
-    """Decorator to mark a method as a computed property with dependencies."""
+def cache_with_dependencies(*deps, optional=()):
+    """Decorator to mark a method as a computed property with dependencies.
+
+    Args:
+        *deps: Names of the parameters or properties the computed property needs.
+        optional: Names of parameters the computed property uses when set. Changing
+            them invalidates the cache, but the property can be computed without them.
+    """
 
     def decorator(func):
-        func._dependencies = deps
+        func._dependencies = deps + tuple(optional)
+        func._optional_dependencies = tuple(optional)
 
         @functools.wraps(func)
         def wrapper(self: "BaseParameters"):
@@ -180,6 +187,16 @@ class BaseParameters:
     # ``{"sound_speed": {"dtype": np.float32, "default": 1540.0}}``.
     # Subclasses must populate this; an empty mapping means "not defined".
     VALID_PARAMS: ClassVar[dict[str, dict[str, Any]]] = {}
+
+    # Memoised `_find_all_dependents` results: the dependency graph is fixed per class.
+    # Properties patched onto a class later are still recomputed correctly, because the
+    # cached-property wrapper also checks a hash of its leaf parameters on every access.
+    _dependents_cache: ClassVar[dict[str, frozenset[str]]] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Own dict per class, so it is freed together with the class
+        cls._dependents_cache = {}
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -476,30 +493,40 @@ class BaseParameters:
                         f"{cls.__name__} class definition."
                     )
 
-    def _find_all_dependents(self, target, seen=None):
+    @classmethod
+    def _find_all_dependents(cls, target):
         """
         Find all computed properties that depend (directly or indirectly) on the target parameter
-        with a global search. Returns a set of property names that depend on the target.
+        with a global search. Returns a frozenset of property names that depend on the target.
+
+        Memoised per class in `_dependents_cache`: every `__setattr__` invalidates through
+        here, and the uncached search rescans the class for each node -- which made `copy()`
+        of a full `Parameters` cost about a second.
         """
+        cache = cls._dependents_cache
+        if target not in cache:
+            cache[target] = frozenset(cls._collect_dependents(target, set()))
+        return cache[target]
+
+    @classmethod
+    def _collect_dependents(cls, target, seen):
         dependents = set()
-        if seen is None:
-            seen = set()
         if target in seen:
             return dependents
         seen.add(target)
-        for name in self.__class__.__dict__:
-            if self._is_property_with_dependencies(name):
-                if target in self._get_dependencies(name):
+        # Walk the MRO so subclasses (e.g. the deprecated Scan) see inherited properties
+        names = dict.fromkeys(name for klass in cls.__mro__ for name in vars(klass))
+        for name in names:
+            if cls._is_property_with_dependencies(name):
+                if target in cls._get_dependencies(name):
                     dependents.add(name)
                     # Recursively add dependents of this property
-                    dependents |= self._find_all_dependents(name, seen)
+                    dependents |= cls._collect_dependents(name, seen)
         return dependents
 
     def _invalidate(self, key):
         """Invalidate a specific cached computed property and its dependencies."""
-        self._cache.pop(key, None)
-        self._dependency_versions.pop(key, None)
-        self._tensor_cache.pop(key, None)
+        self._drop_cached(key)
         self._invalidate_dependents(key)
 
     def _invalidate_dependents(self, changed_key):
@@ -507,8 +534,15 @@ class BaseParameters:
         Invalidate all cached computed properties that (directly or indirectly)
         depend on the changed_key.
         """
+        # The dependents are already transitive, so no need to recurse per dependent
         for key in self._find_all_dependents(changed_key):
-            self._invalidate(key)
+            self._drop_cached(key)
+
+    def _drop_cached(self, key):
+        """Drop the cached value of a single key, without touching its dependents."""
+        self._cache.pop(key, None)
+        self._dependency_versions.pop(key, None)
+        self._tensor_cache.pop(key, None)
 
     def _current_dependency_hash(self, key) -> str:
         """Compute a hash representing the current state of the dependencies of key.
@@ -535,8 +569,10 @@ class BaseParameters:
             return missing_set
 
         if self._is_property_with_dependencies(name):
+            optional = getattr(self.__class__, name).fget._optional_dependencies
             for dep in self._get_dependencies(name):
-                missing_set |= self._find_missing_dependencies(dep)  # union
+                if dep not in optional:
+                    missing_set |= self._find_missing_dependencies(dep)  # union
         else:
             missing_set.add(name)
 

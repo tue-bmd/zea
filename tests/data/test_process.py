@@ -234,8 +234,20 @@ def test_run_passthrough_overwrite_true(tmp_path):
 # ── run_processing — passthrough fallback ─────────────────────────────────────
 
 
-def test_run_processing_passthrough_fallback(tmp_path):
-    """run_processing falls back to passthrough for image keys when config has no pipeline."""
+@pytest.mark.parametrize(
+    "config_revision, expected_config_revision",
+    [
+        (None, None),  # falls back to the dataset revision (None here)
+        ("", None),  # the app sends "" for "no revision"
+        ("v1", "v1"),  # an explicit config revision is forwarded as-is
+    ],
+)
+def test_run_processing_passthrough_fallback(tmp_path, config_revision, expected_config_revision):
+    """run_processing falls back to passthrough for image keys when config has no pipeline.
+
+    Also checks the revision the config (and pipeline) is loaded at.
+    """
+    from zea.config import Config
     from zea.data.process import run_processing
 
     ds_dir = tmp_path / "ds"
@@ -243,16 +255,27 @@ def test_run_processing_passthrough_fallback(tmp_path):
     cfg = _minimal_config(tmp_path / "cfg.yaml", with_pipeline=False)
     out_dir = tmp_path / "out"
 
-    run_processing(
-        str(ds_dir),
-        str(cfg),
-        key="data/image/values",
-        n_frames=None,
-        save_dir=out_dir,
-        save_as="gif",
-    )
+    seen = []
+    original = Config.from_path
+
+    def spy(path, revision=None, **kwargs):
+        seen.append(revision)
+        return original(path, **kwargs)  # local config: revision is irrelevant
+
+    with patch("zea.data.process.Config.from_path", spy):
+        run_processing(
+            str(ds_dir),
+            str(cfg),
+            key="data/image/values",
+            n_frames=None,
+            save_dir=out_dir,
+            save_as="gif",
+            config_revision=config_revision,
+        )
 
     assert (out_dir / "scan.gif").exists()
+    # Config and Pipeline loading must both use the effective config revision.
+    assert seen and all(rev == expected_config_revision for rev in seen)
 
 
 def test_run_processing_raw_without_pipeline_raises(tmp_path):

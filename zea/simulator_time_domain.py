@@ -43,7 +43,6 @@ from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.ultrasound import directivity
 from zea.simulator import (
     _apply_elevation_slab,
-    _resolve_element_width,
     _validate_scatter_exponent,
     _warn_if_elevation_extent,
     attenuate,
@@ -134,6 +133,8 @@ def simulate_rf_td(
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
+    from zea.probes import _resolve_element_width
+
     element_width = _resolve_element_width(probe_geometry, element_width)
     if element_height is None:
         element_height = element_width

@@ -46,7 +46,7 @@ dependencies = [
     "tqdm >=4",
     "pyyaml >=6",
     "decorator >=5",
-    "huggingface_hub >=1.2",
+    "huggingface_hub >=2.0",
     "tyro >=1.0",
     "wget >=3.2",
     "imageio[ffmpeg] >=2.0",
@@ -85,7 +85,7 @@ zea = "zea.__main__:main"
 # uv installs `dev` by default; lean envs opt out with --no-default-groups /
 # --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
 [dependency-groups]
-lint = ["ruff==0.16.9", "ty==0.0.84"]
+lint = ["ruff==0.17.2", "ty==0.0.91"]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
@@ -137,12 +137,21 @@ tf-gpu = ["tensorflow[and-cuda]>=2.21"]
 [tool.uv]
 conflicts = [
     # torch-cpu and torch-gpu are the same package from different indexes, so uv has to fork.
-    [{ group = "torch-cpu" }, { group = "torch-gpu" }],
+    [
+        { group = "torch-cpu" },
+        { group = "torch-gpu" },
+    ],
     # Both opencv extras provide `cv2`, so co-installing them leaves whichever landed last,
     # and uninstalling either takes the shared `cv2/` with it. `dev` already brings the
     # headless build, hence the second pair.
-    [{ extra = "display" }, { extra = "display-headless" }],
-    [{ extra = "display" }, { group = "dev" }],
+    [
+        { extra = "display" },
+        { extra = "display-headless" },
+    ],
+    [
+        { extra = "display" },
+        { group = "dev" },
+    ],
 ]
 
 # One index per compute backend; `explicit` keeps everything else on PyPI. To move to
@@ -294,11 +303,20 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 
 # Keras Layer subclasses deliberately override `call` with domain-specific
 # signatures; Keras dispatches through __call__ and never calls .call()
-# polymorphically, so this override pattern is intentional.
+# polymorphically, so this override pattern is intentional. The same holds for
+# `forward` on torch modules, which torch declares as a mutable attribute.
 [[tool.ty.overrides]]
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
 invalid-method-override = "ignore"
+invalid-mutable-override = "ignore"
+
+# torch declares `Module.forward` as a mutable attribute, which subclasses are meant to
+# override with a method. Only reported when torch is installed, so not in CI's typecheck.
+[[tool.ty.overrides]]
+include = ["zea/models/speckle2self.py"]
+[tool.ty.overrides.rules]
+invalid-mutable-override = "ignore"
 
 
 [tool.pytest.ini_options]

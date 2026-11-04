@@ -20,6 +20,7 @@ from zea.beamform.delays import compute_t0_delays_focused
 from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
+    compute_time_to_peak,
     compute_time_to_peak_stack,
     construct_acquisition_from_synthetic_aperture,
     decode_hadamard,
@@ -32,6 +33,7 @@ from zea.parameters import Parameters
 from zea.simulator import simulate_rf
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
+from .helpers import is_on_gpu
 
 
 @pytest.mark.parametrize(
@@ -1016,19 +1018,44 @@ def test_compute_time_to_peak():
     center_frequencies = np.array([center_frequency0, center_frequency1])
     waveforms = np.array([waveform0, waveform1])
 
-    t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
+    t_peak = compute_time_to_peak(waveforms, center_frequencies, 250e6)
 
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
+
+    # With a sine carrier the largest raw sample sits a quarter period away from the
+    # envelope peak, so this catches taking argmax(|waveform|) instead of the envelope.
+    waveform_sin = np.exp(-((t - 1e-6) ** 2) / (2 * (0.2e-6) ** 2)) * np.sin(
+        2 * np.pi * center_frequency0 * (t - 1e-6)
+    )
+    t_peak = compute_time_to_peak(waveform_sin, center_frequency0, 250e6)
+    assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
+
+    # Deprecated alias still works
+    t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
+    assert np.allclose(t_peak, 1e-6, atol=1e-8)
+
+    # A size-1 frequency acts as a scalar, both for one waveform and for a stack
+    t_peak = compute_time_to_peak(waveform0, np.array([center_frequency0]), 250e6)
+    assert np.shape(t_peak) == ()
+    t_peak = compute_time_to_peak(waveforms, np.array([center_frequency0]), 250e6)
+    assert np.shape(t_peak) == (2,)
+
+    # A frequency per waveform must match the number of waveforms
+    with pytest.raises(ValueError, match="center_frequency"):
+        compute_time_to_peak(waveform0, center_frequencies, 250e6)
+    with pytest.raises(ValueError, match="center_frequency"):
+        compute_time_to_peak(np.stack([waveform0] * 3), center_frequencies, 250e6)
 
 
 # Only the beamformers zea.ops defines itself. A model-backed beamformer (such as
 # "able", registered by zea.models.able) is not comparable across backends: its
 # weights are randomly initialized per backend, and under torch its output requires
 # grad, which this harness cannot convert to numpy. Those live with their model.
+# ADMIRE needs a real imaging geometry; it is tested in test_admire.py.
 _OPS_BEAMFORMERS = [
     name
     for name in beamformer_registry.registered_names()
-    if beamformer_registry[name].__module__.startswith("zea.ops.")
+    if beamformer_registry[name].__module__.startswith("zea.ops.") and name != "admire"
 ]
 
 
@@ -2028,8 +2055,11 @@ def test_decode_hadamard():
         tx_apodizations=tx_apodizations_synthetic_aperture, **shared_kwargs
     )[None]
     raw_data_decoded, tx_apodizations_decoded = decode_hadamard(raw_data_encoded, hadamard_matrix)
+    # On GPU, float32 matmul runs in TF32 on Ampere+ (~1e-3 error here), while a flipped or
+    # swapped Hadamard row deviates by ~1, so 1e-2 still catches decoding bugs.
+    tol = 1e-2 if is_on_gpu(raw_data_decoded) else 1e-5
     np.testing.assert_allclose(
-        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-5, atol=1e-5
+        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=tol, atol=tol
     )
     np.testing.assert_array_equal(tx_apodizations_decoded, np.eye(hadamard_size))
 

@@ -115,7 +115,7 @@ from zea.beamform.pixelgrid import (
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
-from zea.func.ultrasound import compute_time_to_peak_stack
+from zea.func.ultrasound import compute_time_to_peak
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
 from zea.probes import Probe, fit_curved_probe_radius
@@ -191,12 +191,6 @@ class Parameters(BaseParameters):
     - ``list``/``np.ndarray``: use these specific transmit indices.
     - ``slice``: use transmits given by the slice (e.g. ``slice(0, 10, 2)``).
     """
-
-    waveforms_one_way: np.ndarray | None
-    """One-way transmit waveforms, shape (n_tx, n_samples_one_way). None if absent."""
-
-    waveforms_two_way: np.ndarray | None
-    """Two-way transmit waveforms, shape (n_tx, n_samples_two_way). None if absent."""
 
     pixels_per_wavelength: int
     """Number of grid pixels per wavelength. Defaults to 4."""
@@ -591,7 +585,9 @@ class Parameters(BaseParameters):
 
         f_number = float(self.f_number)
         half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
-        normals = np.asarray(compute_element_normals(ops.convert_to_tensor(self.probe_geometry)))
+        normals = ops.convert_to_numpy(
+            compute_element_normals(ops.convert_to_tensor(self.probe_geometry))
+        )
         tilt = np.arctan2(normals[:, 0], normals[:, 2])
 
         # Outermost accepted ray of each edge element.
@@ -1039,9 +1035,27 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_one_way(self):
+        """One-way transmit waveforms of shape (n_tx, n_samples_one_way), or None."""
+        value = self._params.get("waveforms_one_way")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_two_way(self):
+        """Two-way transmit waveforms of shape (n_tx, n_samples_two_way), or None."""
+        value = self._params.get("waveforms_two_way")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
     @cache_with_dependencies("waveforms_one_way", "waveforms_two_way")
     def n_waveforms(self):
-        """The number of unique transmit waveforms."""
+        """The number of transmit waveforms, one per selected transmit."""
 
         if self.waveforms_one_way is not None:
             return self.waveforms_one_way.shape[0]
@@ -1057,7 +1071,7 @@ class Parameters(BaseParameters):
 
         If not set explicitly and ``waveforms_two_way`` (the two-way,
         pulse-echo transmit waveform) is available, this is estimated from it
-        via :func:`~zea.func.ultrasound.compute_time_to_peak_stack`. Otherwise
+        via :func:`~zea.func.ultrasound.compute_time_to_peak`. Otherwise
         it defaults to ``1 / center_frequency``.
         """
         t_peak = self._params.get("t_peak")
@@ -1065,7 +1079,7 @@ class Parameters(BaseParameters):
             waveforms = self._params.get("waveforms_two_way")
             if waveforms is not None:
                 t_peak = ops.convert_to_numpy(
-                    compute_time_to_peak_stack(waveforms, self.center_frequency)
+                    compute_time_to_peak(waveforms, self.center_frequency)
                 )
             else:
                 t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
@@ -1097,12 +1111,12 @@ class Parameters(BaseParameters):
         "sound_speed",
         "center_frequency",
         "probe_bandwidth_percent",
-        "n_el",
         "probe_geometry",
         "tx_apodizations",
         "grid",
         "t0_delays",
         "pfield_kwargs",
+        optional=("element_width",),
     )
     def pfield(self) -> np.ndarray:
         """Compute or return the pressure field (pfield) for weighting
@@ -1113,12 +1127,12 @@ class Parameters(BaseParameters):
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
             center_frequency=self.center_frequency,
-            n_el=self.n_el,
             probe_geometry=self.probe_geometry,
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
             probe_bandwidth_percent=self.probe_bandwidth_percent,
+            element_width=self._params.get("element_width"),
             **self.pfield_kwargs,
         )
         return ops.convert_to_numpy(pfield)

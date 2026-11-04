@@ -67,6 +67,31 @@ def run_in_subprocess(func):
     return wrapper
 
 
+def tensor_device_name(tensor) -> str:
+    """Return a lowercase device string for a tensor (e.g. ``'cpu'``, ``'cuda:0'``)."""
+    import keras
+
+    backend = keras.backend.backend()
+    if backend == "torch":
+        import torch
+
+        if isinstance(tensor, torch.Tensor):
+            return str(tensor.device)
+    if backend == "jax":
+        import jax
+
+        return str(jax.device_put(tensor).devices().pop()).lower()
+    if backend == "tensorflow":
+        return tensor.device.lower()
+    return "unknown"
+
+
+def is_on_gpu(tensor) -> bool:
+    """Whether a tensor lives on a GPU, e.g. to allow for TF32 matmul precision."""
+    name = tensor_device_name(tensor)
+    return "gpu" in name or "cuda" in name
+
+
 class BackendEqualityCheck:
     """This class is used to run a test function in multiple backends and compare the results.
     It starts workers for each backend and runs the test function in each worker.

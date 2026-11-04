@@ -5,9 +5,11 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import types
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import h5py
 import imageio
@@ -25,11 +27,12 @@ from zea.data.convert.utils import (
     require_output_dir_ownership,
     sitk_load,
     unzip,
+    unzip_beside,
     upload_dataset_to_hf,
 )
 from zea.data.convert.verasonics import (
     VerasonicsFile,
-    bs100bw_to_iq,
+    baseband_mode_to_iq,
     convert_verasonics,
     estimate_lens_probe_params,
 )
@@ -139,6 +142,8 @@ def create_test_data_for_dataset(dataset, src):
     os.mkdir(src)
     if dataset == "echonet":
         create_echonet_test_data(src)
+        # The published split does not know the synthetic videos
+        extra_args = ["--new-split"]
     elif dataset == "echonetlvh":
         extra_args = create_echonetlvh_test_data(src)
     elif dataset == "camus":
@@ -1103,33 +1108,40 @@ def verify_converted_echoxflow_test_data(dst, expected):
 
     for exam_id, recs in expected.items():
         for rec in recs:
-            h5_file = dst / exam_id / f"{rec}.hdf5"
+            h5_file = dst / "data" / exam_id / f"{rec}.hdf5"
             assert h5_file.exists(), f"Missing converted file: {h5_file}"
             with File(h5_file, "r") as f:
                 assert "data/image" in f, f"Missing 'data/image' in {h5_file}"
                 image = f.data.image.values[:]
                 assert image.ndim == 3, f"Expected (F, H, W) image, got {image.shape}"
                 assert image.dtype == np.uint8, f"Expected uint8 image in {h5_file}"
-                # subject.id is mapped from exam_id and enables subject-wise splits.
+                # subject.id is mapped from exam_id (an exam, not a patient id).
                 assert "metadata/subject" in f, f"Missing 'metadata/subject' in {h5_file}"
                 f.validate()
 
     # exam_A/rec_0 has geometry + ecg -> coordinates and an ecg signal must be present.
-    with File(dst / "exam_A" / "rec_0.hdf5", "r") as f:
+    with File(dst / "data" / "exam_A" / "rec_0.hdf5", "r") as f:
         assert "coordinates" in f["data/image"], "Expected per-pixel coordinates for rec_0"
         assert "metadata/ecg" in f, "Expected ecg metadata for rec_0"
 
     # exam_B/rec_1 has neither -> no coordinates, no ecg.
-    with File(dst / "exam_B" / "rec_1.hdf5", "r") as f:
+    with File(dst / "data" / "exam_B" / "rec_1.hdf5", "r") as f:
         assert "coordinates" not in f["data/image"], "rec_1 should have no coordinates"
         assert "metadata/ecg" not in f, "rec_1 should have no ecg metadata"
 
     # The conversion writes a dataset card stamped with the default zeahub repo id.
     readme = dst / "README.md"
     assert readme.exists(), "Missing dataset card README.md"
-    assert "zea_repo_id: zeahub/echoxflow" in readme.read_text(), (
+    card = readme.read_text()
+    assert "zea_repo_id: zeahub/echoxflow" in card, (
         "Dataset card must declare the default zea_repo_id"
     )
+    assert "license: cc-by-nc-sa-4.0" in card
+    assert "| **Recordings** | 2 single-plane" in card
+    assert "@inproceedings{stenhede_2026_echoxflow," in card
+
+    # The upstream LICENSE (one level above the data root) is copied next to the data.
+    assert (dst / "LICENSE").read_text() == "CC BY-NC-SA 4.0 test license"
 
 
 @pytest.mark.heavy
@@ -1150,11 +1162,47 @@ def test_echoxflow_conversion_script(tmp_path_factory, monkeypatch):
     src.mkdir()
 
     expected = create_echoxflow_test_data(src, monkeypatch)
+    # Upstream keeps LICENSE one level above the data root.
+    (base / "LICENSE").write_text("CC BY-NC-SA 4.0 test license")
 
     args = tyro.cli(Dataset, args=["echoxflow", str(src), str(dst)])  # ty: ignore[no-matching-overload]
     convert_echoxflow(args)
 
     verify_converted_echoxflow_test_data(dst, expected)
+
+
+def test_echoxflow_upload_requires_license(tmp_path, monkeypatch):
+    """Uploading must fail before any upload when the EchoXFlow LICENSE is missing."""
+    import zea.data.convert.echoxflow as echoxflow
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echoxflow_test_data(src, monkeypatch)  # no LICENSE next to src
+    uploaded = []
+    monkeypatch.setattr(echoxflow, "upload_echoxflow", lambda *a, **k: uploaded.append(a))
+
+    args = tyro.cli(  # ty: ignore[no-matching-overload]
+        Dataset, args=["echoxflow", str(src), str(dst), "--upload", "--revision", "test"]
+    )
+    with pytest.raises(FileNotFoundError, match="LICENSE"):
+        echoxflow.convert_echoxflow(args)
+    assert not uploaded
+
+
+def test_echoxflow_rejects_legacy_layout(tmp_path, monkeypatch):
+    """HDF5 files outside <dst>/data (old layout) must be rejected, not mixed in."""
+    from zea.data.convert.echoxflow import convert_echoxflow
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echoxflow_test_data(src, monkeypatch)
+    (dst / "exam_A").mkdir(parents=True)
+    (dst / "exam_A" / "rec_0.hdf5").touch()
+    (dst / "README.md").write_text("---\nzea_repo_id: zeahub/echoxflow\n---\n")
+
+    args = tyro.cli(Dataset, args=["echoxflow", str(src), str(dst)])  # ty: ignore[no-matching-overload]
+    with pytest.raises(RuntimeError, match="older converter layout"):
+        convert_echoxflow(args)
 
 
 def test_echoxflow_missing_package_raises(monkeypatch):
@@ -1219,6 +1267,31 @@ def test_load_avi(tmp_path):
     assert loaded_frames.shape == (10, 32, 32)
     for i in range(10):
         np.testing.assert_allclose(loaded_frames[i], frames[i], atol=2)
+
+
+def test_load_avi_color_channel_order(tmp_path):
+    """Grayscale conversion must weight red and blue correctly.
+
+    Grayscale videos have R = G = B, so a swapped channel order (e.g. treating OpenCV's
+    BGR frames as RGB) is invisible on them. It silently brightened the tinted EchoNet
+    videos in an earlier conversion; solid colours catch it.
+    """
+    colors = np.array([[255, 0, 0], [0, 255, 0], [0, 0, 255], [128, 128, 128]], np.uint8)
+    frames = np.broadcast_to(colors[:, None, None, :], (4, 16, 16, 3))
+    avi_path = tmp_path / "colors.avi"
+    # ffv1 with bgr0 is lossless, so the expected values are exact
+    with imageio.get_writer(
+        avi_path, fps=10, codec="ffv1", pixelformat="bgr0", macro_block_size=1
+    ) as writer:
+        for frame in frames:
+            writer.append_data(frame)
+
+    rgb = load_avi(avi_path, mode="RGB")
+    np.testing.assert_array_equal(rgb[:, 0, 0], colors)
+
+    gray = load_avi(avi_path, mode="L")
+    # ITU-R 601 luma: 0.299 R + 0.587 G + 0.114 B
+    np.testing.assert_array_equal(gray[:, 0, 0], [76, 150, 29, 128])
 
 
 def test_sitk_load(tmp_path):
@@ -1306,6 +1379,86 @@ def test_unzip_rejects_path_traversal(tmp_path):
     assert not (tmp_path / "evil.txt").exists()
 
 
+def test_unzip_beside(tmp_path, monkeypatch):
+    """unzip_beside extracts next to the zip, or into a fresh temp dir if that is read-only."""
+    src = tmp_path / "archive.zip"
+    with zipfile.ZipFile(src, "w") as zipf:
+        zipf.writestr("dummy.txt", "This is a test.")
+
+    assert unzip_beside(src) == tmp_path / "archive"
+    assert (tmp_path / "archive" / "dummy.txt").exists()
+
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+    monkeypatch.setattr(os, "access", lambda *args: False)
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_dir))
+    out = unzip_beside(src)
+    assert out.parent == tmp_dir
+    assert (out / "dummy.txt").exists()
+    # Each run gets its own directory
+    assert unzip_beside(src) != out
+
+
+def _write_zip(path, names):
+    # Names ending in "/" are written as directories
+    with zipfile.ZipFile(path, "w") as zf:
+        for name in names:
+            zf.writestr(name, "" if name.endswith("/") else "data")
+    return path
+
+
+def test_camus_resolve_path_zip_layouts(tmp_path):
+    """CAMUS sources are found from the zip itself, a folder holding it, and a zip
+    without a database_nifti folder."""
+    from zea.data.convert.camus import _resolve_path
+
+    nested = ["CAMUS_public/database_nifti/patient0001/"]
+    as_file = tmp_path / "as_file"
+    as_file.mkdir()
+    zip_path = _write_zip(as_file / "CAMUS_public.zip", nested)
+    expected = as_file / "CAMUS_public" / "CAMUS_public" / "database_nifti"
+    assert _resolve_path(zip_path) == expected
+
+    in_folder = tmp_path / "in_folder"
+    in_folder.mkdir()
+    _write_zip(in_folder / "CAMUS_public.zip", nested)
+    expected = in_folder / "CAMUS_public" / "CAMUS_public" / "database_nifti"
+    assert _resolve_path(in_folder) == expected
+
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    zip_path = _write_zip(flat / "patients.zip", ["patient0001/"])
+    assert _resolve_path(zip_path) == flat / "patients"
+
+
+def test_picmus_resolve_zip(tmp_path):
+    """PICMUS is found in picmus.zip, whether src is the zip or the folder holding it."""
+    from zea.data.convert.picmus import _resolve_path, convert_picmus
+
+    in_folder = tmp_path / "in_folder"
+    in_folder.mkdir()
+    _write_zip(in_folder / "picmus.zip", ["archive_to_download/"])
+    assert _resolve_path(in_folder) == in_folder / "picmus" / "archive_to_download"
+
+    zip_path = _write_zip(tmp_path / "picmus.zip", ["archive_to_download/"])
+    dst = tmp_path / "dst"
+    convert_picmus(types.SimpleNamespace(src=zip_path, dst=dst))
+    assert (tmp_path / "picmus" / "archive_to_download").is_dir()
+    assert dst.is_dir()
+
+
+def test_echonetlvh_unzips_zip_source(tmp_path):
+    """A zipped EchoNet-LVH source is unzipped beside itself before its contents are checked."""
+    from zea.data.convert.echonetlvh import convert_echonetlvh
+
+    zip_path = _write_zip(tmp_path / "EchoNet-LVH.zip", ["Batch1/"])
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    with pytest.raises(AssertionError, match="Missing Batch2"):
+        convert_echonetlvh(zip_path, dst, True, None, False, False, None, False)
+    assert (tmp_path / "EchoNet-LVH" / "Batch1").is_dir()
+
+
 def test_camus_db_not_cast_to_uint8():
     """translate() to [-60, 0] dB produces negative floats; casting to uint8
     wraps them (e.g. -60 → 196). The fix removes the .astype(np.uint8) call."""
@@ -1374,6 +1527,207 @@ def test_echonet_processor_writes_image_not_image_sc(tmp_path):
 
     with File(rejected[0], "r") as f:
         assert f.data.image.values.ndim == 3, "rejected file should store the 3D Cartesian image"
+
+
+def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
+    """A given split is kept when the acceptance check disagrees, and the disagreement is
+    reported, so a decoder change cannot reshuffle a published split."""
+    from multiprocessing import Value
+
+    from zea.data.convert import echonet
+
+    src = tmp_path / "src"
+    src.mkdir()
+    create_echonet_test_data(src)
+    videos = src / "EchoNet-Dynamic" / "Videos"
+
+    # video_6 fails the acceptance check, video_0 passes it
+    splits = {"train": ["video_6.hdf5"], "val": [], "test": [], "rejected": ["video_0.hdf5"]}
+    processor = echonet.H5Processor(path_out_h5=tmp_path / "out", splits=splits)
+    echonet.count_init(Value("i", 0))
+
+    with mock.patch.object(echonet.log, "warning") as warning:
+        processor(videos / "video_6.avi")
+        processor(videos / "video_0.avi")
+    messages = [call.args[0] % call.args[1:] for call in warning.call_args_list]
+    assert any("video_6.hdf5: the acceptance check rejects" in m for m in messages)
+    assert any("video_0.hdf5: the acceptance check accepts" in m for m in messages)
+
+    assert (tmp_path / "out/train/video_6.hdf5").exists()
+    assert (tmp_path / "out/rejected/video_0.hdf5").exists()
+
+
+def test_echonet_load_split(tmp_path):
+    """load_split reads a split.yaml, directly or from its folder; an empty split is a set."""
+    from zea.data.convert.echonet import load_split
+
+    content = {"train": ["a.hdf5"], "val": None, "test": [], "rejected": ["e.hdf5"]}
+    (tmp_path / "split.yaml").write_text(yaml.dump(content))
+    expected = {"train": {"a.hdf5"}, "val": set(), "test": set(), "rejected": {"e.hdf5"}}
+    assert load_split(tmp_path) == expected
+    assert load_split(tmp_path / "split.yaml") == expected
+
+    with pytest.raises(FileNotFoundError):
+        load_split(tmp_path / "empty")
+
+
+def test_echonet_unavailable_hf_split_fails_before_unzip(tmp_path, monkeypatch):
+    """Without a connection, conversion points at the local options and leaves the zip alone."""
+    from zea.data.convert import echonet
+
+    def offline(hf_path):
+        raise ConnectionError("no connection")
+
+    monkeypatch.setattr(echonet, "_hf_resolve_path", offline)
+    unzip = mock.Mock()
+    monkeypatch.setattr(echonet, "unzip_beside", unzip)
+
+    args = types.SimpleNamespace(src=tmp_path, dst=tmp_path / "dst", no_hyperthreading=True)
+    with pytest.raises(RuntimeError, match="--new-split") as excinfo:
+        echonet.convert_echonet(args)
+    assert isinstance(excinfo.value.__cause__, ConnectionError)
+    unzip.assert_not_called()
+
+
+def test_echonet_load_split_hf_downloads_only_split_file(tmp_path, monkeypatch):
+    """An hf:// split resolves the split file alone, never the whole repository."""
+    from zea.data.convert import echonet
+
+    split_file = tmp_path / "split.yaml"
+    split_file.write_text(yaml.dump({"val": ["a.hdf5"]}))
+
+    requested = []
+
+    def fake_resolve(hf_path):
+        requested.append(hf_path)
+        return split_file
+
+    monkeypatch.setattr(echonet, "_hf_resolve_path", fake_resolve)
+    for path in ["hf://org/repo", "hf://org/repo/", "hf://org/repo/split.yaml"]:
+        assert echonet.load_split(path) == {"val": {"a.hdf5"}}
+    assert requested == ["hf://org/repo/split.yaml"] * 3
+
+
+def test_echonet_resolve_path_layouts(tmp_path):
+    """Videos are found after unzipping beside the zip, on a rerun, and in a manual
+    extraction; an empty Videos folder raises instead of silently converting nothing."""
+    from zea.data.convert.echonet import _resolve_path, convert_echonet
+
+    create_echonet_test_data(tmp_path)
+    videos = tmp_path / "EchoNet-Dynamic" / "Videos"
+    assert _resolve_path(tmp_path) == videos  # manual extraction
+
+    zipped = tmp_path / "zipped"
+    zipped.mkdir()
+    with zipfile.ZipFile(zipped / "EchoNet-Dynamic.zip", "w") as zf:
+        for avi in videos.glob("*.avi"):
+            zf.write(avi, f"EchoNet-Dynamic/Videos/{avi.name}")
+    nested = zipped / "EchoNet-Dynamic" / "EchoNet-Dynamic" / "Videos"
+    assert _resolve_path(zipped) == nested  # unzips
+    assert _resolve_path(zipped) == nested  # rerun
+    assert _resolve_path(zipped / "EchoNet-Dynamic.zip") == nested
+
+    for avi in videos.glob("*.avi"):
+        avi.unlink()
+    args = types.SimpleNamespace(
+        src=tmp_path, dst=tmp_path / "dst", new_split=True, no_hyperthreading=True
+    )
+    with pytest.raises(FileNotFoundError, match="No .avi files"):
+        convert_echonet(args)
+
+
+def test_echonet_nearest_matches_scipy():
+    """The cached nearest-neighbour lookup gives what NearestNDInterpolator gives."""
+    from scipy.interpolate import NearestNDInterpolator
+
+    from zea.data.convert.echonet import _polar_grid, cartesian_to_polar_matrix
+
+    frames = np.random.default_rng(DEFAULT_TEST_SEED).uniform(size=(2, 112, 112))
+    tri, new_points = _polar_grid(112, 112, (61, 7), 107, 0.79)
+    values = NearestNDInterpolator(tri.points, frames.reshape(2, -1).T)(new_points)
+    expected = np.rot90(values.T.reshape(-1, 112, 112), k=-1, axes=(1, 2))
+    np.testing.assert_array_equal(cartesian_to_polar_matrix(frames), expected)
+
+
+def test_echonet_polar_interpolation_modes():
+    """Linear and cubic interpolation keep the input shape; unknown modes raise."""
+    from zea.data.convert.echonet import cartesian_to_polar_matrix
+
+    frame = np.random.default_rng(DEFAULT_TEST_SEED).uniform(size=(112, 112))
+    for interpolation in ["linear", "cubic"]:
+        polar = cartesian_to_polar_matrix(frame, interpolation=interpolation)
+        assert polar.shape == frame.shape and np.isfinite(polar).all()
+    with pytest.raises(ValueError, match="Unknown interpolation"):
+        cartesian_to_polar_matrix(frame, interpolation="bogus")
+
+
+def test_echonet_find_split_warns_about_unlisted_file():
+    """The published split lists all files, so an unlisted one is surprising."""
+    from zea.data.convert import echonet
+
+    with mock.patch.object(echonet.log, "warning") as warning:
+        assert echonet.find_split_for_file({"train": {"a.hdf5"}}, "a.hdf5") == "train"
+        warning.assert_not_called()
+        assert echonet.find_split_for_file({"train": {"a.hdf5"}}, "b.hdf5") == "rejected"
+        warning.assert_called_once()
+
+
+def test_echonet_processor_rejects_non_finite(tmp_path):
+    """NaNs survive clipping, so they are caught before writing the file."""
+    from zea.data.convert import echonet
+
+    src = tmp_path / "src"
+    src.mkdir()
+    create_echonet_test_data(src)
+    splits = {"train": ["video_0.hdf5"], "val": [], "test": [], "rejected": []}
+    processor = echonet.H5Processor(path_out_h5=tmp_path / "out", splits=splits)
+
+    with mock.patch.object(
+        echonet, "cartesian_to_polar_matrix", side_effect=lambda x, **_: np.full(x.shape, np.nan)
+    ):
+        with pytest.raises(ValueError, match="non-finite"):
+            processor(src / "EchoNet-Dynamic" / "Videos" / "video_0.avi")
+    assert not (tmp_path / "out/train/video_0.hdf5").exists()
+
+
+def test_echonet_resolve_path_direct_and_missing(tmp_path):
+    """src may be the folder holding Videos; a folder without Videos raises."""
+    from zea.data.convert.echonet import _resolve_path
+
+    (tmp_path / "Videos").mkdir()
+    assert _resolve_path(tmp_path) == tmp_path / "Videos"
+
+    (tmp_path / "other" / "EchoNet-Dynamic").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="No Videos folder"):
+        _resolve_path(tmp_path / "other")
+
+
+def test_echonet_conversion_reports_failures(tmp_path):
+    """A file that fails to convert makes the conversion raise after the other files are
+    written, instead of being logged as an anonymous warning."""
+    from zea.data.convert.echonet import convert_echonet
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    create_echonet_test_data(src)
+    (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").write_bytes(b"not a video")
+
+    args = types.SimpleNamespace(src=src, dst=dst, new_split=True, no_hyperthreading=True)
+    with pytest.raises(RuntimeError, match="1 of 9 files failed"):
+        convert_echonet(args)
+
+    split = yaml.safe_load((dst / "split.yaml").read_text())
+    assert sum(len(names) for names in split.values()) == 8
+
+    # A rerun only converts what is left
+    (src / "EchoNet-Dynamic" / "Videos" / "broken.avi").unlink()
+    convert_echonet(args)
+
+    # A stale copy in another split is refused rather than listed twice in split.yaml
+    stale = next(f for split in ("train", "val", "test") for f in (dst / split).glob("*.hdf5"))
+    shutil.copy(stale, dst / "rejected" / stale.name)
+    with pytest.raises(RuntimeError, match="1 files are in more than one split"):
+        convert_echonet(args)
 
 
 def test_camus_build_polar_image_in_process(tmp_path):
@@ -1666,7 +2020,7 @@ class _FakeHfApi:
     def create_branch(self, repo_id, branch, repo_type):
         self.created_branches.append(branch)
 
-    def upload_large_folder(self, **kwargs):
+    def upload_folder(self, **kwargs):
         self.uploads.append(kwargs)
 
 
@@ -1765,43 +2119,126 @@ class TestEstimateLensProbeParams:
             estimate_lens_probe_params(float("inf"), 7e6)
 
 
-class TestBs100bwToIq:
+class TestBasebandModeToIq:
     def _make_data(self, n_frames=2, n_tx=3, n_ax=8, n_el=4):
         return np.zeros((n_frames, n_tx, n_ax, n_el, 1), dtype=np.float32)
 
     def test_output_shape(self):
         data = self._make_data()
-        out = bs100bw_to_iq(data)
+        out = baseband_mode_to_iq(data)
         assert out.shape == (2, 3, 4, 4, 2)
 
     def test_i_samples_are_even_rows(self):
         data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
         data[0, 0, 0, 0, 0] = 5.0  # even index → I
         data[0, 0, 2, 0, 0] = 7.0  # even index → I
-        out = bs100bw_to_iq(data)
+        out = baseband_mode_to_iq(data)
         np.testing.assert_array_equal(out[0, 0, :, 0, 0], [5.0, 7.0])  # I channel
-
-    def test_q_samples_are_negated_odd_rows(self):
-        data = np.zeros((1, 1, 4, 1, 1), dtype=np.float32)
-        data[0, 0, 1, 0, 0] = 3.0  # odd index → Q (negated)
-        out = bs100bw_to_iq(data)
-        assert out[0, 0, 0, 0, 1] == -3.0  # Q channel negated
 
     def test_wrong_ndim_raises(self):
         with pytest.raises(ValueError, match="Expected shape"):
-            bs100bw_to_iq(np.zeros((2, 3, 8, 4)))
+            baseband_mode_to_iq(np.zeros((2, 3, 8, 4)))
 
     def test_wrong_last_dim_raises(self):
         with pytest.raises(ValueError, match="Expected shape"):
-            bs100bw_to_iq(np.zeros((2, 3, 8, 4, 2)))
+            baseband_mode_to_iq(np.zeros((2, 3, 8, 4, 2)))
 
     def test_odd_axial_dim_raises(self):
         with pytest.raises(ValueError, match="Axial dimension must be even"):
-            bs100bw_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
+            baseband_mode_to_iq(np.zeros((2, 3, 7, 4, 1), dtype=np.float32))
+
+    def test_odd_rows_hold_negated_q(self):
+        # Odd samples hold -Q, so Q is the negated odd sample. A constant Q is unchanged
+        # by the fractional delay, so only the negation remains.
+        data = np.zeros((1, 1, 8, 1, 1), dtype=np.float32)
+        data[0, 0, 1::2, 0, 0] = 3.0  # odd index holds -Q
+        out = baseband_mode_to_iq(data)
+        np.testing.assert_allclose(out[0, 0, :, 0, 1], -3.0, rtol=1e-5)  # Q channel
+
+    def test_invalid_carrier_periods_per_pair_raises(self):
+        with pytest.raises(ValueError, match="carrier_periods_per_pair"):
+            baseband_mode_to_iq(self._make_data(), carrier_periods_per_pair=3)
+
+    CENTER_FREQUENCY = 5e6
+    NUMBER_OF_IQ_SAMPLES = 256
+
+    def _true_baseband(
+        self,
+        time: np.ndarray,
+        periods_per_pair: int,
+        pulse_width_periods: float,
+        frequency_offset_fraction: float,
+    ) -> np.ndarray:
+        """Band-limited complex baseband pulse centered in the record.
+
+        Pulse width and frequency offset scale with ``periods_per_pair`` so that the
+        pulse occupies the same fraction of the IQ band in every sample mode.
+        """
+        record_duration = self.NUMBER_OF_IQ_SAMPLES * periods_per_pair / self.CENTER_FREQUENCY
+        pulse_width = pulse_width_periods * periods_per_pair / self.CENTER_FREQUENCY
+        relative_time = time - record_duration / 2
+        envelope = np.exp(-0.5 * (relative_time / pulse_width) ** 2)
+        frequency_offset = frequency_offset_fraction * self.CENTER_FREQUENCY / periods_per_pair
+        phase = 2 * np.pi * frequency_offset * relative_time + 0.7
+        return envelope * np.exp(1j * phase)
+
+    def _baseband_samples(self, periods_per_pair: int, **pulse) -> np.ndarray:
+        """Sample RF at four times the center frequency and keep the first two samples of
+        every ``4 * periods_per_pair``, as BS100BW (1) and BS50BW (2) do."""
+        samples_per_pair = 4 * periods_per_pair
+        time = np.arange(samples_per_pair * self.NUMBER_OF_IQ_SAMPLES) / (4 * self.CENTER_FREQUENCY)
+        carrier = np.exp(2j * np.pi * self.CENTER_FREQUENCY * time)
+        rf = np.real(self._true_baseband(time, periods_per_pair, **pulse) * carrier)
+        return rf.reshape(self.NUMBER_OF_IQ_SAMPLES, samples_per_pair)[:, :2].reshape(-1)
+
+    def _true_baseband_at_iq_times(self, periods_per_pair: int, **pulse) -> np.ndarray:
+        iq_times = np.arange(self.NUMBER_OF_IQ_SAMPLES) * periods_per_pair / self.CENTER_FREQUENCY
+        return self._true_baseband(iq_times, periods_per_pair, **pulse)
+
+    @staticmethod
+    def _relative_error(estimate: np.ndarray, reference: np.ndarray) -> float:
+        return np.linalg.norm(estimate - reference) / np.linalg.norm(reference)
+
+    NARROWBAND_PULSE = {"pulse_width_periods": 3, "frequency_offset_fraction": 0.2}
+    WIDEBAND_PULSE = {"pulse_width_periods": 1, "frequency_offset_fraction": 0.0}
+
+    @pytest.mark.parametrize(
+        "periods_per_pair, pulse, tolerance",
+        [
+            (1, NARROWBAND_PULSE, 1e-3),
+            (2, NARROWBAND_PULSE, 1e-3),
+            (1, WIDEBAND_PULSE, 1e-2),
+            (2, WIDEBAND_PULSE, 1e-2),
+        ],
+        ids=["bs100bw-narrowband", "bs50bw-narrowband", "bs100bw-wideband", "bs50bw-wideband"],
+    )
+    def test_matches_true_baseband(self, periods_per_pair, pulse, tolerance):
+        interleaved = self._baseband_samples(periods_per_pair, **pulse)
+        iq = baseband_mode_to_iq(
+            interleaved[None, None, :, None, None], carrier_periods_per_pair=periods_per_pair
+        )[0, 0, :, 0]
+        estimated_baseband = iq[:, 0] + 1j * iq[:, 1]
+        reference = self._true_baseband_at_iq_times(periods_per_pair, **pulse)
+        assert self._relative_error(estimated_baseband, reference) < tolerance
+
+    @pytest.mark.parametrize("periods_per_pair", [1, 2], ids=["bs100bw", "bs50bw"])
+    def test_unaligned_differs_from_true_baseband(self, periods_per_pair):
+        interleaved = self._baseband_samples(periods_per_pair, **self.NARROWBAND_PULSE)
+        # Even samples hold I and odd samples hold -Q, so I + jQ = even - j * odd.
+        unaligned_baseband = interleaved[0::2] - 1j * interleaved[1::2]
+        reference = self._true_baseband_at_iq_times(periods_per_pair, **self.NARROWBAND_PULSE)
+        assert self._relative_error(unaligned_baseband, reference) > 1e-2
+
+    def test_bs50bw_needs_its_own_delay(self):
+        # Aligning BS50BW with the BS100BW delay must not reach the BS50BW accuracy.
+        interleaved = self._baseband_samples(2, **self.NARROWBAND_PULSE)
+        iq = baseband_mode_to_iq(interleaved[None, None, :, None, None])[0, 0, :, 0]
+        reference = self._true_baseband_at_iq_times(2, **self.NARROWBAND_PULSE)
+        assert self._relative_error(iq[:, 0] + 1j * iq[:, 1], reference) > 1e-2
 
     def test_int16_saturation_no_overflow(self):
         data = np.full((1, 1, 2, 1, 1), -32768, dtype=np.int16)
-        out = bs100bw_to_iq(data)
-        # Q channel negation of -32768 would overflow in int16; must be 32768.0
+        out = baseband_mode_to_iq(data)
+        # Negating the odd sample -32768 to recover Q would overflow in int16; must be 32768.0
         assert out[0, 0, 0, 0, 1] == 32768.0
         assert out.dtype == np.float32
