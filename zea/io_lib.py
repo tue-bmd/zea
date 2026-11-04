@@ -179,7 +179,7 @@ def save_video(images, filename, fps=20, **kwargs):
         raise ValueError(f"Unsupported file extension: {ext}")
 
 
-def save_to_gif(images, filename, fps=20, shared_color_palette=True, transparent=False):
+def save_to_gif(images, filename, fps=20, shared_color_palette=True, transparent=False, loop=0):
     """Saves a sequence of images to a GIF file.
 
     .. note::
@@ -198,6 +198,9 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True, transparent
             throughout the GIF. Defaults to True, which is default behavior
             of PIL.Image.save. Note: True increases speed and shrinks file
             size for longer sequences.
+        loop (int, optional): Number of times to repeat after the first play.
+            Defaults to 0, which loops forever. Pass None to write no loop
+            extension at all, so the GIF plays once and stops on the last frame.
         transparent (bool, optional): If True, keeps the alpha channel of RGBA
             images as GIF transparency. GIF only supports binary transparency,
             so pixels with alpha < 128 become fully transparent and all others
@@ -256,15 +259,18 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True, transparent
 
     pillow_img, *pillow_imgs = pillow_imgs
 
+    # Pillow only omits the Netscape loop extension when `loop` is absent entirely
+    loop_kwarg = {} if loop is None else {"loop": loop}
+
     pillow_img.save(
         fp=filename,
         format="GIF",
         append_images=pillow_imgs,
         save_all=True,
-        loop=0,
         duration=duration,
         interlace=False,
         optimize=False,
+        **loop_kwarg,
         **transparency_kwargs,
     )
     log.success(f"Successfully saved GIF to -> {log.yellow(filename)}")
@@ -428,6 +434,8 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
     total_bins = bins_per**3
     # counts per bin in the final histogram
     counts = np.zeros(total_bins, dtype=np.int64)
+    # sum of the colors per bin
+    sums = np.zeros((total_bins, 3), dtype=np.int64)
 
     shift = 8 - bits_per_channel
     # Iterate images, accumulate bin counts
@@ -441,6 +449,10 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
         # accumulate counts
         bincount = np.bincount(idx, minlength=total_bins)
         counts += bincount
+        for channel in range(3):
+            sums[:, channel] += np.bincount(
+                idx, weights=arr[:, channel], minlength=total_bins
+            ).astype(np.int64)
 
     # pick top bins
     top_idx = np.argpartition(-counts, palette_size - 1)[:palette_size]
@@ -448,16 +460,12 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
     # sort top bins by frequency
     top_idx = top_idx[np.argsort(-counts[top_idx])]
 
-    # convert bin index back to representative RGB (center of bin)
-    bins = np.array(
-        [((i // (bins_per * bins_per)), (i // bins_per) % bins_per, i % bins_per) for i in top_idx]
-    )
-
-    # expand bin centers back to 8-bit values
-    center = (
-        (bins * (1 << (8 - bits_per_channel)) + (1 << (7 - bits_per_channel))).clip(0, 255)
+    # represent each bin by the mean color in it, so exact colors are preserved
+    occupied = counts[top_idx] > 0
+    palette_colors = np.zeros((len(top_idx), 3), dtype=np.uint8)  # shape (k,3)
+    palette_colors[occupied] = np.round(
+        sums[top_idx][occupied] / counts[top_idx][occupied, None]
     ).astype(np.uint8)
-    palette_colors = center.reshape(-1, 3)  # shape (k,3)
 
     # build a PIL 'P' palette image from these colors
     pal = np.zeros(768, dtype=np.uint8)  # 256*3 entries

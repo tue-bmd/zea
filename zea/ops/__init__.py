@@ -231,6 +231,7 @@ ops_registry.registry["cast"] = Cast
 from .base import Identity, Lambda, Mean, Operation, get_ops
 from .imports import import_ops_module, import_ops_modules
 from .pipeline import (
+    ADMIRE,
     Beamform,
     CoherenceFactor,
     DelayAndSum,
@@ -289,6 +290,7 @@ __all__ = [
     "CoherenceFactor",
     "GeneralizedCoherenceFactor",
     "MinimumVariance",
+    "ADMIRE",
     "Beamform",
     "Map",
     "PatchedGrid",
