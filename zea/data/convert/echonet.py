@@ -295,82 +295,53 @@ def find_split_for_file(file_dict, target_file):
 
     Returns:
         str: The split name that contains `target_file`, or `"rejected"` if the file is not found.
-            Warns about a file that is not found only when `file_dict` lists the rejected
-            files explicitly; otherwise unlisted files are rejected by definition.
     """
     for split, files in file_dict.items():
         if target_file in files:
             return split
-    if "rejected" in file_dict:
-        log.warning(f"File {target_file} not found in any split, defaulting to rejected.")
+    log.warning(f"File {target_file} not found in any split, defaulting to rejected.")
     return "rejected"
 
 
-# The published EchoNet-Dynamic split (train.yaml, val.yaml and test.yaml)
+# The published EchoNet-Dynamic split
 ECHONET_SPLIT_PATH = "hf://zeahub/echonet-dynamic"
 
 
-def _hf_resolve_split(hf_path):
-    # Download only the split files
-    if hf_path.endswith(".yaml"):
-        return _hf_resolve_path(hf_path)
-    hf_path = hf_path.rstrip("/")
-    try:
-        return _hf_resolve_path(f"{hf_path}/split.yaml")
-    except FileNotFoundError:
-        files = [_hf_resolve_path(f"{hf_path}/{split}.yaml") for split in ["train", "val", "test"]]
-        return files[0].parent
-
-
 def load_split(split_path):
-    """Load an EchoNet dataset split.
-
-    Two formats are supported:
-
-    * ``split.yaml``, as written by :func:`convert_echonet`: maps ``train``, ``val``,
-      ``test`` and ``rejected`` to lists of file names.
-    * ``train.yaml``, ``val.yaml`` and ``test.yaml``, as published on
-      `zeahub/echonet-dynamic <https://huggingface.co/datasets/zeahub/echonet-dynamic>`_:
-      each has ``file_paths`` and ``file_lengths`` (frames per file). Files that are in
-      none of them are rejected.
+    """Load an EchoNet dataset split, as written by :func:`convert_echonet`.
 
     Args:
-        split_path (str, Path): A folder containing either format, a ``split.yaml``
-            file, or an ``hf://`` path to a Hugging Face dataset repository.
+        split_path (str, Path): A ``split.yaml`` file, a folder containing one, or an
+            ``hf://`` path to either. The file maps ``train``, ``val``, ``test`` and
+            ``rejected`` to lists of file names. The default split is published on
+            `zeahub/echonet-dynamic <https://huggingface.co/datasets/zeahub/echonet-dynamic>`_.
 
     Returns:
-        tuple: The split, mapping split names to sets of ``.hdf5`` file names, and the
-        expected number of frames per file name (empty for ``split.yaml``).
+        dict: The split, mapping split names to sets of ``.hdf5`` file names.
+
+    Raises:
+        RuntimeError: If an ``hf://`` split cannot be fetched, e.g. without a connection.
     """
     text = str(split_path)
     if text.startswith(HF_PREFIX):
-        split_path = _hf_resolve_split(text)
+        if not text.endswith(".yaml"):
+            text = f"{text.rstrip('/')}/split.yaml"
+        try:
+            split_path = _hf_resolve_path(text)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not get the split from {text}: {exc!r}. Without a connection to "
+                "Hugging Face, pass a local split with --split-path, or create a new random "
+                "split with --new-split."
+            ) from exc
     split_path = Path(split_path)
 
-    if split_path.is_file():
-        split_path, split_file = split_path.parent, split_path
-        if split_file.name != "split.yaml":
-            # One of the published per-split files; read all three from its folder.
-            split_file = split_path / "split.yaml"
-    else:
-        split_file = split_path / "split.yaml"
+    if split_path.is_dir():
+        split_path = split_path / "split.yaml"
 
-    if split_file.exists():
-        with open(split_file, "r") as f:
-            splits = yaml.safe_load(f)
-        return {split: set(names or []) for split, names in splits.items()}, {}
-
-    splits, frames = {}, {}
-    for split in ["train", "val", "test"]:
-        yaml_file = split_path / f"{split}.yaml"
-        if not yaml_file.exists():
-            raise FileNotFoundError(f"Neither split.yaml nor {split}.yaml found in {split_path}.")
-        with open(yaml_file, "r") as f:
-            content = yaml.safe_load(f)
-        names = [Path(p).name for p in content["file_paths"]]
-        splits[split] = set(names)
-        frames.update(zip(names, content.get("file_lengths", [])))
-    return splits, frames
+    with open(split_path, "r") as f:
+        splits = yaml.safe_load(f)
+    return {split: set(names or []) for split, names in splits.items()}
 
 
 def count_init(shared_counter, processor=None):
@@ -386,7 +357,8 @@ def count_init(shared_counter, processor=None):
     """
     global COUNTER, PROCESSOR
     COUNTER = shared_counter
-    PROCESSOR = processor
+    if processor is not None:
+        PROCESSOR = processor
 
 
 def _process_file(avi_file):
@@ -406,7 +378,6 @@ class H5Processor:
         range_from=(0, 255),
         range_to=(-60, 0),
         splits=None,
-        expected_frames=None,
     ):
         self.path_out_h5 = Path(path_out_h5)
         self.num_val = num_val
@@ -414,8 +385,6 @@ class H5Processor:
         self.range_from = range_from
         self.range_to = range_to
         self.splits = splits
-        # Frames per file name, as listed by the published split
-        self.expected_frames = expected_frames or {}
         self._process_range = (0, 1)
 
         # Ensure train, val, test, rejected paths exist
@@ -534,15 +503,6 @@ class H5Processor:
         hdf5_file = avi_file.stem + ".hdf5"
         sequence = load_avi(avi_file)
 
-        expected = self.expected_frames.get(hdf5_file)
-        if expected is not None and len(sequence) != expected:
-            log.warning(
-                "%s has %d frames, but the published split lists %d.",
-                hdf5_file,
-                len(sequence),
-                expected,
-            )
-
         assert sequence.min() >= self.range_from[0], f"{sequence.min()} < {self.range_from[0]}"
         assert sequence.max() <= self.range_from[1], f"{sequence.max()} > {self.range_from[1]}"
 
@@ -641,24 +601,25 @@ def convert_echonet(args):
         - May unzip the source into a working directory.
         - Writes zea files into dst.
         - Writes a split.yaml into dst summarizing produced files per split.
-        - Logs progress and validation results, including files whose frame count or
-          acceptance check disagrees with the given split.
+        - Logs progress and validation results, including files whose acceptance check
+          disagrees with the given split.
 
     Raises:
         RuntimeError: If any file failed to convert. The split.yaml is still written for
             the files that succeeded.
     """
-    # Check if unzip is needed
-    src = _resolve_path(args.src)
-
+    # Before unzipping, which is slow, so that an unavailable split fails fast
     split_path = getattr(args, "split_path", ECHONET_SPLIT_PATH)
     if getattr(args, "new_split", False) or split_path is None:
-        splits, expected_frames = None, {}
+        splits = None
         log.info("Creating a new train-val-test split.")
     else:
         # Reproduce a previous split...
-        splits, expected_frames = load_split(split_path)
+        splits = load_split(split_path)
         log.info(f"Processor initialized with train-val-test split from {split_path}.")
+
+    # Check if unzip is needed
+    src = _resolve_path(args.src)
 
     # List the files that have an entry in path_out_h5 already
     files_done = []
@@ -675,7 +636,7 @@ def convert_echonet(args):
     log.info(f"Files left to process: {len(h5_files)}")
 
     # Run the processor
-    processor = H5Processor(path_out_h5=args.dst, splits=splits, expected_frames=expected_frames)
+    processor = H5Processor(path_out_h5=args.dst, splits=splits)
 
     log.info("Starting the conversion process.")
 

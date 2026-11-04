@@ -1530,8 +1530,8 @@ def test_echonet_processor_writes_image_not_image_sc(tmp_path):
 
 
 def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
-    """A given split is kept when the acceptance check or the frame count disagrees, and
-    the disagreement is reported, so a decoder change cannot reshuffle a published split."""
+    """A given split is kept when the acceptance check disagrees, and the disagreement is
+    reported, so a decoder change cannot reshuffle a published split."""
     from multiprocessing import Value
 
     from zea.data.convert import echonet
@@ -1540,13 +1540,10 @@ def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
     src.mkdir()
     create_echonet_test_data(src)
     videos = src / "EchoNet-Dynamic" / "Videos"
-    n_frames = len(load_avi(videos / "video_0.avi"))
 
     # video_6 fails the acceptance check, video_0 passes it
     splits = {"train": ["video_6.hdf5"], "val": [], "test": [], "rejected": ["video_0.hdf5"]}
-    processor = echonet.H5Processor(
-        path_out_h5=tmp_path / "out", splits=splits, expected_frames={"video_0.hdf5": n_frames + 1}
-    )
+    processor = echonet.H5Processor(path_out_h5=tmp_path / "out", splits=splits)
     echonet.count_init(Value("i", 0))
 
     with mock.patch.object(echonet.log, "warning") as warning:
@@ -1555,69 +1552,60 @@ def test_echonet_given_split_wins_over_acceptance_check(tmp_path):
     messages = [call.args[0] % call.args[1:] for call in warning.call_args_list]
     assert any("video_6.hdf5: the acceptance check rejects" in m for m in messages)
     assert any("video_0.hdf5: the acceptance check accepts" in m for m in messages)
-    assert any(f"but the published split lists {n_frames + 1}" in m for m in messages)
 
     assert (tmp_path / "out/train/video_6.hdf5").exists()
     assert (tmp_path / "out/rejected/video_0.hdf5").exists()
 
 
-def test_echonet_load_split_formats(tmp_path):
-    """load_split reads both split.yaml and the published per-split files; in the latter,
-    unlisted files are rejected."""
-    from zea.data.convert.echonet import find_split_for_file, load_split
+def test_echonet_load_split(tmp_path):
+    """load_split reads a split.yaml, directly or from its folder; an empty split is a set."""
+    from zea.data.convert.echonet import load_split
 
-    published = tmp_path / "published"
-    published.mkdir()
-    for split, names in {"train": ["a", "b"], "val": ["c"], "test": ["d"]}.items():
-        content = {
-            "file_paths": [f"{n}.hdf5" for n in names],
-            "file_lengths": [10] * len(names),
-            "total_num_files": len(names),
-        }
-        (published / f"{split}.yaml").write_text(yaml.dump(content))
-
-    splits, frames = load_split(published)
-    assert splits == {"train": {"a.hdf5", "b.hdf5"}, "val": {"c.hdf5"}, "test": {"d.hdf5"}}
-    assert frames == {"a.hdf5": 10, "b.hdf5": 10, "c.hdf5": 10, "d.hdf5": 10}
-    assert find_split_for_file(splits, "e.hdf5") == "rejected"
-
-    own = tmp_path / "own"
-    own.mkdir()
-    (own / "split.yaml").write_text(
-        yaml.dump({"train": ["a.hdf5"], "val": [], "test": [], "rejected": ["e.hdf5"]})
-    )
-    for path in (own, own / "split.yaml"):
-        splits, frames = load_split(path)
-        assert splits["rejected"] == {"e.hdf5"} and frames == {}
-
-    # Pointing at one of the published files reads all three
-    assert load_split(published / "train.yaml") == load_split(published)
+    content = {"train": ["a.hdf5"], "val": None, "test": [], "rejected": ["e.hdf5"]}
+    (tmp_path / "split.yaml").write_text(yaml.dump(content))
+    expected = {"train": {"a.hdf5"}, "val": set(), "test": set(), "rejected": {"e.hdf5"}}
+    assert load_split(tmp_path) == expected
+    assert load_split(tmp_path / "split.yaml") == expected
 
     with pytest.raises(FileNotFoundError):
         load_split(tmp_path / "empty")
 
 
-def test_echonet_load_split_hf_downloads_only_split_files(tmp_path, monkeypatch):
-    """An hf:// split resolves the split files one by one, never the whole repository."""
+def test_echonet_unavailable_hf_split_fails_before_unzip(tmp_path, monkeypatch):
+    """Without a connection, conversion points at the local options and leaves the zip alone."""
     from zea.data.convert import echonet
 
-    for split in ["train", "val", "test"]:
-        content = {"file_paths": [f"{split}.hdf5"], "file_lengths": [1]}
-        (tmp_path / f"{split}.yaml").write_text(yaml.dump(content))
+    def offline(hf_path):
+        raise ConnectionError("no connection")
+
+    monkeypatch.setattr(echonet, "_hf_resolve_path", offline)
+    unzip = mock.Mock()
+    monkeypatch.setattr(echonet, "unzip_beside", unzip)
+
+    args = types.SimpleNamespace(src=tmp_path, dst=tmp_path / "dst", no_hyperthreading=True)
+    with pytest.raises(RuntimeError, match="--new-split") as excinfo:
+        echonet.convert_echonet(args)
+    assert isinstance(excinfo.value.__cause__, ConnectionError)
+    unzip.assert_not_called()
+
+
+def test_echonet_load_split_hf_downloads_only_split_file(tmp_path, monkeypatch):
+    """An hf:// split resolves the split file alone, never the whole repository."""
+    from zea.data.convert import echonet
+
+    split_file = tmp_path / "split.yaml"
+    split_file.write_text(yaml.dump({"val": ["a.hdf5"]}))
 
     requested = []
 
     def fake_resolve(hf_path):
         requested.append(hf_path)
-        path = tmp_path / hf_path.rsplit("/", 1)[1]
-        if not path.exists():
-            raise FileNotFoundError(hf_path)
-        return path
+        return split_file
 
     monkeypatch.setattr(echonet, "_hf_resolve_path", fake_resolve)
-    splits, _ = echonet.load_split("hf://org/repo/")
-    assert splits["val"] == {"val.hdf5"}
-    assert requested == [f"hf://org/repo/{name}.yaml" for name in ["split", "train", "val", "test"]]
+    for path in ["hf://org/repo", "hf://org/repo/", "hf://org/repo/split.yaml"]:
+        assert echonet.load_split(path) == {"val": {"a.hdf5"}}
+    assert requested == ["hf://org/repo/split.yaml"] * 3
 
 
 def test_echonet_resolve_path_layouts(tmp_path):
@@ -1673,26 +1661,15 @@ def test_echonet_polar_interpolation_modes():
         cartesian_to_polar_matrix(frame, interpolation="bogus")
 
 
-def test_echonet_find_split_warns_only_with_explicit_rejected():
-    """An unlisted file is only surprising when the rejected files are listed too."""
+def test_echonet_find_split_warns_about_unlisted_file():
+    """The published split lists all files, so an unlisted one is surprising."""
     from zea.data.convert import echonet
 
     with mock.patch.object(echonet.log, "warning") as warning:
-        assert echonet.find_split_for_file({"train": {"a.hdf5"}}, "b.hdf5") == "rejected"
+        assert echonet.find_split_for_file({"train": {"a.hdf5"}}, "a.hdf5") == "train"
         warning.assert_not_called()
-        splits = {"train": {"a.hdf5"}, "rejected": set()}
-        assert echonet.find_split_for_file(splits, "b.hdf5") == "rejected"
+        assert echonet.find_split_for_file({"train": {"a.hdf5"}}, "b.hdf5") == "rejected"
         warning.assert_called_once()
-
-
-def test_echonet_hf_split_yaml_file(monkeypatch):
-    """An hf:// path to a .yaml file is resolved as is."""
-    from zea.data.convert import echonet
-
-    monkeypatch.setattr(echonet, "_hf_resolve_path", lambda path: f"resolved:{path}")
-    assert (
-        echonet._hf_resolve_split("hf://org/repo/train.yaml") == "resolved:hf://org/repo/train.yaml"
-    )
 
 
 def test_echonet_processor_rejects_non_finite(tmp_path):
