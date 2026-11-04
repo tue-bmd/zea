@@ -5,7 +5,7 @@
 # Merging that PR does not release anything by itself -- publishing a GitHub
 # release tagged vX.Y.Z is still a manual step, and that is what triggers
 # `publish.yaml` (PyPI), `docker.yaml` (images) and `release-tags.yaml`
-# (moves `latest` / `openh-rf-latest` and rebuilds the docs).
+# (moves `openh-rf-latest` and rebuilds its docs).
 #
 # Requires a `RELEASE_PAT` secret: a personal access token with write access to
 # this repository's contents and pull requests.
@@ -180,7 +180,7 @@ jobs:
           - \`pyproject.toml\`: \`version = "${NEW}"\`
           - \`uv.lock\`: refreshed
 
-          After merging, publish a GitHub release tagged \`${TAG}\` off \`main\`. This will trigger the following workflows: \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`latest\` and \`openh-rf-latest\`, then rebuilds the docs).
+          After merging, publish a GitHub release tagged \`${TAG}\` off \`main\`. This will trigger the following workflows: \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`openh-rf-latest\`, then rebuilds its docs).
           EOF
           )
 
