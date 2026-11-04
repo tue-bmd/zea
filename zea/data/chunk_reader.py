@@ -559,7 +559,7 @@ class HTTPFetcher(Fetcher):
         if self.cache is None:
             return super().pending_bytes(ranges)
         return sum(
-            size for offset, size in ranges if self.cache.get(int(offset), int(size)) is None
+            size for offset, size in ranges if not self.cache.contains(int(offset), int(size))
         )
 
 

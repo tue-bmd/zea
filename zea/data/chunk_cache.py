@@ -90,6 +90,13 @@ class ChunkCache:
             pass
         return data
 
+    def contains(self, offset: int, size: int) -> bool:
+        """Whether this chunk is cached, without reading it."""
+        try:
+            return self._path(offset, size).stat().st_size == size
+        except OSError:
+            return False
+
     def put(self, offset: int, size: int, data: bytes) -> None:
         """Store this chunk. Failure to cache is never an error — it just costs a re-fetch."""
         try:
