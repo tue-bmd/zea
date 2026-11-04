@@ -1,8 +1,10 @@
 """Test pressure field computation."""
 
 import numpy as np
+import pytest
 
 from zea.beamform.delays import compute_t0_delays_planewave
+from zea.beamform.pfield import compute_pfield
 from zea.ops import Pipeline
 from zea.parameters import Parameters
 from zea.probes import Verasonics_l11_4v
@@ -116,3 +118,99 @@ def test_pfield_single_transmit_auto_xlims_is_finite():
     assert np.all(np.isfinite(pfield)), (
         f"pfield contains {np.sum(~np.isfinite(pfield))} non-finite values"
     )
+
+
+@pytest.mark.parametrize("downmix", [1, 2, 4])
+def test_pfield_attenuation_follows_true_frequency(downmix):
+    """The one-way loss matches Eq. 40 at the true frequency, whatever the downmix."""
+    center_frequency = 5e6
+    attenuation_coef = 0.5  # dB/(cm·MHz)
+    n_el = 16
+    geometry = np.zeros((n_el, 3))
+    geometry[:, 0] = (np.arange(n_el) - (n_el - 1) / 2) * 3e-4
+    depths = np.array([0.01, 0.03, 0.05, 0.07])
+    grid = np.zeros((len(depths), 1, 3))
+    grid[:, 0, 2] = depths
+
+    def on_axis_pressure(coef):
+        pfield = compute_pfield(
+            sound_speed=1540.0,
+            center_frequency=center_frequency,
+            probe_bandwidth_percent=60.0,
+            probe_geometry=geometry,
+            tx_apodizations=np.ones((1, n_el)),
+            grid=grid,
+            t0_delays=np.zeros((1, n_el)),
+            element_width=2.7e-4,
+            frequency_step=1,
+            downsample=1,
+            downmix=downmix,
+            percentile=0,
+            norm=False,
+            attenuation_coef=coef,
+        )
+        return np.asarray(pfield)[0, :, 0]
+
+    loss_db = 20 * np.log10(on_axis_pressure(0.0) / on_axis_pressure(attenuation_coef))
+    expected_db = attenuation_coef * (depths * 100) * (center_frequency / 1e6)
+    # Attenuation shifts the retained band below the center frequency, so the loss is
+    # slightly under the value at the center frequency.
+    np.testing.assert_allclose(loss_db, expected_db, rtol=0.15)
+
+
+def _capture_pfield_kwargs(monkeypatch):
+    """Replace compute_pfield in zea.parameters by a stub recording its keyword arguments."""
+    calls = []
+
+    def fake_compute_pfield(**kwargs):
+        calls.append(kwargs)
+        return np.zeros((1, 2, 2))
+
+    monkeypatch.setattr("zea.parameters.compute_pfield", fake_compute_pfield)
+    return calls
+
+
+def _single_transmit_parameters(**kwargs):
+    probe = Verasonics_l11_4v()
+    angles = np.zeros(1)
+    return Parameters(
+        probe_geometry=probe.probe_geometry,
+        n_tx=1,
+        n_el=probe.n_el,
+        zlims=(0, 40e-3),
+        n_ax=1024,
+        sampling_frequency=probe.probe_center_frequency * 4,
+        center_frequency=probe.probe_center_frequency,
+        polar_angles=angles,
+        t0_delays=compute_t0_delays_planewave(
+            probe_geometry=probe.probe_geometry, polar_angles=angles
+        ),
+        focus_distances=np.array([np.inf]),
+        tx_apodizations=np.ones((1, probe.n_el)),
+        **kwargs,
+    )
+
+
+def test_parameters_forward_attenuation_coef_to_pfield(monkeypatch):
+    """pfield uses attenuation_coef, and recomputes when it changes."""
+    calls = _capture_pfield_kwargs(monkeypatch)
+    parameters = _single_transmit_parameters(attenuation_coef=0.5)
+
+    _ = parameters.pfield
+    assert calls[-1]["attenuation_coef"] == pytest.approx(0.5)
+
+    parameters.attenuation_coef = 0.7
+    _ = parameters.pfield
+    assert len(calls) == 2
+    assert calls[-1]["attenuation_coef"] == pytest.approx(0.7)
+
+
+def test_pfield_kwargs_override_attenuation_coef(monkeypatch):
+    """An attenuation_coef in pfield_kwargs takes precedence over the parameter."""
+    calls = _capture_pfield_kwargs(monkeypatch)
+    parameters = _single_transmit_parameters(
+        attenuation_coef=0.5, pfield_kwargs={"attenuation_coef": 0.0}
+    )
+
+    _ = parameters.pfield
+    assert calls[-1]["attenuation_coef"] == 0.0

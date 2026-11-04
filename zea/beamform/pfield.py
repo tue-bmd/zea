@@ -101,8 +101,9 @@ def compute_pfield(
             transmit's insonified region; "bilinear" (default) removes those steps at a
             small extra cost and is recommended for display-quality images.
         attenuation_coef (float, optional): Frequency-dependent attenuation of the
-            medium in dB/(cm·MHz), applied one-way along the transmit path (Eq. 42's
-            exponential). Default is 0 (lossless). Soft tissue is ~0.5; with it the
+            medium in dB/(cm·MHz), applied one-way along the transmit path (Eq. 40)
+            at the true frequency, regardless of `downmix`. Default is 0 (lossless).
+            Soft tissue is ~0.5; with it the
             high end of the band, which focuses hardest, is lost with depth, so the
             focus is wider and weaker than in the lossless field.
 
@@ -259,11 +260,12 @@ def compute_pfield(
 
     # Exponential arrays of size [numel(x) n_el num_sub_elements]
     wavenumber = 2 * np.pi * freq[0] / sound_speed
-    attenuation_wavenumber = attenuation_coef * freq[0]
+    # freq is downmixed, which only coarsens the phase: the loss follows the true frequency.
+    attenuation_wavenumber = attenuation_coef * downmix * freq[0]
 
     # Exponential array for the increment wavenumber dk
     wavenumber_step = 2 * np.pi * freq_step / sound_speed
-    attenuation_wavenumber_step = attenuation_coef * freq_step
+    attenuation_wavenumber_step = attenuation_coef * downmix * freq_step
 
     @jit(torch=False)
     def _pfield_freq_loop(distance, sub_element_directivity):
@@ -298,7 +300,7 @@ def compute_pfield(
                 freq[k],
                 t0_delays,
                 tx_apodizations,
-                ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
+                ops.mean(monochromatic_pressure, axis=1),  # as PFIELD; Eq. (37) sums instead
                 pulse_spect[k],
                 probe_spect[k],
             )
@@ -333,7 +335,7 @@ def compute_pfield(
     # itself set above from max(t0_delays), so a bare sum would depend on which
     # transmits are in the stack -- times the element width, whose square root is the
     # amplitude factor of Eq. (36). Like PFIELD we integrate over ordinary frequency,
-    # so there is no 2 pi against Eq. (42)'s dw. No effect when norm=True.
+    # so there is no 2 pi against Eq. (42)'s Δω. No effect when norm=True.
     pressure_squared = pressure_squared * freq_step * element_width
 
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
