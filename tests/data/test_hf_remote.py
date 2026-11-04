@@ -129,6 +129,27 @@ class TestSignedURL:
         assert location.refresh("https://cdn.example/signed?1")  # already replaced
         assert len(hub.heads) == 2
 
+    def test_unchanged_url_is_not_refreshed_again_right_away(self, hub):
+        """Many requests rejected at once with a URL the Hub hands out again (e.g. a Hub URL)
+        send one request to the Hub, not one each."""
+        location = hf_remote.SignedURL(HF_PATH)
+        for _ in range(5):
+            assert not location.refresh("https://cdn.example/signed?1")
+        assert len(hub.heads) == 2
+
+    def test_failed_refresh_is_not_retried_right_away(self, hub, monkeypatch):
+        location = hf_remote.SignedURL(HF_PATH)
+
+        def rate_limited(url, **kwargs):
+            hub.heads.append(url)
+            raise OSError("429")
+
+        monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", rate_limited)
+        with pytest.raises(OSError, match="429"):
+            location.refresh("https://cdn.example/signed?1")
+        assert not location.refresh("https://cdn.example/signed?1")
+        assert len(hub.heads) == 2
+
     def test_content_change_while_open_raises(self, hub):
         location = hf_remote.SignedURL(HF_PATH)
         hub.etag = "sha-2"

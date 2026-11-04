@@ -42,6 +42,10 @@ from zea.internal.utils import atomic_write
 #: hour. If that changes, a rejected URL is resolved again anyway.
 URL_TTL = 30 * 60
 
+#: Seconds after a refresh that did not give a new URL (it failed, or the URL is the same,
+#: e.g. a Hub URL) during which a request rejected with that URL does not ask the Hub again.
+REFRESH_COOLDOWN = 30.0
+
 #: HTTP statuses the CDN returns for an expired or invalid URL.
 REFUSED_STATUS = frozenset({401, 403, 404, 410})
 
@@ -204,6 +208,8 @@ class SignedURL:
         self._resolved = resolve(hf_path, revision=revision, repo_type=repo_type)
         # Pin later refreshes to this commit, so the file cannot change while open.
         self._revision = self._resolved.commit or revision
+        #: ``(stale_url, time)`` of the last refresh, see :data:`REFRESH_COOLDOWN`.
+        self._last_refresh: tuple[str, float] | None = None
 
     @property
     def size(self) -> int:
@@ -235,11 +241,18 @@ class SignedURL:
         a new URL.
 
         Checks the shared cache first to prevent multiple handles of the same file sending
-        multiple requests.
+        multiple requests, and asks the Hub at most once per :data:`REFRESH_COOLDOWN` for the
+        same ``stale_url``, so many rejected requests at once send one request.
         """
         with self._lock:
             if self._resolved.url != stale_url:
                 return True
+            last = self._last_refresh
+            if last is not None and last[0] == stale_url:
+                if time.time() - last[1] < REFRESH_COOLDOWN:
+                    return False
+            # Recorded before asking, so a failed request also holds off the next one.
+            self._last_refresh = (stale_url, time.time())
             resolved = resolve(self.hf_path, revision=self._revision, repo_type=self.repo_type)
             if resolved == self._resolved:
                 resolved = resolve(
