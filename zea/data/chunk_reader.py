@@ -72,7 +72,8 @@ DECODABLE = (BLOSC, LZ4, ZSTD, GZIP, SHUFFLE)
 MIN_BYTES = 1 << 20  # 1 MiB
 
 # Ceiling on compressed bytes held in memory at once. Bounded by bytes and not by chunk
-# *count*, because chunk sizes vary hugely across files (12 MB to 166 MB).
+# *count*, because chunk sizes vary hugely across files (12 MB to 166 MB). Merged requests
+# (see _merge) download at most as many gap bytes as chunk bytes, so at most twice this.
 MAX_BYTES_IN_FLIGHT = 512 << 20  # 512 MiB
 
 # Decode threads. Blosc and zlib release the GIL, so these scale with cores; but the work
@@ -121,9 +122,10 @@ def _max_concurrent_requests(default: int = 64) -> int:
 
 MAX_CONCURRENT_REQUESTS = _max_concurrent_requests()
 
-#: Merge ranges into one request when the gap between them is at most this many bytes.
-#: The chunks of a frame are stored almost back to back, so a frame (or a block of
-#: consecutive frames) becomes one request instead of one per chunk.
+#: Merge ranges into one request when the gap between them is at most this many bytes,
+#: and the request then downloads no more gap bytes than requested ones. The chunks of a
+#: frame are stored almost back to back, so a frame (or a block of consecutive frames)
+#: becomes one request instead of one per chunk, while a sparse read is not inflated.
 MERGE_GAP = 1 << 20  # 1 MiB
 
 #: Maximum size of a merged request, so large reads are still split over a few parallel
@@ -253,18 +255,27 @@ class _FixedURL:
 def _merge(misses: Sequence[tuple[int, int, int]]) -> list[tuple[int, int, list]]:
     """Group ``(index, offset, size)`` ranges into ``(start, end, members)`` requests.
 
-    A range joins the previous request if the gap is at most :data:`MERGE_GAP` and the
-    request stays within :data:`MERGE_MAX`. Overlapping ranges are allowed.
+    A range joins the previous request if the gap is at most :data:`MERGE_GAP`, the request
+    stays within :data:`MERGE_MAX`, and it downloads no more gap bytes than range bytes.
+    Overlapping ranges are allowed.
     """
     spans: list[tuple[int, int, list]] = []
+    wanted = gaps = 0  # range and gap bytes of the last request
     for miss in sorted(misses, key=lambda m: m[1]):
         _, offset, size = miss
         if spans:
             start, end, members = spans[-1]
-            if offset - end <= MERGE_GAP and max(end, offset + size) - start <= MERGE_MAX:
+            gap = max(0, offset - end)
+            if (
+                offset - end <= MERGE_GAP
+                and max(end, offset + size) - start <= MERGE_MAX
+                and gaps + gap <= wanted + size
+            ):
                 spans[-1] = (start, max(end, offset + size), members + [miss])
+                wanted, gaps = wanted + size, gaps + gap
                 continue
         spans.append((offset, offset + size, [miss]))
+        wanted, gaps = size, 0
     return spans
 
 

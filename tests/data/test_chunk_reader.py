@@ -992,6 +992,15 @@ class TestMerge:
         assert [(start, end) for start, end, _ in spans] == [(0, 85), (85, 115), (200, 210)]
         assert [[m[0] for m in members] for *_, members in spans] == [[0, 1], [3], [2]]
 
+    def test_sparse_ranges_are_not_inflated(self):
+        """One small chunk per far-apart frame stays one request each, instead of a request
+        that is mostly gap."""
+        misses = [(i, i * (1 << 20), 64 << 10) for i in range(8)]
+        assert len(chunk_reader._merge(misses)) == 8
+        # Gaps no larger than the chunks still merge.
+        misses = [(i, i * (128 << 10), 64 << 10) for i in range(8)]
+        assert len(chunk_reader._merge(misses)) == 1
+
     def test_unsorted_and_overlapping_ranges(self):
         spans = chunk_reader._merge([(0, 50, 10), (1, 0, 60), (2, 55, 10)])
         assert [(start, end) for start, end, _ in spans] == [(0, 65)]
