@@ -54,7 +54,7 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
        ``cuda:0``, ``auto:1``, etc.
    * - ``ZEA_TEST_BACKEND``
      - Backend to run the tests with. ``KERAS_BACKEND`` is ignored by the tests.
-     - ``tensorflow`` (``jax`` if TensorFlow is not installed)
+     - ``tensorflow``
      - ``tensorflow``, ``jax``, ``torch``
    * - ``ZEA_HF_CACHE_TTL``
      - Seconds a Hugging Face repository listing or resolved download path may be reused before
