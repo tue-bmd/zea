@@ -342,7 +342,8 @@ class RemoteFile:
         #: fsspec-style file info. The chunk cache uses the etag as its key.
         self.details = {"name": location.hf_path, "size": self.size, "etag": location.etag}
         self._fetcher = HTTPFetcher(location)
-        self._keep_blocks = keep_blocks
+        #: Whether reads keep the blocks they fetch, so reading one ahead pays off.
+        self.keeps_blocks = keep_blocks
         # Without an etag, blocks of other handles may be other content: keep them per handle.
         self._blocks_key = location.etag or object()
         self._pos = 0
@@ -362,7 +363,7 @@ class RemoteFile:
         end = min(self.size, offset + size)
         if end <= offset:
             return b""
-        if not self._keep_blocks:
+        if not self.keeps_blocks:
             return self._fetcher.read_range(offset, end - offset)
         out = bytearray()
         pos = offset

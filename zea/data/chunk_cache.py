@@ -145,6 +145,8 @@ class CachedFile:
         self.details = getattr(fileobj, "details", {})
         #: Passed through: the chunk fetcher reuses the file's CDN URL.
         self.location = getattr(fileobj, "location", None)
+        #: Reads keep the blocks they fetch (in the cache).
+        self.keeps_blocks = True
         # Guards seek + read on a wrapped file object that has no positional read_at.
         self._lock = threading.Lock()
 

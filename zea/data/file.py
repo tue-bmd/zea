@@ -1084,8 +1084,6 @@ class File(h5py.File):
 
         # File object opened for streaming; kept so we can close it in close().
         stream_fileobj = None
-        # Whether the stream keeps the blocks it reads, so prefetching one pays off.
-        keeps_blocks = False
         # Original source path, retained for streamed files whose ``filename`` is
         # just a placeholder for the underlying file object (see ``path``).
         source_name = None
@@ -1110,7 +1108,6 @@ class File(h5py.File):
             hf_kwargs.pop("cache_dir", None)
             source_name = str(name)
             stream_fileobj = _hf_stream_open(str(name), **hf_kwargs)
-            keeps_blocks = hf_kwargs.get("cache_type") != "none"
 
             # Serve the HDF5 metadata h5py walks on open from the cache too, not just the
             # data chunks: it is the same file, and re-opening otherwise re-fetches it every
@@ -1121,7 +1118,6 @@ class File(h5py.File):
                 chunk_cache = cache_for(getattr(stream_fileobj, "details", None) or {})
                 if chunk_cache is not None:
                     stream_fileobj = CachedFile(stream_fileobj, chunk_cache)
-                    keeps_blocks = True
 
             name = stream_fileobj
         elif is_hf:
@@ -1143,7 +1139,7 @@ class File(h5py.File):
             # h5py opens the file and takes its global lock, so threads opening different
             # files fetch in parallel instead of one after another. Reading one byte fetches
             # the whole block, from the chunk cache if it is there.
-            if keeps_blocks and hasattr(stream_fileobj, "read_at"):
+            if stream_fileobj is not None and getattr(stream_fileobj, "keeps_blocks", False):
                 stream_fileobj.read_at(0, 1)
             super().__init__(name, mode, *args, **kwargs)
         except Exception:

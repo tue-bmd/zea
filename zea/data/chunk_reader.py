@@ -440,7 +440,7 @@ class HTTPFetcher(Fetcher):
         else:
             self.location = url
         self.cache = cache  # zea.data.chunk_cache.ChunkCache, or None
-        #: The file object h5py reads through, if it has a block cache (see fetch_small).
+        #: The file object h5py reads through, if it keeps its blocks (see fetch_small).
         self.blocks = None
         self._fs = fsspec.filesystem("http")
         _redact_fsspec_http_logs()
@@ -616,7 +616,7 @@ def fetcher_for(file: h5py.File) -> Fetcher | None:
         cache = cache_for(details) if getattr(file, "_cache_chunks", True) else None
         fetcher = HTTPFetcher(location, get_token(), cache)
         fetcher.source = str(source)  # the hf:// path, not the resolved streaming url
-        if hasattr(stream, "read_at"):
+        if getattr(stream, "keeps_blocks", False):
             fetcher.blocks = stream
         return fetcher
 

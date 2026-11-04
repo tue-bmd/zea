@@ -375,3 +375,12 @@ def test_small_reads_fetch_their_blocks_concurrently(tmp_path, hub):
         assert server.count - before == 2 and server.peak == 2
     finally:
         server.close()
+
+
+def test_small_reads_use_blocks_only_if_the_stream_keeps_them(small_cdn):
+    """With cache_type="none", serving small reads from blocks would fetch every chunk on
+    its own, so they go through the merged requests of fetch instead."""
+    with File(HF_PATH, progress=False, cache=False, cache_type="none") as remote:
+        assert remote._chunk_fetcher.blocks is None
+    with File(HF_PATH, progress=False, cache=False) as remote:
+        assert remote._chunk_fetcher.blocks is remote._stream_fileobj
