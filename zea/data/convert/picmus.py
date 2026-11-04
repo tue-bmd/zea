@@ -48,7 +48,7 @@ from zea.data.convert.utils import (
     check_output_dir_ownership,
     download_file,
     require_output_dir_ownership,
-    unzip,
+    unzip_beside,
     upload_dataset_to_hf,
     write_dataset_card,
 )
@@ -319,7 +319,7 @@ def _resolve_path(src: str | Path) -> Path:
     if (src / folder_name).exists():
         return unzip_dir
 
-    unzipped_path = unzip(src / zip_name, src)
+    unzipped_path = unzip_beside(src / zip_name)
     return unzipped_path / folder_name
 
 
@@ -380,6 +380,8 @@ def convert_picmus(args):
                 f"Source directory {base_dir} does not exist. "
                 "Use --download to download the PICMUS dataset automatically."
             )
+        if base_dir.is_file() and base_dir.suffix == ".zip":
+            base_dir = unzip_beside(base_dir)
         main_dir = _resolve_path(base_dir)
         source_entries.append((main_dir, main_dir))
 

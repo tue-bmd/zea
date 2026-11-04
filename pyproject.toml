@@ -137,12 +137,21 @@ tf-gpu = ["tensorflow[and-cuda]>=2.21"]
 [tool.uv]
 conflicts = [
     # torch-cpu and torch-gpu are the same package from different indexes, so uv has to fork.
-    [{ group = "torch-cpu" }, { group = "torch-gpu" }],
+    [
+        { group = "torch-cpu" },
+        { group = "torch-gpu" },
+    ],
     # Both opencv extras provide `cv2`, so co-installing them leaves whichever landed last,
     # and uninstalling either takes the shared `cv2/` with it. `dev` already brings the
     # headless build, hence the second pair.
-    [{ extra = "display" }, { extra = "display-headless" }],
-    [{ extra = "display" }, { group = "dev" }],
+    [
+        { extra = "display" },
+        { extra = "display-headless" },
+    ],
+    [
+        { extra = "display" },
+        { group = "dev" },
+    ],
 ]
 
 # One index per compute backend; `explicit` keeps everything else on PyPI. To move to
@@ -300,6 +309,13 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
 invalid-method-override = "ignore"
+invalid-mutable-override = "ignore"
+
+# torch declares `Module.forward` as a mutable attribute, which subclasses are meant to
+# override with a method. Only reported when torch is installed, so not in CI's typecheck.
+[[tool.ty.overrides]]
+include = ["zea/models/speckle2self.py"]
+[tool.ty.overrides.rules]
 invalid-mutable-override = "ignore"
 
 
