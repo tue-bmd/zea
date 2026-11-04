@@ -301,19 +301,29 @@ def test_small_reads_of_large_chunks_stay_one_request(small_cdn):
         assert small_cdn.server.count - before == dset.id.get_num_chunks() // dset.shape[0]
 
 
-def test_read_at_bypasses_the_fsspec_cache(small_cdn):
-    """Positional reads go through the locked shared blocks, never the per-handle fsspec
-    cache: some cache types keep state per read (e.g. "readahead"), which concurrent
-    reads would corrupt."""
+@pytest.mark.parametrize("cache_type", ["blockcache", "none"])
+def test_reads_match_the_file(small_cdn, cache_type):
     expected = small_cdn.path.read_bytes()
-    stream = hf_remote.open_remote(HF_PATH, block_size=4096, cache_type="readahead")
-
-    def unsafe(*args):
-        raise AssertionError("read_at went through the fsspec cache")
-
-    stream._cache._fetch = unsafe
+    stream = hf_remote.open_remote(HF_PATH, block_size=4096, cache_type=cache_type)
     for offset, size in [(0, 1), (100, 5000), (4095, 2), (len(expected) - 10, 50)]:
         assert stream.read_at(offset, size) == expected[offset : offset + size]
+    stream.seek(4000)
+    assert stream.read(200) == expected[4000:4200] and stream.tell() == 4200
+
+
+def test_read_shares_the_blocks_of_read_at(small_cdn):
+    """h5py's reads and the chunk reader's positional reads use the same blocks."""
+    stream = hf_remote.open_remote(HF_PATH, block_size=4096)
+    stream.read_at(0, 10)
+    before = small_cdn.server.count
+    stream.seek(100)
+    stream.read(1000)
+    assert small_cdn.server.count == before
+
+
+def test_unknown_cache_type_raises(small_cdn):
+    with pytest.raises(ValueError, match="cache_type"):
+        hf_remote.open_remote(HF_PATH, cache_type="nope")
 
 
 def test_no_prefetch_when_nothing_keeps_the_block(small_cdn, monkeypatch):
@@ -326,10 +336,11 @@ def test_no_prefetch_when_nothing_keeps_the_block(small_cdn, monkeypatch):
     )
     with File(HF_PATH, progress=False, cache=False, cache_type="none") as remote:
         remote[RAW].shape
-    assert calls == []
+    assert (0, 1) not in calls  # h5py's own reads go through read_at too
+    calls.clear()
     with File(HF_PATH, progress=False, cache=False) as remote:
         remote[RAW].shape
-    assert calls == [(0, 1)]
+    assert calls[0] == (0, 1)
 
 
 def test_small_reads_draw_no_progress_bar(small_cdn, monkeypatch):

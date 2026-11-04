@@ -327,14 +327,13 @@ _shared_blocks = _SharedBlocks(SHARED_BLOCK_BYTES)
 class RemoteFile:
     """Read-only file object over a :class:`SignedURL`, passed to h5py.
 
-    Uses an fsspec block cache so h5py's many small metadata reads become a few requests, and
-    shares fetched blocks with other handles of the same file (:class:`_SharedBlocks`).
-    Requests go through :class:`~zea.data.chunk_reader.HTTPFetcher` for retries and URL refresh.
+    Reads whole blocks, so h5py's many small metadata reads become a few requests, and keeps
+    them in :class:`_SharedBlocks`, shared with other handles of the same file. With
+    ``keep_blocks=False`` it reads exactly the requested bytes instead. Requests go through
+    :class:`~zea.data.chunk_reader.HTTPFetcher` for retries and URL refresh.
     """
 
-    def __init__(self, location: SignedURL, block_size: int, cache_type: str = "blockcache"):
-        import fsspec.caching
-
+    def __init__(self, location: SignedURL, block_size: int, keep_blocks: bool = True):
         from zea.data.chunk_reader import HTTPFetcher
 
         self.location = location
@@ -343,31 +342,33 @@ class RemoteFile:
         #: fsspec-style file info. The chunk cache uses the etag as its key.
         self.details = {"name": location.hf_path, "size": self.size, "etag": location.etag}
         self._fetcher = HTTPFetcher(location)
-        self._cache = fsspec.caching.caches[cache_type](block_size, self._fetch, self.size)
+        self._keep_blocks = keep_blocks
+        # Without an etag, blocks of other handles may be other content: keep them per handle.
+        self._blocks_key = location.etag or object()
         self._pos = 0
         self._closed = False
 
-    def _fetch(self, start: int, end: int) -> bytes:
-        key = (self.location.etag, start, end)
-        if key[0] is not None and (hit := _shared_blocks.get(key)) is not None:
+    def _block(self, start: int) -> bytes:
+        end = min(start + self.blocksize, self.size)
+        key = (self._blocks_key, start, end)
+        if (hit := _shared_blocks.get(key)) is not None:
             return hit
         data = self._fetcher.read_range(start, end - start)
-        if key[0] is not None:
-            _shared_blocks.put(key, data)
+        _shared_blocks.put(key, data)
         return data
 
     def read_at(self, offset: int, size: int) -> bytes:
-        """Read ``size`` bytes at ``offset`` without moving the file position.
-
-        Safe to call from several threads: reads whole blocks through :class:`_SharedBlocks`,
-        not through the fsspec cache, which may keep state per read (e.g. ``"readahead"``).
-        """
+        """Read ``size`` bytes at ``offset`` without moving the file position. Thread-safe."""
         end = min(self.size, offset + size)
+        if end <= offset:
+            return b""
+        if not self._keep_blocks:
+            return self._fetcher.read_range(offset, end - offset)
         out = bytearray()
         pos = offset
         while pos < end:
             start = pos - pos % self.blocksize
-            block = self._fetch(start, min(start + self.blocksize, self.size))
+            block = self._block(start)
             out += block[pos - start : end - start]
             pos = start + len(block)
         return bytes(out)
@@ -375,10 +376,7 @@ class RemoteFile:
     def read(self, length: int = -1) -> bytes:
         if length is None or length < 0:
             length = self.size - self._pos
-        end = min(self.size, self._pos + length)
-        if end <= self._pos:
-            return b""
-        data = self._cache._fetch(self._pos, end)
+        data = self.read_at(self._pos, length)
         self._pos += len(data)
         return data
 
@@ -414,12 +412,21 @@ def open_remote(
     block_size: int | None = None,
     cache_type: str | None = None,
 ) -> RemoteFile:
-    """Open an ``hf://`` file for streaming reads."""
-    from zea.internal.preset_utils import _HF_STREAM_BLOCK_SIZE, _HF_STREAM_CACHE_TYPE
+    """Open an ``hf://`` file for streaming reads.
 
+    ``cache_type="none"`` reads exactly the requested bytes; any other fsspec cache type
+    reads and keeps whole blocks (see :class:`RemoteFile`).
+    """
+    import fsspec.caching
+
+    from zea.internal.preset_utils import _HF_STREAM_BLOCK_SIZE
+
+    known = {name for name in fsspec.caching.caches if name}
+    if cache_type is not None and cache_type not in known:
+        raise ValueError(f"Unknown cache_type {cache_type!r}; expected one of {sorted(known)}.")
     location = SignedURL(hf_path, revision=revision, repo_type=repo_type)
     return RemoteFile(
         location,
         block_size=block_size or _HF_STREAM_BLOCK_SIZE,
-        cache_type=cache_type or _HF_STREAM_CACHE_TYPE,
+        keep_blocks=cache_type != "none",
     )

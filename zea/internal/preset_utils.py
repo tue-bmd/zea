@@ -457,7 +457,6 @@ def _hf_resolve_path(hf_path: str, cache_dir=None, repo_type="dataset", **kwargs
 # This file object only serves h5py's metadata reads; chunk_reader fetches the array chunks
 # itself. The paged layout keeps that metadata to ~0.26 MB in one request, so the block just has
 # to cover it. Keep it aligned with chunk_cache.CachedFile's block size. Overridable via File().
-_HF_STREAM_CACHE_TYPE = "blockcache"
 _HF_STREAM_BLOCK_SIZE = 1024 * 1024  # 1 MiB
 
 
@@ -519,13 +518,14 @@ def _hf_stream_open(
             repository default branch.
         repo_type (str, optional): One of ``"dataset"``, ``"model"`` or
             ``"space"``. Defaults to ``"dataset"``.
-        block_size (int, optional): Block size in bytes for the fsspec cache.
+        block_size (int, optional): Block size in bytes of streamed reads.
             Larger blocks coalesce more chunk reads per HTTP request (faster for
             whole-frame reads, more over-fetch for sparse reads). Defaults to
             :data:`_HF_STREAM_BLOCK_SIZE`.
-        cache_type (str, optional): fsspec cache strategy. Defaults to
-            :data:`_HF_STREAM_CACHE_TYPE` (``"blockcache"``), which caches touched
-            blocks so the many small chunks of a frame share a few requests.
+        cache_type (str, optional): ``"none"`` reads exactly the requested bytes. Any other
+            fsspec cache type (default ``"blockcache"``) reads and keeps whole blocks, shared
+            by all handles of the file, so the many small chunks of a frame share a few
+            requests.
 
     Returns:
         An open, seekable binary file object. The caller is responsible for

@@ -240,7 +240,7 @@ def test_hf_stream_open_path_construction(kwargs, expected_url_path, monkeypatch
         return SimpleNamespace(location="https://cdn.example/x", etag="e", commit_hash="c", size=10)
 
     monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", fake_metadata)
-    monkeypatch.setattr(hf_remote.RemoteFile, "_fetch", lambda self, start, end: bytes(end - start))
+    monkeypatch.setattr(hf_remote.RemoteFile, "_block", lambda self, start: bytes(self.blocksize))
 
     result = _hf_stream_open(FILE_STR, block_size=1234, **kwargs)
     assert heads == [f"{constants.ENDPOINT}/{expected_url_path}"]

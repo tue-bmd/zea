@@ -529,7 +529,7 @@ def no_byte_reads(monkeypatch):
     """Answer the streamed file's reads (e.g. its metadata prefetch) without a network."""
     from zea.data import hf_remote
 
-    monkeypatch.setattr(hf_remote.RemoteFile, "_fetch", lambda self, start, end: bytes(end - start))
+    monkeypatch.setattr(hf_remote.RemoteFile, "_block", lambda self, start: bytes(self.blocksize))
 
 
 def test_stream_open_retries_after_login(monkeypatch, no_byte_reads):
