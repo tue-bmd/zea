@@ -8,10 +8,11 @@ import pytest
 from keras import ops
 
 from zea import Parameters
+from zea.beamform.geometry import element_pitch
 from zea.beamform.pfield import compute_pfield
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
-from zea.probes import Probe, create_curved_probe_geometry
+from zea.probes import create_curved_probe_geometry
 
 scan_args = {
     "n_tx": 10,
@@ -823,7 +824,7 @@ def test_pfield_infers_element_width():
         grid=parameters.grid,
         t0_delays=parameters.t0_delays,
     )
-    pitch = Probe.get_pitch(parameters.probe_geometry)
+    pitch = element_pitch(parameters.probe_geometry)
     inferred = ops.convert_to_numpy(compute_pfield(**kwargs))
     explicit = ops.convert_to_numpy(compute_pfield(**kwargs, element_width=0.9 * pitch))
     np.testing.assert_allclose(inferred, explicit)
