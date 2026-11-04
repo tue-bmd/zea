@@ -157,8 +157,9 @@ require a missing backend with:
 
 .. dropdown:: Choosing the backend and device
 
-   Tests run on TensorFlow and one free GPU by default. ``KERAS_BACKEND`` is ignored;
-   use these environment variables instead:
+   Tests run on TensorFlow by default. They use one free GPU when one is available and
+   fall back to CPU otherwise. ``KERAS_BACKEND`` is ignored; use these environment
+   variables instead:
 
    .. code-block:: shell
 
