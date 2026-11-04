@@ -1,5 +1,6 @@
-# Rebuilds the Read the Docs version that tracks one of our rolling tags
-# (`latest`, `openh-rf-latest`) after that tag has been moved.
+# Rebuilds the Read the Docs version that tracks the rolling `openh-rf-latest`
+# tag after that tag has been moved. Regular versions (`latest` from `main`,
+# `stable` and `vX.Y.Z` from release tags) are built by Read the Docs itself.
 #
 # Read the Docs' own webhook races the force-push: it starts a build while its
 # cached git ref still resolves to the previous release, so the build succeeds
@@ -14,7 +15,6 @@ name: Rebuild Docs
 on:
   push:
     tags:
-      - latest
       - openh-rf-latest
   workflow_call:
     inputs:
@@ -30,10 +30,9 @@ on:
       version:
         description: "Read the Docs version slug to rebuild"
         required: true
-        default: latest
+        default: openh-rf-latest
         type: choice
         options:
-          - latest
           - openh-rf-latest
 
 permissions:
