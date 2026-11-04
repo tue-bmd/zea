@@ -194,6 +194,10 @@ def clear() -> None:
     shutil.rmtree(_CACHE_DIR, ignore_errors=True)
 
 
+class FileChangedError(OSError):
+    """The content of a file changed on the Hub while it was open."""
+
+
 class SignedURL:
     """The current CDN URL of one open file. Refreshed when it expires or is rejected.
 
@@ -229,10 +233,19 @@ class SignedURL:
     def current(self) -> tuple[str, dict[str, str]]:
         """Return ``(url, headers)``, refreshing the URL first if it is older than
         :data:`URL_TTL`. May make a request, so do not call it from an event loop.
+
+        The refresh is early (signed URLs last longer than :data:`URL_TTL`), so if it fails
+        the current URL is used. If that has expired too, the CDN rejects it and
+        :meth:`refresh` is called again.
         """
         resolved = self._resolved
         if not resolved.fresh:
-            self.refresh(resolved.url)
+            try:
+                self.refresh(resolved.url)
+            except FileChangedError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — any failure to reach the Hub
+                log.debug(f"Could not refresh the URL of '{self.hf_path}', reusing it: {exc}")
             resolved = self._resolved
         return resolved.url, self._headers(resolved)
 
@@ -259,7 +272,7 @@ class SignedURL:
                     self.hf_path, revision=self._revision, repo_type=self.repo_type, refresh=True
                 )
             if self._resolved.etag and resolved.etag and resolved.etag != self._resolved.etag:
-                raise OSError(
+                raise FileChangedError(
                     f"'{self.hf_path}' changed on the Hub while it was open "
                     f"(etag {self._resolved.etag} -> {resolved.etag}). Reopen the file."
                 )

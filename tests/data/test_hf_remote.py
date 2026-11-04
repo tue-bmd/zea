@@ -150,6 +150,17 @@ class TestSignedURL:
         assert not location.refresh("https://cdn.example/signed?1")
         assert len(hub.heads) == 2
 
+    def test_failed_early_refresh_keeps_the_current_url(self, hub, monkeypatch):
+        """Signed URLs outlive URL_TTL, so a Hub outage at that point must not fail reads."""
+        location = hf_remote.SignedURL(HF_PATH)
+        monkeypatch.setattr(hf_remote, "URL_TTL", 0)
+
+        def unavailable(url, **kwargs):
+            raise RuntimeError("503")
+
+        monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", unavailable)
+        assert location.current() == ("https://cdn.example/signed?1", {})
+
     def test_content_change_while_open_raises(self, hub):
         location = hf_remote.SignedURL(HF_PATH)
         hub.etag = "sha-2"
