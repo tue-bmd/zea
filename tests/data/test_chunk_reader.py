@@ -1119,6 +1119,28 @@ def test_fsspec_debug_log_redacts_signed_urls(structured_file, caplog):
         server.close()
 
 
+@pytest.mark.parametrize(
+    "name, status, error",
+    [("gone.hdf5", None, FileNotFoundError), (None, 403, chunk_reader.RemoteReadError)],
+)
+def test_errors_redact_signed_urls(structured_file, name, status, error):
+    """The error of a failed request names the file, but not the signature of its URL."""
+    server = _CountingServer(
+        structured_file.parent, latency=0, reject_first=100 if status else 0, reject_status=status
+    )
+    try:
+        name = name or structured_file.name
+        fetcher = HTTPFetcher(server.url + name + "?Policy=abc&Signature=secret")
+        with pytest.raises(error) as info:
+            fetcher.fetch([(0, 16)])
+        assert name in str(info.value) and "secret" not in str(info.value)
+        assert info.value.__suppress_context__
+        if status == 403:
+            assert info.value.status == 403
+    finally:
+        server.close()
+
+
 class TestIsTransient:
     @pytest.mark.parametrize("status", sorted(chunk_reader.RETRY_STATUS))
     def test_transient_statuses(self, status):

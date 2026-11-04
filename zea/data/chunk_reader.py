@@ -191,7 +191,7 @@ class _Location(Protocol):
 class _RedactQueryStrings(logging.Filter):
     """Strip query strings from URLs in log records: they carry the signature of a CDN URL."""
 
-    _url = re.compile(r"(https?://[^\s?]+)\?\S*")
+    _url = re.compile(r"(https?://[^\s?'\"]+)\?[^\s'\"]*")
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
@@ -199,6 +199,30 @@ class _RedactQueryStrings(logging.Filter):
         if redacted != message:
             record.msg, record.args = redacted, ()
         return True
+
+
+class RemoteReadError(OSError):
+    """A failed range request whose message had a signed URL in it (now redacted)."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+def _redacted(exc: Exception) -> Exception | None:
+    """``exc`` with the query strings of its URLs redacted, or ``None`` if it has none.
+
+    fsspec and aiohttp put the requested URL in their errors, and a signed URL is a credential.
+    """
+    message = str(exc)
+    redacted = _RedactQueryStrings._url.sub(r"\1?<redacted>", message)
+    if redacted == message:
+        return None
+    if isinstance(exc, FileNotFoundError):
+        return FileNotFoundError(redacted)
+    if isinstance(exc, PermissionError):
+        return PermissionError(redacted)
+    return RemoteReadError(redacted, getattr(exc, "status", None))
 
 
 _redaction_lock = threading.Lock()
@@ -437,7 +461,10 @@ class HTTPFetcher(Fetcher):
                         url, headers = await asyncio.to_thread(self.location.current)
                         continue
                 if not _is_transient(exc) or attempt >= MAX_RETRIES:
-                    raise
+                    redacted = _redacted(exc)
+                    if redacted is None:
+                        raise
+                    raise redacted from None
                 from zea import log  # local, like the fallback warning below: zea imports us
 
                 status = getattr(exc, "status", None)
