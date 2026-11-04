@@ -14,8 +14,9 @@ os.environ["MPLBACKEND"] = "Agg"
 
 # Hide the GPUs before any backend initializes CUDA: init_device("cpu") below hides them too,
 # but that is a no-op once a backend has claimed them.
-_TEST_DEVICE = os.environ.get("ZEA_TEST_DEVICE", "auto:1")
-if _TEST_DEVICE == "cpu":
+_TEST_DEVICE = os.environ.get("ZEA_TEST_DEVICE", "auto:1").strip().lower()
+_TEST_ON_CPU = _TEST_DEVICE in ("cpu", "auto:0")  # the spellings init_device resolves to CPU
+if _TEST_ON_CPU:
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["JAX_PLATFORMS"] = "cpu"
 
@@ -52,7 +53,7 @@ def _gpu_available() -> bool:
 
 
 # must be before importing anything that may call init_device()
-_GPU_AVAILABLE = _TEST_DEVICE != "cpu" and _gpu_available()
+_GPU_AVAILABLE = not _TEST_ON_CPU and _gpu_available()
 
 # Warm up jax's GPU backend while all GPUs are still visible. If the first init happens when
 # a test has hidden the GPUs, jax permanently falls back to CPU.

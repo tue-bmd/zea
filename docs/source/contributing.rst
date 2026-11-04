@@ -155,6 +155,26 @@ require a missing backend with:
 
    pytest -m 'not heavy and not notebook' --skip-unavailable-backends
 
+.. dropdown:: Choosing the backend and device
+
+   Tests run on TensorFlow by default (JAX if TensorFlow is not installed) and on one
+   free GPU. ``KERAS_BACKEND`` is ignored; use these environment variables instead:
+
+   .. code-block:: shell
+
+      # Backend: tensorflow, jax or torch
+      ZEA_TEST_BACKEND=jax pytest -m 'not heavy and not notebook'
+
+      # Device: auto:1 (default), cpu, gpu:0, auto:-1 (all GPUs), ...
+      ZEA_TEST_DEVICE=cpu pytest -m 'not heavy and not notebook'
+
+      # or a specific test file or function, e.g.:
+      ZEA_TEST_BACKEND=jax ZEA_TEST_DEVICE=gpu:0 pytest tests/test_io_lib.py::test_load_video_gif
+
+   Parts of tests that only apply to other backends are skipped and counted in the
+   summary. Cross-backend comparisons always run every installed backend on CPU,
+   whichever backend you pick.
+
 .. dropdown:: Heavy tests
 
    Heavy tests require significant compute and are best run on a machine with a GPU.
