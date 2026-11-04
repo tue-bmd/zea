@@ -919,6 +919,15 @@ def test_bandwidth_derived_from_probe():
     assert "bandwidth" in Parameters(**scan_args).to_tensor(include=["bandwidth"])
 
 
+def test_bandwidth_follows_in_place_changes():
+    """In-place changes to center_frequency refresh the derived bandwidth."""
+    parameters = Parameters(center_frequency=np.full(3, 5e6), probe_bandwidth_percent=60.0)
+    assert parameters.bandwidth == pytest.approx(3e6)
+
+    parameters.center_frequency[:] = 6e6
+    assert parameters.bandwidth == pytest.approx(3.6e6)
+
+
 def test_bandwidth_explicit_value_wins():
     """An explicit bandwidth overrides the derived one, and unsetting it falls back."""
     parameters = Parameters(center_frequency=5e6, probe_bandwidth_percent=60.0, bandwidth=1e6)
