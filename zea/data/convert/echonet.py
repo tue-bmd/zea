@@ -11,7 +11,10 @@ For more information about the dataset, resort to the following links:
 
 """
 
+import collections
+import functools
 import os
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Value
 from pathlib import Path
@@ -19,13 +22,15 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import yaml
-from scipy.interpolate import griddata
+from scipy.interpolate import CloughTocher2DInterpolator, LinearNDInterpolator
+from scipy.spatial import Delaunay, cKDTree
 from tqdm import tqdm
 
 from zea import log
-from zea.data.convert.utils import load_avi, unzip
+from zea.data.convert.utils import load_avi, unzip_beside
 from zea.data.file import File
 from zea.func.tensor import translate
+from zea.internal.preset_utils import HF_PREFIX, _hf_resolve_path
 
 if TYPE_CHECKING:
     from multiprocessing.sharedctypes import Synchronized
@@ -35,6 +40,9 @@ if TYPE_CHECKING:
 # does not exist until an initializer runs, but declaring it here gives the
 # ``global COUNTER`` statement a module-scope declaration to rebind.
 COUNTER: "Synchronized[int]"
+# The worker's H5Processor, bound once per worker process by ``count_init``, so the
+# split it holds is not pickled again for every file.
+PROCESSOR: "H5Processor"
 
 
 def segment(tensor, number_erasing=0, min_clip=0):
@@ -205,38 +213,17 @@ def rotate_coordinates(data_points, degrees):
     return rotated_points.T
 
 
-def cartesian_to_polar_matrix(
-    cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
-):
-    """
-    Function that converts a timeseries of a cartesian cone to a polar representation
-    that is more compatible with CNN's/action selection.
-
-    Args:
-        - cartesian_matrix (2d array): (rows, cols) matrix containing time sequence
-            of scan-converted (Cartesian) image data.
-        - tip (tuple, optional): coordinates (in indices) of the tip of the cone.
-            Defaults to (61, 7).
-        - r_max (int, optional): expected radius of the cone. Defaults to 107.
-        - angle (float, optional): expected angle of the cone, will be used as (-angle, angle).
-            Defaults to 0.79.
-        - interpolation (str, optional): can be [nearest, linear, cubic]. Defaults to 'nearest'.
-
-    Returns:
-        polar_matrix (2d array): polar conversion of the input.
-    """
-    rows, cols = cartesian_matrix.shape
+@functools.lru_cache
+def _polar_grid(rows, cols, tip, r_max, angle):
+    # The triangulation only depends on the grid, so it is shared by all frames and files.
     center_x, center_y = tip
 
     # Create cartesian coordinates of the image data
     x = np.linspace(-center_x, cols - center_x - 1, cols)
     y = np.linspace(-center_y, rows - center_y - 1, rows)
     x, y = np.meshgrid(x, y)
-
-    # Flatten the grid and values
     data_points = np.column_stack((x.ravel(), y.ravel()))
     data_points = rotate_coordinates(data_points, -90)
-    data_values = cartesian_matrix.ravel()
 
     # Define new points to sample from in the region of the data.
     # R_max and Theta are found manually. R_max differs from the number of rows in EchoNet!
@@ -247,13 +234,54 @@ def cartesian_to_polar_matrix(
     x_polar = r * np.cos(theta)
     y_polar = r * np.sin(theta)
     new_points = np.column_stack((x_polar.ravel(), y_polar.ravel()))
+    return Delaunay(data_points), new_points
 
-    # Interpolate and reshape to 2D matrix
-    polar_values = griddata(
-        data_points, data_values, new_points, method=interpolation, fill_value=0
-    )
-    polar_matrix = np.rot90(polar_values.reshape(cols, rows), k=-1)
-    return polar_matrix
+
+@functools.lru_cache
+def _nearest_indices(rows, cols, tip, r_max, angle):
+    # What NearestNDInterpolator looks up, without rebuilding its KD-tree on every call.
+    tri, new_points = _polar_grid(rows, cols, tip, r_max, angle)
+    return cKDTree(tri.points).query(new_points)[1]
+
+
+def cartesian_to_polar_matrix(
+    cartesian_matrix, tip=(61, 7), r_max=107, angle=0.79, interpolation="nearest"
+):
+    """
+    Function that converts a timeseries of a cartesian cone to a polar representation
+    that is more compatible with CNN's/action selection.
+
+    Args:
+        - cartesian_matrix (ndarray): (rows, cols) scan-converted (Cartesian) image, or a
+            (n_frames, rows, cols) time sequence of them.
+        - tip (tuple, optional): coordinates (in indices) of the tip of the cone.
+            Defaults to (61, 7).
+        - r_max (int, optional): expected radius of the cone. Defaults to 107.
+        - angle (float, optional): expected angle of the cone, will be used as (-angle, angle).
+            Defaults to 0.79.
+        - interpolation (str, optional): can be [nearest, linear, cubic]. Defaults to 'nearest'.
+
+    Returns:
+        polar_matrix (ndarray): polar conversion of the input, same shape as the input.
+    """
+    *batch, rows, cols = cartesian_matrix.shape
+    tri, new_points = _polar_grid(rows, cols, tuple(tip), r_max, angle)
+
+    # (rows * cols, n_frames) so that all frames are interpolated at once
+    data_values = cartesian_matrix.reshape(-1, rows * cols).T
+
+    if interpolation == "nearest":
+        polar_values = data_values[_nearest_indices(rows, cols, tuple(tip), r_max, angle)]
+    elif interpolation == "linear":
+        polar_values = LinearNDInterpolator(tri, data_values, fill_value=0)(new_points)
+    elif interpolation == "cubic":
+        polar_values = CloughTocher2DInterpolator(tri, data_values, fill_value=0)(new_points)
+    else:
+        raise ValueError(f"Unknown interpolation method: {interpolation}")
+
+    # Reshape to (n_frames, rows, cols)
+    polar_matrix = np.rot90(polar_values.T.reshape(-1, cols, rows), k=-1, axes=(1, 2))
+    return polar_matrix.reshape(*batch, rows, cols)
 
 
 def find_split_for_file(file_dict, target_file):
@@ -275,7 +303,48 @@ def find_split_for_file(file_dict, target_file):
     return "rejected"
 
 
-def count_init(shared_counter):
+# The published EchoNet-Dynamic split
+ECHONET_SPLIT_PATH = "hf://zeahub/echonet-dynamic"
+
+
+def load_split(split_path):
+    """Load an EchoNet dataset split, as written by :func:`convert_echonet`.
+
+    Args:
+        split_path (str, Path): A ``split.yaml`` file, a folder containing one, or an
+            ``hf://`` path to either. The file maps ``train``, ``val``, ``test`` and
+            ``rejected`` to lists of file names. The default split is published on
+            `zeahub/echonet-dynamic <https://huggingface.co/datasets/zeahub/echonet-dynamic>`_.
+
+    Returns:
+        dict: The split, mapping split names to sets of ``.hdf5`` file names.
+
+    Raises:
+        RuntimeError: If an ``hf://`` split cannot be fetched, e.g. without a connection.
+    """
+    text = str(split_path)
+    if text.startswith(HF_PREFIX):
+        if not text.endswith(".yaml"):
+            text = f"{text.rstrip('/')}/split.yaml"
+        try:
+            split_path = _hf_resolve_path(text)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not get the split from {text}: {exc!r}. Without a connection to "
+                "Hugging Face, pass a local split with --split-path, or create a new random "
+                "split with --new-split."
+            ) from exc
+    split_path = Path(split_path)
+
+    if split_path.is_dir():
+        split_path = split_path / "split.yaml"
+
+    with open(split_path, "r") as f:
+        splits = yaml.safe_load(f)
+    return {split: set(names or []) for split, names in splits.items()}
+
+
+def count_init(shared_counter, processor=None):
     """
     Initialize the module-level shared counter used by worker processes.
 
@@ -283,9 +352,17 @@ def count_init(shared_counter):
         shared_counter (multiprocessing.Value): A process-shared integer Value that
             will be assigned to the module-global COUNTER for coordinated counting
             across processes.
+        processor (H5Processor, optional): Processor that :func:`_process_file` runs
+            in this worker.
     """
-    global COUNTER
+    global COUNTER, PROCESSOR
     COUNTER = shared_counter
+    if processor is not None:
+        PROCESSOR = processor
+
+
+def _process_file(avi_file):
+    return PROCESSOR(avi_file)
 
 
 class H5Processor:
@@ -324,7 +401,10 @@ class H5Processor:
 
         This method checks acceptance based on the first frame of `sequence`.
         If explicit splits were provided to the processor, it returns the split
-        found for `hdf5_file` (and asserts that the acceptance result matches the split).
+        found for `hdf5_file`, even when the acceptance check disagrees: the check
+        thresholds decoded pixels, so a different decoder can flip borderline videos,
+        and a published split should not change because of that. Disagreements are
+        logged.
         If no explicit splits are provided, rejected sequences are labeled `"rejected"`.
         Accepted sequences increment a shared counter and are assigned
         `"val"`, `"test"`, or `"train"` according to the processor's
@@ -345,7 +425,14 @@ class H5Processor:
         # Previous split
         if self.splits is not None:
             split = find_split_for_file(self.splits, hdf5_file)
-            assert accepted == (split != "rejected"), "Rejection mismatch"
+            if accepted != (split != "rejected"):
+                log.warning(
+                    "%s: the acceptance check %s it, but the given split puts it in %s. "
+                    "Keeping the given split.",
+                    hdf5_file,
+                    "accepts" if accepted else "rejects",
+                    split,
+                )
             return split
 
         # New split
@@ -409,6 +496,9 @@ class H5Processor:
 
         Args:
             avi_file (pathlib.Path): Path to the source .avi file to process.
+
+        Raises:
+            ValueError: If the converted image has non-finite values.
         """
         hdf5_file = avi_file.stem + ".hdf5"
         sequence = load_avi(avi_file)
@@ -426,17 +516,9 @@ class H5Processor:
 
         out_h5 = self.path_out_h5 / split / hdf5_file
 
-        polar_im_set = []
-        for _, im in enumerate(sequence):
-            if not accepted:
-                continue
-
-            polar_im = cartesian_to_polar_matrix(im, interpolation="cubic")
-            polar_im = np.clip(polar_im, *self._process_range)
-            polar_im_set.append(polar_im)
-
         if accepted:
-            polar_im_set = np.stack(polar_im_set, axis=0)
+            polar_im_set = cartesian_to_polar_matrix(sequence, interpolation="cubic")
+            polar_im_set = np.clip(polar_im_set, *self._process_range)
 
         # Check the ranges
         assert sequence.min() >= self._process_range[0], sequence.min()
@@ -454,6 +536,10 @@ class H5Processor:
             cartesian_db = self._translate(sequence).astype(np.float32)
             data = {"image": {"values": cartesian_db}}
 
+        # Values are clipped to range_to, but NaNs survive clipping
+        if not np.isfinite(data["image"]["values"]).all():
+            raise ValueError(f"{hdf5_file} has non-finite values.")
+
         File.create(
             path=out_h5,
             data=data,
@@ -462,18 +548,32 @@ class H5Processor:
         )
 
 
+def _find_videos(folder: Path) -> Path:
+    # EchoNet-Dynamic.zip nests everything under a top-level EchoNet-Dynamic/ folder, so
+    # unzip_beside yields EchoNet-Dynamic/EchoNet-Dynamic/Videos, while a manual extraction
+    # into the folder holding the zip yields EchoNet-Dynamic/Videos.
+    for candidate in (folder / "Videos", folder / "EchoNet-Dynamic" / "Videos"):
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"No Videos folder found in {folder}.")
+
+
 def _resolve_path(src: str | Path) -> Path:
     src = Path(src)
 
+    if src.is_file() and src.suffix == ".zip":
+        return _find_videos(unzip_beside(src))
+
+    if (src / "Videos").exists():
+        return src / "Videos"
+
     zip_name = "EchoNet-Dynamic.zip"
     folder_name = "EchoNet-Dynamic"
-    unzip_dir = src / folder_name / "Videos"
 
     if (src / folder_name).exists():
-        return unzip_dir
+        return _find_videos(src / folder_name)
 
-    unzipped_path = unzip(src / zip_name, src)
-    return unzipped_path / folder_name / "Videos"
+    return _find_videos(unzip_beside(src / zip_name))
 
 
 def convert_echonet(args):
@@ -489,8 +589,11 @@ def convert_echonet(args):
             - dst (str|Path): Destination directory for generated zea files
                 per-split subdirectories (train, val, test, rejected) and a split.yaml
                 are created or updated.
-            - split_path (str|Path|None): If provided, must contain a split.yaml to reproduce
-                an existing split; function asserts the file exists.
+            - split_path (str|Path|None, optional): The split to reproduce, in any format
+                :func:`load_split` reads. Defaults to the published split,
+                :data:`ECHONET_SPLIT_PATH`.
+            - new_split (bool, optional): Create a new random split instead of reproducing
+                one. Defaults to False.
             - no_hyperthreading (bool): When false, processing uses a ProcessPoolExecutor
                 with a shared counter; when true, processing runs sequentially.
 
@@ -498,22 +601,25 @@ def convert_echonet(args):
         - May unzip the source into a working directory.
         - Writes zea files into dst.
         - Writes a split.yaml into dst summarizing produced files per split.
-        - Logs progress and validation results.
-        - Asserts that split.yaml exists at split_path when split reproduction is requested.
+        - Logs progress and validation results, including files whose acceptance check
+          disagrees with the given split.
+
+    Raises:
+        RuntimeError: If any file failed to convert. The split.yaml is still written for
+            the files that succeeded.
     """
+    # Before unzipping, which is slow, so that an unavailable split fails fast
+    split_path = getattr(args, "split_path", ECHONET_SPLIT_PATH)
+    if getattr(args, "new_split", False) or split_path is None:
+        splits = None
+        log.info("Creating a new train-val-test split.")
+    else:
+        # Reproduce a previous split...
+        splits = load_split(split_path)
+        log.info(f"Processor initialized with train-val-test split from {split_path}.")
+
     # Check if unzip is needed
     src = _resolve_path(args.src)
-
-    if args.split_path is not None:
-        # Reproduce a previous split...
-        yaml_file = Path(args.split_path) / "split.yaml"
-        assert yaml_file.exists(), f"File {yaml_file} does not exist."
-        splits = {"train": None, "val": None, "test": None, "rejected": None}
-        with open(yaml_file, "r") as f:
-            splits = yaml.safe_load(f)
-        log.info(f"Processor initialized with train-val-test split from {yaml_file}.")
-    else:
-        splits = None
 
     # List the files that have an entry in path_out_h5 already
     files_done = []
@@ -523,7 +629,9 @@ def convert_echonet(args):
 
     # List all files of echonet and exclude those already processed
     path_in = Path(src)
-    h5_files = path_in.glob("*.avi")
+    h5_files = list(path_in.glob("*.avi"))
+    if not h5_files:
+        raise FileNotFoundError(f"No .avi files found in {path_in}.")
     h5_files = [file for file in h5_files if file.stem not in files_done]
     log.info(f"Files left to process: {len(h5_files)}")
 
@@ -532,20 +640,32 @@ def convert_echonet(args):
 
     log.info("Starting the conversion process.")
 
+    failures = {}
+
+    def collect(file, run):
+        try:
+            run()
+        except Exception as exc:
+            failures[file.name] = exc
+            log.error(
+                "Failed to convert %s:\n%s",
+                log.yellow(file),
+                "".join(traceback.format_exception(exc)),
+            )
+
     if not args.no_hyperthreading:
         shared_counter = Value("i", 0)
-        with ProcessPoolExecutor(initializer=count_init, initargs=(shared_counter,)) as executor:
-            futures = [executor.submit(processor, file) for file in h5_files]
+        with ProcessPoolExecutor(
+            initializer=count_init, initargs=(shared_counter, processor)
+        ) as executor:
+            futures = {executor.submit(_process_file, file): file for file in h5_files}
             for future in tqdm(as_completed(futures), total=len(futures)):
-                try:
-                    future.result()
-                except Exception:
-                    log.warning("Task raised an exception")
+                collect(futures[future], future.result)
     else:
         # Initialize global variable for counting
         count_init(Value("i", 0))
         for file in tqdm(h5_files):
-            processor(file)
+            collect(file, lambda file=file: processor(file))
 
     log.info("All tasks are completed.")
 
@@ -553,13 +673,24 @@ def convert_echonet(args):
     full_list = {}
     for split in ["train", "val", "test", "rejected"]:
         split_dir = Path(args.dst) / split
+        full_list[split] = sorted(f.name for f in split_dir.glob("*.hdf5"))
 
-        # Get only files (skip directories)
-        file_list = [f.name for f in split_dir.iterdir() if f.is_file()]
-        full_list[split] = file_list
+    # Resumes skip files that exist in any split, so a duplicate was put there by hand.
+    counts = collections.Counter(name for names in full_list.values() for name in names)
+    duplicates = sorted(name for name, count in counts.items() if count > 1)
+    if duplicates:
+        raise RuntimeError(
+            f"{len(duplicates)} files are in more than one split of {args.dst}, e.g. "
+            f"{', '.join(duplicates[:5])}. Remove the stale copies and rerun."
+        )
 
     with open(Path(args.dst) / "split.yaml", "w") as f:
         yaml.dump(full_list, f)
 
     # Validate that the split was copied correctly
     processor.validate_split_copy(Path(args.dst) / "split.yaml")
+
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} of {len(h5_files)} files failed to convert; see the errors above."
+        )
