@@ -26,7 +26,6 @@ We now do what :func:`huggingface_hub.hf_hub_download` does: one HEAD request pe
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import threading
 import time
@@ -36,7 +35,7 @@ from urllib.parse import urlsplit
 
 from zea import log
 from zea.internal.cache import ZEA_CACHE_DIR
-from zea.internal.utils import atomic_write
+from zea.internal.utils import load_json_cache, store_json_cache
 
 #: Seconds to reuse a resolved URL. The Hub's signed URLs currently expire after about an
 #: hour. If that changes, a rejected URL is resolved again anyway.
@@ -77,11 +76,6 @@ class Resolved:
         return time.time() - self.resolved_at < URL_TTL
 
 
-def _token_id(token: str | None) -> str:
-    """Hash of the token, so cached URLs are kept per user."""
-    return hashlib.sha256(token.encode()).hexdigest()[:16] if token else "anonymous"
-
-
 def _reusable(resolved: Resolved | None, revision: str | None) -> bool:
     """Whether a cached ``resolved`` may be used to open the file at ``revision``.
 
@@ -107,21 +101,13 @@ def _disk_path(key: tuple) -> Path:
 
 
 def _load(key: tuple) -> Resolved | None:
-    try:
-        resolved = Resolved(**json.loads(_disk_path(key).read_text()))
-    except (OSError, ValueError, TypeError):
+    data = load_json_cache(_disk_path(key), URL_TTL)
+    if not isinstance(data, dict):
         return None
-    return resolved
-
-
-def _store(key: tuple, resolved: Resolved) -> None:
     try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        # atomic_write goes through mkstemp, so the file is private to this user (0600).
-        with atomic_write(_disk_path(key), suffix=".part") as tmp:
-            tmp.write_text(json.dumps(asdict(resolved)))
-    except OSError as exc:  # the disk cache is optional
-        log.debug(f"Could not cache the location of a streamed file: {exc}")
+        return Resolved(**data)
+    except TypeError:  # written by another version of zea
+        return None
 
 
 def resolve(
@@ -144,13 +130,13 @@ def resolve(
     """
     from huggingface_hub import constants, get_hf_file_metadata, get_token, hf_hub_url
 
-    from zea.internal.preset_utils import _hf_call, _hf_parse_path
+    from zea.internal.preset_utils import _hf_call, _hf_parse_path, _hf_token_id
 
     repo_id, subpath = _hf_parse_path(hf_path)
     if not subpath:
         raise ValueError(f"Expected an 'hf://' path to a single file, got '{hf_path}'.")
     token = get_token()
-    key = (constants.ENDPOINT, repo_type, repo_id, revision, subpath, _token_id(token))
+    key = (constants.ENDPOINT, repo_type, repo_id, revision, subpath, _hf_token_id(token))
 
     with _memory_lock:
         lock = _key_locks.setdefault(key, threading.Lock())
@@ -180,7 +166,7 @@ def resolve(
         )
         with _memory_lock:
             _memory[key] = resolved
-        _store(key, resolved)
+        store_json_cache(_disk_path(key), asdict(resolved))
         return resolved
 
 

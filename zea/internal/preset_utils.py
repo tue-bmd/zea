@@ -10,7 +10,6 @@ See https://huggingface.co/zeahub/
 """
 
 import hashlib
-import json
 import os
 import threading
 import time
@@ -28,7 +27,7 @@ from huggingface_hub.utils import (
 
 from zea import log
 from zea.internal.cache import ZEA_CACHE_DIR
-from zea.internal.utils import atomic_write
+from zea.internal.utils import load_json_cache, store_json_cache
 
 HF_SCHEME = "hf"
 HF_PREFIX = "hf://"
@@ -214,31 +213,27 @@ class _RepoEntry(NamedTuple):
     content_id: str | None
 
 
+def _hf_token_id(token: str | None) -> str:
+    """Hash of a Hub token, so on-disk caches of Hub answers are kept per user."""
+    return hashlib.sha256(token.encode()).hexdigest()[:16] if token else "anonymous"
+
+
 def _listing_path(key) -> Path:
     from huggingface_hub import constants, get_token
 
-    token = get_token()
-    who = hashlib.sha256(token.encode()).hexdigest()[:16] if token else "anonymous"
+    who = _hf_token_id(get_token())
     digest = hashlib.sha256(repr((constants.ENDPOINT, who, key)).encode()).hexdigest()
     return _LISTING_DIR / f"{digest}.json"
 
 
 def _load_listing(path: Path) -> "dict[str, _RepoEntry] | None":
-    try:
-        if time.time() - path.stat().st_mtime >= _HF_CACHE_TTL:
-            return None
-        return {name: _RepoEntry(*entry) for name, entry in json.loads(path.read_text()).items()}
-    except (OSError, ValueError, TypeError):
+    entries = load_json_cache(path, _HF_CACHE_TTL)
+    if not isinstance(entries, dict):
         return None
-
-
-def _store_listing(path: Path, listing: "dict[str, _RepoEntry]") -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with atomic_write(path, suffix=".part") as tmp:
-            tmp.write_text(json.dumps(listing))
-    except OSError as exc:  # the disk cache is optional
-        log.debug(f"Could not cache the listing of a Hugging Face repo: {exc}")
+        return {name: _RepoEntry(*entry) for name, entry in entries.items()}
+    except TypeError:  # written by another version of zea
+        return None
 
 
 def _hf_repo_files(repo_id, repo_type="dataset", **kwargs) -> "dict[str, _RepoEntry]":
@@ -265,7 +260,7 @@ def _hf_repo_files(repo_id, repo_type="dataset", **kwargs) -> "dict[str, _RepoEn
             if isinstance(entry, RepoFile)
         }
         if path is not None:
-            _store_listing(path, listing)
+            store_json_cache(path, listing)
         return listing
 
     return _LISTING_CACHE.get_or_call(key, _list)
