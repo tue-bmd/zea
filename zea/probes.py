@@ -249,8 +249,7 @@ def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
     # well as a geometry in a different frame, which would otherwise fit the wrong circle.
     if np.isfinite(radius):
         deviation = np.max(np.abs(np.hypot(x, z + radius) - radius))
-        pitch = np.median(np.linalg.norm(np.diff(probe_geometry, axis=0), axis=1))
-        if deviation <= tol * pitch:
+        if deviation <= tol * element_pitch(probe_geometry):
             return float(radius)
 
     raise ValueError(
@@ -328,34 +327,25 @@ class Probe(ProbeSpec):
         """Compute the pitch (centre-to-centre element spacing) in metres from
         the probe geometry.
 
-        The pitch is always positive, also when the elements are ordered by
-        descending x.
 
-        Raises :class:`ValueError` when the probe has fewer than 2 elements,
-        the geometry is not a 1-D (linear) array, the element positions are
-        not uniformly spaced, or the elements coincide.
+        Raises :class:`ValueError` when the probe has fewer than 2 elements, the
+        neighbouring elements are not uniformly spaced (which includes matrix arrays),
+        or the elements coincide.
         """
 
         n_el = probe_geometry.shape[0]
         if n_el < 2:
             raise ValueError(f"Cannot compute pitch: probe has fewer than 2 elements (n_el={n_el})")
 
-        # Only valid for 1-D (linear) arrangements – all elements must lie on the x-axis
-        # (y == 0 and z == 0 for every element).
-        if not (np.allclose(probe_geometry[:, 1], 0) and np.allclose(probe_geometry[:, 2], 0)):
-            raise ValueError(
-                "Cannot compute pitch: probe geometry is not 1-D (linear array). "
-                "Element positions must have y=0 and z=0 for all elements."
-            )
-
-        spacings = np.diff(probe_geometry[:, 0])
+        steps = np.diff(np.asarray(probe_geometry, dtype=np.float64), axis=0)
+        spacings = np.linalg.norm(steps, axis=1)
         if not np.allclose(spacings, spacings[0], rtol=1e-3):
             raise ValueError(
-                "Cannot compute pitch: element x-positions are not uniformly spaced. "
+                "Cannot compute pitch: elements are not uniformly spaced. "
                 f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
             )
 
-        pitch = abs(float(spacings[0]))
+        pitch = element_pitch(probe_geometry)
         if pitch == 0:
             raise ValueError("Cannot compute pitch: element positions coincide.")
         return pitch
@@ -367,10 +357,10 @@ class Probe(ProbeSpec):
         Raises :class:`ValueError` when:
 
         * :attr:`probe_geometry` is not set,
-        * the probe has fewer than 2 elements, or
-        * the elements are not arranged along a single axis (not a 1-D / linear array).
-        * the spacing is non-uniform (elements are present but clearly not a ULA),
-            to surface likely data errors rather than silently returning ``None``.
+        * the probe has fewer than 2 elements,
+        * the spacing is non-uniform (which includes matrix arrays), to surface likely
+          data errors rather than silently returning ``None``, or
+        * the elements coincide.
 
         """
         if self.probe_geometry is None:

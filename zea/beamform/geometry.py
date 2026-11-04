@@ -77,8 +77,9 @@ def is_diverging(focus_distances):
 def element_pitch(probe_geometry):
     """Median distance between neighbouring elements in metres.
 
-    Unlike :meth:`zea.probes.Probe.get_pitch` this also works for curved arrays, since
-    it measures the distance along the array rather than along ``x``.
+    The distance is measured along the array rather than along ``x``, so this also works
+    for curved arrays. Use :meth:`zea.probes.Probe.get_pitch` to also reject geometries
+    that have no single pitch.
 
     Args:
         probe_geometry (np.ndarray): Element positions of shape ``(n_el, 3)``, ordered
