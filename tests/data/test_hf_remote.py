@@ -330,3 +330,16 @@ def test_no_prefetch_when_nothing_keeps_the_block(small_cdn, monkeypatch):
     with File(HF_PATH, progress=False, cache=False) as remote:
         remote[RAW].shape
     assert calls == [(0, 1)]
+
+
+def test_small_reads_draw_no_progress_bar(small_cdn, monkeypatch):
+    """A read below MIN_BYTES is one request at most, so it gets no bar (h5py, which served
+    these reads before, drew none either)."""
+    from unittest.mock import MagicMock
+
+    tqdm_mock = MagicMock()
+    monkeypatch.setattr("tqdm.auto.tqdm", tqdm_mock)
+    with File(HF_PATH, progress=False) as remote:
+        for _ in range(2):
+            chunk_reader.read(remote[RAW], 0, remote._chunk_fetcher, progress=True)
+    tqdm_mock.assert_not_called()

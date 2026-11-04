@@ -996,6 +996,8 @@ def read(
     # total before a single byte moves — it measures the bytes actually transferred, not a
     # guess. Ticks arrive from worker threads; tqdm.update is thread-safe.
     total = sum(int(task[0].size) for task in tasks)
+    if small and not callable(progress):
+        progress = False  # one quick request at most: a bar would only flash by
     all_ranges = [(int(task[0].byte_offset), int(task[0].size)) for task in tasks]
     with _ticker(progress, total, all_ranges, fetcher) as on_bytes:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
