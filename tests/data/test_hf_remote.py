@@ -343,3 +343,24 @@ def test_small_reads_draw_no_progress_bar(small_cdn, monkeypatch):
         for _ in range(2):
             chunk_reader.read(remote[RAW], 0, remote._chunk_fetcher, progress=True)
     tqdm_mock.assert_not_called()
+
+
+def test_small_reads_fetch_their_blocks_concurrently(tmp_path, hub):
+    """A small read whose chunks lie in several blocks fetches those blocks together."""
+    path = _write(tmp_path / "x.hdf5", _structured())
+    server = _CountingServer(tmp_path, latency=0.05)
+    hub.location, hub.size = server.url + path.name, path.stat().st_size
+    try:
+        block = 64 << 10
+        with File(HF_PATH, progress=False, cache=False, block_size=block) as remote:
+            dset = remote[RAW]
+            chunks = [dset.id.get_chunk_info(i) for i in (3, 4)]
+            assert all(chunk.size < block for chunk in chunks)
+            assert len({chunk.byte_offset // block for chunk in chunks}) == 2
+            server.peak, before = 0, server.count
+            got = chunk_reader.read(dset, slice(3, 5), remote._chunk_fetcher)
+            with File(path) as local:
+                np.testing.assert_array_equal(got, local[RAW][3:5])
+        assert server.count - before == 2 and server.peak == 2
+    finally:
+        server.close()

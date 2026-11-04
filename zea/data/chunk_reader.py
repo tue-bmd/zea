@@ -531,15 +531,31 @@ class HTTPFetcher(Fetcher):
         transmit stored in a 7 MB chunk) go through :meth:`fetch`, as one request instead of a
         request per block.
         """
-        if self.blocks is None:
+        blocks = self.blocks
+        if blocks is None:
             return self.fetch(ranges, on_bytes)
         out: list[bytes | None] = [None] * len(ranges)
-        large = [i for i, (_, size) in enumerate(ranges) if size >= self.blocks.blocksize]
+        block_size = blocks.blocksize
+        large = [i for i, (_, size) in enumerate(ranges) if size >= block_size]
         for i, data in zip(large, self.fetch([ranges[i] for i in large], on_bytes)):
             out[i] = data
+
+        # Fetch the blocks of the small chunks together, so a read spread over many blocks
+        # costs one round trip instead of one per block. read_at keeps them for the reads below.
+        starts = {
+            start
+            for i, (offset, size) in enumerate(ranges)
+            if out[i] is None
+            for start in range(offset - offset % block_size, offset + size, block_size)
+        }
+        if len(starts) > 1:
+            workers = min(len(starts), MAX_CONCURRENT_REQUESTS)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(lambda start: blocks.read_at(start, 1), sorted(starts)))
+
         for i, (offset, size) in enumerate(ranges):
             if out[i] is None:
-                out[i] = self.blocks.read_at(int(offset), int(size))
+                out[i] = blocks.read_at(int(offset), int(size))
                 if on_bytes is not None:
                     on_bytes(int(size))
         return cast(list[bytes], out)
