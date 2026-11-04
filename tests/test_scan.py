@@ -913,8 +913,8 @@ def test_bandwidth_derived_from_probe():
     parameters.probe_bandwidth_percent = 80.0
     assert parameters.bandwidth == pytest.approx(4e6)
 
-    # Without probe_bandwidth_percent in the file, its 200 % default applies.
-    assert Parameters(center_frequency=5e6).bandwidth == pytest.approx(10e6)
+    # Without probe_bandwidth_percent in the file, its 100 % default applies.
+    assert Parameters(center_frequency=5e6).bandwidth == pytest.approx(5e6)
 
     assert "bandwidth" in Parameters(**scan_args).to_tensor(include=["bandwidth"])
 
