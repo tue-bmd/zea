@@ -66,6 +66,29 @@ class TestResolve:
         hf_remote.resolve(HF_PATH)
         assert len(hub.heads) == 2
 
+    def test_branch_reuse_is_capped_by_the_listing_ttl(self, hub, monkeypatch):
+        """A branch can move after an upload, so its URL is reused no longer than the listing.
+        A commit cannot move, so its URL is reused until it expires."""
+        from zea.internal import preset_utils
+
+        commit = "c0ffee" * 6 + "c0ff"
+        monkeypatch.setattr(preset_utils, "_HF_CACHE_TTL", 0)
+        hf_remote.resolve(HF_PATH)
+        hf_remote.resolve(HF_PATH)
+        assert len(hub.heads) == 2
+        hf_remote.resolve(HF_PATH, revision=commit)
+        hf_remote.resolve(HF_PATH, revision=commit)
+        assert len(hub.heads) == 3
+
+    def test_clearing_the_hub_caches_drops_urls(self, hub):
+        """An upload clears the hub caches, so the next open sees the new file."""
+        from zea.internal.preset_utils import _hf_clear_caches
+
+        hf_remote.resolve(HF_PATH)
+        _hf_clear_caches()
+        hf_remote.resolve(HF_PATH)
+        assert len(hub.heads) == 2
+
     def test_refresh_skips_the_cache(self, hub):
         hf_remote.resolve(HF_PATH)
         hf_remote.resolve(HF_PATH, refresh=True)

@@ -15,7 +15,9 @@ We now do what :func:`huggingface_hub.hf_hub_download` does: one HEAD request pe
 ``location``, without the ``Authorization`` header (the token is for the Hub, not the CDN).
 
 - The signed URL is treated as opaque. It is reused for :data:`URL_TTL` seconds and
-  resolved again when it expires or the CDN rejects it.
+  resolved again when it expires or the CDN rejects it. A branch or tag can point at new
+  content after an upload, so opening a file by one reuses a cached URL only as long as the
+  repo listing is cached (``ZEA_HF_CACHE_TTL``).
 - Re-resolving uses the commit of the first resolve, so the file cannot change while open.
 - Resolved URLs are cached in memory and on disk, so all threads and processes on a machine
   (e.g. one process per GPU) share them. The disk cache files are only readable by the user.
@@ -25,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -75,6 +78,21 @@ def _token_id(token: str | None) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:16] if token else "anonymous"
 
 
+def _reusable(resolved: Resolved | None, revision: str | None) -> bool:
+    """Whether a cached ``resolved`` may be used to open the file at ``revision``.
+
+    A commit cannot change, so its URL is reused until it expires. A branch or tag is reused
+    no longer than the repo listing, so the content id and the bytes read stay in step.
+    """
+    if resolved is None or not resolved.fresh:
+        return False
+    if revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision):
+        return True
+    from zea.internal.preset_utils import _HF_CACHE_TTL
+
+    return time.time() - resolved.resolved_at < _HF_CACHE_TTL
+
+
 def _origin(url: str) -> tuple[str, str]:
     parts = urlsplit(url)
     return parts.scheme, parts.netloc
@@ -89,7 +107,7 @@ def _load(key: tuple) -> Resolved | None:
         resolved = Resolved(**json.loads(_disk_path(key).read_text()))
     except (OSError, ValueError, TypeError):
         return None
-    return resolved if resolved.fresh else None
+    return resolved
 
 
 def _store(key: tuple, resolved: Resolved) -> None:
@@ -137,9 +155,9 @@ def resolve(
         if not refresh:
             with _memory_lock:
                 cached = _memory.get(key)
-            if cached is None or not cached.fresh:
+            if not _reusable(cached, revision):
                 cached = _load(key)
-            if cached is not None:
+            if cached is not None and _reusable(cached, revision):
                 with _memory_lock:
                     _memory[key] = cached
                 return cached

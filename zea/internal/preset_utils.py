@@ -179,9 +179,12 @@ _DOWNLOAD_CACHE = _TTLCache(_HF_CACHE_TTL)
 
 
 def _hf_clear_caches() -> None:
-    """Drop the memoized repository listings and resolved download paths."""
+    """Drop the memoized repository listings, resolved download paths and CDN URLs."""
     import shutil
 
+    from zea.data import hf_remote
+
+    hf_remote.clear()
     _LISTING_CACHE.clear()
     _DOWNLOAD_CACHE.clear()
     shutil.rmtree(_LISTING_DIR, ignore_errors=True)
