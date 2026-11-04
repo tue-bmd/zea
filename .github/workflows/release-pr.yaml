@@ -164,6 +164,18 @@ jobs:
           git switch -c "${BRANCH}"
           git add pyproject.toml uv.lock docs/source/changelog.rst
           git commit -m "bump version to ${TAG}"
+
+          # Maintainers fix the release notes by editing the changelog on this
+          # branch. Never force-push over such edits: only replace a branch that
+          # holds nothing but this workflow's own commit.
+          if git fetch --quiet origin "refs/heads/${BRANCH}" 2>/dev/null; then
+            others=$(git log --format='%H %ae' origin/main..FETCH_HEAD | grep -v ' 41898282+github-actions\[bot\]@users.noreply.github.com$' || true)
+            if [ -n "${others}" ]; then
+              echo "::error::${BRANCH} has commits that are not from this workflow (e.g. changelog edits); merge or close its pull request and delete the branch before re-running"
+              echo "${others}"
+              exit 1
+            fi
+          fi
           # Force so a re-run after a failed attempt replaces the stale branch
           # rather than erroring out.
           git push --force origin "${BRANCH}"
@@ -187,7 +199,7 @@ jobs:
           - \`uv.lock\`: refreshed
           - \`docs/source/changelog.rst\`: **Current** moved under \`${TAG}\` (pre-releases leave it unchanged)
 
-          The release notes below are generated from the changelog. To change them, edit \`docs/source/changelog.rst\` on this branch: the draft release is made from the merged changelog.
+          The release notes below are a snapshot, generated from the changelog when this PR was opened. To change them, edit \`docs/source/changelog.rst\` on this branch: the draft release is made from the merged changelog, so it includes those edits even though this description does not show them.
 
           After merging, the [Draft Release](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/release-draft.yaml) workflow creates a draft GitHub release tagged \`${TAG}\` with these notes. Add a short highlights paragraph at the top if you like, then publish it. This will trigger the following workflows: \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`openh-rf-latest\`, then rebuilds its docs).
 

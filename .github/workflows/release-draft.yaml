@@ -104,6 +104,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          # GitHub ignores the target commit when the tag already exists, so a tag
+          # made by hand on another commit would silently win.
+          if tagged=$(git rev-parse --verify --quiet "refs/tags/${TAG}^{commit}"); then
+            if [ "${tagged}" != "${SHA}" ]; then
+              echo "::error::tag ${TAG} already exists on ${tagged}, not on the release commit ${SHA}"
+              exit 1
+            fi
+          fi
+
           # Drafts have no tag yet, so look them up by tag name in the list.
           release=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
             --jq ".[] | select(.tag_name == \"${TAG}\") | {id, draft, html_url}" | head -n 1)
@@ -120,7 +129,8 @@ jobs:
             id=$(jq -r .id <<< "${release}")
             url=$(jq -r .html_url <<< "${release}")
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${id}" \
-              -f target_commitish="${SHA}" -F body=@"${RUNNER_TEMP}/notes.md" --silent
+              -f target_commitish="${SHA}" -F prerelease="${PRERELEASE}" \
+              -F body=@"${RUNNER_TEMP}/notes.md" --silent
             echo "Updated draft release: ${url}"
           else
             echo "::error::${TAG} is already published; not touching it"

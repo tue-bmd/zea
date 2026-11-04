@@ -12,6 +12,10 @@ the layout it relies on.
     # version that has no section yet (a pre-release) prints "Current". API
     # references link to the docs of `--docs-version` (default: v0.1.9).
     python .github/scripts/changelog.py notes 0.1.9 [--docs-version latest]
+
+    # Check that "Current" has an entry that the changelog of the base branch
+    # (here saved to base.rst) does not have. Used by the Changelog workflow.
+    python .github/scripts/changelog.py check base.rst
 """
 
 import argparse
@@ -46,7 +50,11 @@ ROLE_TYPES = {
 
 # A title line followed by an underline of at least the same length.
 HEADING = re.compile(r"^(?P<title>\S.*)\n(?P<underline>([-^])\3+)$", re.MULTILINE)
+VERSION = re.compile(r"\d+\.\d+\.\d+((a|b|rc)\d+)?")
 PRE_RELEASE = re.compile(r"\d+\.\d+\.\d+(a|b|rc)\d+")
+# An RST comment: ".." alone or followed by text, but not a directive (".. note::"),
+# link target (".. _label:") or footnote (".. [1]").
+COMMENT = re.compile(r"\.\.(?:\s+(?!_|\[)(?!\S+::).*)?")
 
 
 def heading(title, char):
@@ -101,8 +109,29 @@ def drop_empty_subsections(body):
     return "\n\n".join(part for part in kept if part)
 
 
+def strip_comments(body):
+    """Remove RST comments, e.g. commented-out draft entries, which never render."""
+    kept, in_comment = [], False
+    for line in body.splitlines():
+        if COMMENT.fullmatch(line):
+            in_comment = True
+        elif in_comment and (not line.strip() or line[0].isspace()):
+            continue
+        else:
+            in_comment = False
+            kept.append(line)
+    return "\n".join(kept)
+
+
+def entries(body):
+    """The bullet lines of a section, ignoring comments."""
+    return [
+        line.strip() for line in strip_comments(body).splitlines() if re.match(r"\s*- \S", line)
+    ]
+
+
 def has_entries(body):
-    return re.search(r"^\s*- \S", body, re.MULTILINE) is not None
+    return bool(entries(body))
 
 
 def release(version, date):
@@ -117,6 +146,7 @@ def release(version, date):
     index, body = find_section(sections, CURRENT)
     if index is None:
         sys.exit(f"{CHANGELOG.name} has no {CURRENT!r} section")
+    body = strip_comments(body)
     if not has_entries(body):
         sys.exit(f"the {CURRENT!r} section of {CHANGELOG.name} has no entries to release")
 
@@ -136,15 +166,16 @@ def load_inventory(url=INVENTORY_URL):
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             data = response.read()
-    except OSError as error:
+        # Four header lines, then zlib-compressed "name type priority uri display-name" lines.
+        lines = zlib.decompress(data.split(b"\n", 4)[4]).decode().splitlines()
+    except (OSError, IndexError, zlib.error, UnicodeDecodeError) as error:
         print(
-            f"warning: could not fetch {url} ({error}); API references will not link",
+            f"warning: could not read {url} ({error}); API references will not link",
             file=sys.stderr,
         )
         return {}
-    # Four header lines, then zlib-compressed "name type priority uri display-name" lines.
     inventory = {}
-    for line in zlib.decompress(data.split(b"\n", 4)[4]).decode().splitlines():
+    for line in lines:
         match = re.fullmatch(
             r"(?P<name>.+?)\s+(?P<type>\S+:\S+)\s+-?\d+\s+(?P<uri>\S*)\s+(?P<display>.*)", line
         )
@@ -216,10 +247,28 @@ def notes(version, docs_version):
         if not PRE_RELEASE.fullmatch(version):
             sys.exit(f"{CHANGELOG.name} has no section for v{version}")
         _, body = find_section(sections, CURRENT)
-    if not body or not has_entries(body):
+    body = strip_comments(body or "")
+    if not has_entries(body):
         sys.exit(f"no changelog entries for v{version}")
     docs_url = DOCS_URL.format(version=docs_version or f"v{version}")
     sys.stdout.write(rst_to_markdown(body, load_inventory(), docs_url))
+
+
+def check(base_path):
+    """Exit with an error unless "Current" gained an entry compared to `base_path`."""
+    _, sections = split_sections(CHANGELOG.read_text())
+    _, current = find_section(sections, CURRENT)
+    base = pathlib.Path(base_path).read_text() if pathlib.Path(base_path).is_file() else ""
+    _, base_current = (
+        find_section(split_sections(base)[1], CURRENT) if base.strip() else (None, None)
+    )
+
+    added = set(entries(current or "")) - set(entries(base_current or ""))
+    if not added:
+        sys.exit(f"no new entry under {CURRENT!r} in {CHANGELOG.name}")
+    print(f"new entries under {CURRENT!r}:")
+    for entry in sorted(added):
+        print(f"  {entry}")
 
 
 def main():
@@ -240,9 +289,20 @@ def main():
         "--docs-version",
         help="Read the Docs version API references link to (default: the released version, vX.Y.Z)",
     )
+    check_parser = commands.add_parser(
+        "check", help="check that 'Current' has a new entry compared to a base changelog"
+    )
+    check_parser.add_argument("base", help="the changelog of the base branch")
     args = parser.parse_args()
 
+    if args.command == "check":
+        check(args.base)
+        return
     version = args.version.strip().removeprefix("v")
+    if not VERSION.fullmatch(version):
+        sys.exit(
+            f"invalid version {version!r}: expected X.Y.Z, optionally followed by aN, bN or rcN"
+        )
     if args.command == "release":
         release(version, args.date)
     else:

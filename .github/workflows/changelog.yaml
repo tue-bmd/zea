@@ -1,4 +1,5 @@
-# Checks that a pull request adds an entry to `docs/source/changelog.rst`.
+# Checks that a pull request adds an entry under "Current" in
+# `docs/source/changelog.rst`, compared to the changelog of its base branch.
 #
 # Changes that users do not notice need no entry: label the PR `dev` (CI,
 # dependency bumps; Dependabot adds it), `documentation` or `skip changelog`, and
@@ -11,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   changelog:
@@ -19,25 +19,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check for a changelog entry
+      - name: Check for a skip label
+        id: labels
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           set -euo pipefail
-
           for label in "dev" "documentation" "skip changelog"; do
             if jq -e --arg label "${label}" 'index($label)' <<< "${LABELS}" > /dev/null; then
               echo "Labelled \`${label}\`: no changelog entry needed." >> "$GITHUB_STEP_SUMMARY"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
-          if gh pr diff "${PR}" --repo "${GITHUB_REPOSITORY}" --name-only | grep -qx "docs/source/changelog.rst"; then
-            echo "Found a change to \`docs/source/changelog.rst\`." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+      # The default checkout is the PR merged into the tip of the base branch, so
+      # comparing with that tip shows exactly the entries this PR adds.
+      - name: Checkout repository
+        if: steps.labels.outputs.skip == 'false'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check for a new entry under Current
+        if: steps.labels.outputs.skip == 'false'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet --depth=1 origin "${BASE_REF}"
+          # Empty when the base branch has no changelog yet.
+          git show FETCH_HEAD:docs/source/changelog.rst > "${RUNNER_TEMP}/base.rst" 2>/dev/null || true
+
+          if ! python3 .github/scripts/changelog.py check "${RUNNER_TEMP}/base.rst"; then
+            echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
+            exit 1
           fi
-
-          echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
-          exit 1
