@@ -303,11 +303,13 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 
 # Keras Layer subclasses deliberately override `call` with domain-specific
 # signatures; Keras dispatches through __call__ and never calls .call()
-# polymorphically, so this override pattern is intentional.
+# polymorphically, so this override pattern is intentional. The same holds for
+# `forward` on torch modules, which torch declares as a mutable attribute.
 [[tool.ty.overrides]]
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
 invalid-method-override = "ignore"
+invalid-mutable-override = "ignore"
 
 # torch declares `Module.forward` as a mutable attribute, which subclasses are meant to
 # override with a method. Only reported when torch is installed, so not in CI's typecheck.

@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://zea.readthedocs.io/en/latest/getting-started.html"><img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="140" alt="zea logo"></a>
+  <a href="https://zea.readthedocs.io/en/stable/getting-started.html"><img src="https://raw.githubusercontent.com/tue-bmd/zea/main/docs/_static/zea-logo.png" width="140" alt="zea logo"></a>
 </p>
 
 <h1 align="center">zea</h1>
@@ -9,7 +9,7 @@
   <a href="https://pypi.org/project/zea/"><img src="https://img.shields.io/pypi/v/zea?logo=pypi&logoColor=white&labelColor=56395B&color=FBB53E" alt="PyPI version"></a>
   <a href="https://pypi.org/project/zea/"><img src="https://img.shields.io/pypi/pyversions/zea?logo=python&logoColor=white&labelColor=56395B&color=FBB53E" alt="Python versions"></a>
   <a href="https://github.com/tue-bmd/zea/actions/workflows/tests.yaml"><img src="https://img.shields.io/github/actions/workflow/status/tue-bmd/zea/tests.yaml?branch=main&label=tests&logo=githubactions&logoColor=white&labelColor=56395B" alt="Tests"></a>
-  <a href="https://zea.readthedocs.io/en/latest/?badge=latest"><img src="https://img.shields.io/readthedocs/zea?logo=readthedocs&logoColor=white&labelColor=56395B" alt="Documentation Status"></a>
+  <a href="https://zea.readthedocs.io/en/stable/?badge=stable"><img src="https://img.shields.io/readthedocs/zea?logo=readthedocs&logoColor=white&labelColor=56395B" alt="Documentation Status"></a>
   <a href="https://codecov.io/gh/tue-bmd/zea"><img src="https://codecov.io/gh/tue-bmd/zea/branch/main/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/tue-bmd/zea/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tue-bmd/zea?labelColor=56395B&color=FBB53E" alt="License"></a>
   <a href="https://joss.theoj.org/papers/fa923917ca41761fe0623ca6c350017d"><img src="https://img.shields.io/badge/JOSS-10.21105%2Fjoss.09881-FBB53E?labelColor=56395B" alt="JOSS"></a>
@@ -20,9 +20,9 @@
 
 <p align="center">
   <a href="https://zea.readthedocs.io"><b>Documentation</b></a> ·
-  <a href="https://zea.readthedocs.io/en/latest/getting-started.html"><b>Getting Started</b></a> ·
-  <a href="https://zea.readthedocs.io/en/latest/examples.html"><b>Examples</b></a> ·
-  <a href="https://zea.readthedocs.io/en/latest/models.html"><b>Models</b></a> ·
+  <a href="https://zea.readthedocs.io/en/stable/getting-started.html"><b>Getting Started</b></a> ·
+  <a href="https://zea.readthedocs.io/en/stable/examples.html"><b>Examples</b></a> ·
+  <a href="https://zea.readthedocs.io/en/stable/models.html"><b>Models</b></a> ·
   <a href="https://huggingface.co/zeahub"><b>Datasets</b></a>
 </p>
 
@@ -42,7 +42,7 @@
 pip install zea
 ```
 
-Additionally, `zea` needs one of the Keras backends installed: [JAX](https://jax.readthedocs.io/en/latest/installation.html) (recommended), [PyTorch](https://pytorch.org/get-started/locally/), or [TensorFlow](https://www.tensorflow.org/install). See the [installation guide](https://zea.readthedocs.io/en/latest/installation.html) for details regarding more advanced installation options, such as GPU support.
+Additionally, `zea` needs one of the Keras backends installed: [JAX](https://jax.readthedocs.io/en/latest/installation.html) (recommended), [PyTorch](https://pytorch.org/get-started/locally/), or [TensorFlow](https://www.tensorflow.org/install). See the [installation guide](https://zea.readthedocs.io/en/stable/installation.html) for details regarding more advanced installation options, such as GPU support.
 
 ## Quick start
 
@@ -73,30 +73,30 @@ image = zea.display.to_8bit(image)
 image.save("bmode.png")
 ```
 
-The [Getting Started](https://zea.readthedocs.io/en/latest/getting-started.html) guide walks through this example step by step, and the [Examples](https://zea.readthedocs.io/en/latest/examples.html) page has many more notebooks you can open in Colab.
+The [Getting Started](https://zea.readthedocs.io/en/stable/getting-started.html) guide walks through this example step by step, and the [Examples](https://zea.readthedocs.io/en/stable/examples.html) page has many more notebooks you can open in Colab.
 
 ## Core modules
 
 <table>
   <tr>
-    <td nowrap>🔧&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/pipeline.html">Pipeline</a></b></td>
+    <td nowrap>🔧&nbsp;<b><a href="https://zea.readthedocs.io/en/stable/pipeline.html">Pipeline</a></b></td>
     <td>Flexible, differentiable signal processing and image reconstruction, written in your favorite deep learning framework.</td>
   </tr>
   <tr>
-    <td nowrap>💾&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/data-acquisition.html">Data</a></b></td>
+    <td nowrap>💾&nbsp;<b><a href="https://zea.readthedocs.io/en/stable/data-acquisition.html">Data</a></b></td>
     <td>Loading tools for ultrasound data and acquisition parameters, designed for deep learning workflows. Datasets on Hugging Face are streamed, so only the frames you read are fetched.</td>
   </tr>
   <tr>
-    <td nowrap>🧠&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/models.html">Models</a></b></td>
+    <td nowrap>🧠&nbsp;<b><a href="https://zea.readthedocs.io/en/stable/models.html">Models</a></b></td>
     <td>Pretrained models for ultrasound image and signal processing, hosted on <a href="https://huggingface.co/zeahub">Hugging Face</a>.</td>
   </tr>
   <tr>
-    <td nowrap>🎯&nbsp;<b><a href="https://zea.readthedocs.io/en/latest/agent.html">Agent</a></b></td>
+    <td nowrap>🎯&nbsp;<b><a href="https://zea.readthedocs.io/en/stable/agent.html">Agent</a></b></td>
     <td>Action selection for cognitive ultrasound, with flexible transmit and acquisition design: an action decides what to acquire next, such as which scan lines to fire.</td>
   </tr>
 </table>
 
-Read the [About](https://zea.readthedocs.io/en/latest/about.html) page for the motivation behind `zea` and the [research](https://zea.readthedocs.io/en/latest/about.html#papers) it supports.
+Read the [About](https://zea.readthedocs.io/en/stable/about.html) page for the motivation behind `zea` and the [research](https://zea.readthedocs.io/en/stable/about.html#papers) it supports.
 
 ## Contributing
 
@@ -104,7 +104,7 @@ Questions and suggestions are welcome as an [issue on GitHub](https://github.com
 
 ## Citation
 
-If `zea` helps your research, please cite our [JOSS paper](https://doi.org/10.21105/joss.09881). More citation info is in the [docs](https://zea.readthedocs.io/en/latest/getting-started.html#citation).
+If `zea` helps your research, please cite our [JOSS paper](https://doi.org/10.21105/joss.09881). More citation info is in the [docs](https://zea.readthedocs.io/en/stable/getting-started.html#citation).
 
 <details>
 <summary>BibTeX</summary>
