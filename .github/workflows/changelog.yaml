@@ -1,0 +1,43 @@
+# Checks that a pull request adds an entry to `docs/source/changelog.rst`.
+#
+# Changes that users do not notice need no entry: label the PR `dev` (CI,
+# dependency bumps; Dependabot adds it), `documentation` or `skip changelog`, and
+# the check passes. It re-runs when labels change, so adding one fixes a red check.
+name: Changelog
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changelog:
+    name: Changelog entry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check for a changelog entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+
+          for label in "dev" "documentation" "skip changelog"; do
+            if jq -e --arg label "${label}" 'index($label)' <<< "${LABELS}" > /dev/null; then
+              echo "Labelled \`${label}\`: no changelog entry needed." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+
+          if gh pr diff "${PR}" --repo "${GITHUB_REPOSITORY}" --name-only | grep -qx "docs/source/changelog.rst"; then
+            echo "Found a change to \`docs/source/changelog.rst\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
+          exit 1

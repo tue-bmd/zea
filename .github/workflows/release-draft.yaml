@@ -1,0 +1,130 @@
+# When a "Release vX.Y.Z" PR from `release-pr.yaml` is merged, creates a draft
+# GitHub release for it, with the release notes generated from the changelog
+# (`.github/scripts/changelog.py`) plus a "Full Changelog" compare link.
+#
+# The draft targets the merge commit on `main`, but the tag itself is only
+# created when a maintainer publishes the draft. That keeps everything that
+# follows exactly as with a release made by hand: the tag push triggers
+# `docker.yaml` and Read the Docs (`stable` and `vX.Y.Z`), and publishing triggers
+# `publish.yaml` and `release-tags.yaml`. Edit the draft (e.g. add a highlights
+# paragraph) before publishing it.
+#
+# Re-running (or dispatching by hand for a version) refreshes the notes of an
+# existing draft, and refuses to touch a release that is already published.
+name: Draft Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to draft a release for, as in pyproject.toml on main (e.g. 0.1.9)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Draft GitHub release
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged &&
+       startsWith(github.event.pull_request.head.ref, 'release/v') &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || 'main' }}
+          # The tags are needed to find the previous release for the compare link.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine version
+        id: version
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION:-${HEAD_REF#release/v}}"
+          version="${version#v}"
+
+          # The release must be cut from a commit that carries its own version.
+          current=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "${version}" != "${current}" ]; then
+            echo "::error::pyproject.toml at $(git rev-parse --short HEAD) has version ${current}, not ${version}"
+            exit 1
+          fi
+
+          prerelease=false
+          if [[ "${version}" =~ (a|b|rc)[0-9]+$ ]]; then
+            prerelease=true
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/changelog.py notes "${VERSION}" > "${RUNNER_TEMP}/notes.md"
+
+          # The most recent release tag before this one, skipping the rolling tag.
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude "${TAG}" HEAD 2>/dev/null || true)
+          if [ -n "${previous}" ]; then
+            printf '\n**Full Changelog**: %s/%s/compare/%s...%s\n' \
+              "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${previous}" "${TAG}" >> "${RUNNER_TEMP}/notes.md"
+          fi
+          cat "${RUNNER_TEMP}/notes.md"
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ steps.version.outputs.sha }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          # Drafts have no tag yet, so look them up by tag name in the list.
+          release=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | {id, draft, html_url}" | head -n 1)
+
+          if [ -z "${release}" ]; then
+            flags=()
+            if [ "${PRERELEASE}" = true ]; then
+              flags+=(--prerelease)
+            fi
+            url=$(gh release create "${TAG}" --draft --target "${SHA}" --title "${TAG}" \
+              --notes-file "${RUNNER_TEMP}/notes.md" "${flags[@]}")
+            echo "Created draft release: ${url}"
+          elif [ "$(jq -r .draft <<< "${release}")" = true ]; then
+            id=$(jq -r .id <<< "${release}")
+            url=$(jq -r .html_url <<< "${release}")
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${id}" \
+              -f target_commitish="${SHA}" -F body=@"${RUNNER_TEMP}/notes.md" --silent
+            echo "Updated draft release: ${url}"
+          else
+            echo "::error::${TAG} is already published; not touching it"
+            exit 1
+          fi
+
+          echo "Review and publish the [draft release ${TAG}](${url})." >> "$GITHUB_STEP_SUMMARY"

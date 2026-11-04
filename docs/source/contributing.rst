@@ -317,7 +317,34 @@ The overall structure of the documentation is manually designed, but the API doc
 See the `README.md <https://github.com/tue-bmd/zea/blob/main/docs/README.md>`_ for more information.
 
 
-6. Make a pull request
+.. _changelog-entry:
+
+6. Log your changes
+~~~~~~~~~~~~~~~~~~~
+
+Add a line about your change to the :doc:`changelog` in `docs/source/changelog.rst
+<https://github.com/tue-bmd/zea/blob/main/docs/source/changelog.rst>`_. Put it under the
+**Current** section, in the subsection that fits: **New Features**, **Changed** or **Fixed**.
+The release notes are generated from these entries, so write them for users: what changed and
+how it affects them, in one or two sentences.
+
+- Reference the API with roles, such as ``:class:`zea.ops.Normalize``` or ``:func:`zea.func.vmap```,
+  so the entry links to its documentation.
+- End with the pull request number and your GitHub handle: ``(:gh:`681` by :user:`your-handle`)``.
+  You can add the number once the pull request is open.
+- Start breaking changes with "(Breaking)", and deprecations with "Deprecate".
+
+.. code-block:: rst
+
+   Fixed
+   ^^^^^
+   - :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`tristan-deep`)
+
+A check on each pull request looks for a changelog entry. Changes that users will not notice,
+such as CI, tooling or refactors, need none: a maintainer labels the pull request
+``skip changelog`` (``dev`` and ``documentation`` work as well).
+
+7. Make a pull request
 ~~~~~~~~~~~~~~~~~~~~~~
 Once your changes are ready and all tests pass, push your branch to your forked repository:
 
@@ -327,20 +354,7 @@ Once your changes are ready and all tests pass, push your branch to your forked 
    git commit -m "Description of your changes"
    git push origin <your_feature_branch_name>
 
-Then, go to the original repository on GitHub and open a Pull Request (PR) from your branch. In your PR description, clearly explain what changes you made and reference any related issues.
-
-.. dropdown:: Example Pull Request Template
-
-   .. code-block:: markdown
-
-      **Title:** [Bug/Feature]: Brief summary of changes
-
-      **Description:**
-      - What changes were made?
-      - Why were these changes made?
-      - How do these changes address the issue or feature request?
-      - Any additional context or references.
-      - How to test the changes.
+Then, go to the original repository on GitHub and open a Pull Request (PR) from your branch. The description starts from a `template <https://github.com/tue-bmd/zea/blob/main/.github/pull_request_template.md>`_: explain what you changed and why as short bullets, reference any related issues, and go through the checklist.
 
 The maintainers will review your PR and may request changes or ask questions. Please respond to feedback and update your PR as needed. Once everything looks good, your changes will be merged!
 
