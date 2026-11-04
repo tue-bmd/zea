@@ -97,7 +97,7 @@ def get_ops(ops_name: str):
             "        imports:\n"
             "          - path/to/your_module.py\n"
             "or pass --import path/to/your_module.py to `zea process`. See "
-            "https://zea.readthedocs.io/en/latest/pipeline.html#custom-operations\n\n"
+            "https://zea.readthedocs.io/en/stable/pipeline.html#custom-operations\n\n"
             f"{exc.args[0]}"
         ) from exc
 
