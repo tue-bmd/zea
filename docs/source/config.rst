@@ -246,10 +246,9 @@ Angle and radius names
 zea uses two kinds of angles, in radians, both in the transducer frame (``x`` along
 the array, ``y`` across it, ``+z`` into the medium):
 
-- **Transmit directions** are spherical coordinates, as stored in the file format.
+- **Transmit directions** are `spherical coordinates <https://en.wikipedia.org/wiki/Spherical_coordinate_system>`_, as stored in the file format.
 - **Grid and scan-conversion angles** are projections onto the x-z and y-z planes, so
-  a 3D volume is a frustum that extends the 2D sector in elevation. 3D adds one name,
-  ``elevation_limits``; every 2D name keeps its meaning.
+  a 3D volume is a frustum that extends the 2D sector in elevation.
 
 .. list-table::
    :header-rows: 1
@@ -261,7 +260,7 @@ the array, ``y`` across it, ``+z`` into the medium):
    * - :math:`\theta`
      - ``polar_angles``
      - Spherical polar angle of each transmit: the angle between its direction and
-       ``+z``.
+       ``+z``, signed, positive toward ``+x``.
    * - :math:`\phi`
      - ``azimuth_angles``
      - Spherical azimuth angle of each transmit: the rotation of its direction around
@@ -281,35 +280,32 @@ the array, ``y`` across it, ``+z`` into the medium):
        toward ``+y``. Only in 3D. Defaults to the transmits' elevation angles, widened
        by 15 % of their range, or by :attr:`~zea.Parameters.elevation_margin`.
 
-A transmit points along
-:math:`(\sin\theta\cos\phi,\ \sin\theta\sin\phi,\ \cos\theta)`. Its grid angles are
-:math:`\operatorname{atan}(\tan\theta\cos\phi)` (polar) and
-:math:`\operatorname{atan}(\tan\theta\sin\phi)` (elevation), so the two coincide with
-the spherical angles only in the x-z plane (:math:`\phi = 0`) and the y-z plane
-(:math:`\phi = \pm\pi/2`). That is why the grid angles are not called ``azimuth``.
+To find where a transmit falls on the grid, convert its spherical angles:
 
-**The zea standard.** 2D data stores :math:`\phi = 0` and a *signed* :math:`\theta`,
-positive toward ``+x``, so :math:`\theta` equals the grid's polar angle. The spherical
-convention would instead keep :math:`\theta \geq 0` and steer toward ``-x`` with
-:math:`\phi = \pi`; both describe the same direction, but zea writes the signed form,
-and 3D data keeps :math:`\phi` in :math:`(-\pi/2, \pi/2]` so that the sign of
-:math:`\theta` still gives the side in ``x``.
+.. math::
+
+   \text{polar} = \operatorname{atan}(\tan\theta\cos\phi), \qquad
+   \text{elevation} = \operatorname{atan}(\tan\theta\sin\phi)
+
+A transmit steered only along the array has a grid polar angle equal to :math:`\theta`.
+Once it is also steered in elevation, the two differ.
+
+**Signed** :math:`\theta`\ **.** :math:`\theta` is stored with a sign, positive toward
+``+x``. 2D data stores :math:`\phi = 0`. 3D data keeps :math:`\phi` in :math:`(-\pi/2, \pi/2]`, so the sign of :math:`\theta` still
+gives the side in ``x``.
 
 .. note::
 
    **Physics vs. mathematics convention.** zea uses the physics convention (ISO 80000-2):
    :math:`\theta` is the polar angle from ``+z`` and :math:`\phi` the azimuth around
-   ``z``. Many mathematics texts, and some libraries, swap the symbols: :math:`\theta`
-   is the azimuth and :math:`\phi` the polar angle. When converting data, go by the
-   names ``polar_angles`` and ``azimuth_angles``, not by the symbols of the source.
+   ``z``.
 
 .. note::
 
    **Ultrasound jargon.** In ultrasound, "azimuth" usually names the *lateral* direction,
-   along the array (``x``), and "elevation" the direction across it (``y``). zea's
-   ``azimuth_angles`` is the spherical coordinate-system :math:`\phi` instead, not an
-   angle toward ``x``. "Elevation" means the same in both: ``elevation_limits`` is the
-   angle toward ``y``.
+   along the array (``x``). We instead follow the
+   `spherical coordinate system <https://en.wikipedia.org/wiki/Spherical_coordinate_system>`_ where
+   azimuth :math:`\phi` is the rotation around the ``z`` axis.
 
 
 ----------------------------
