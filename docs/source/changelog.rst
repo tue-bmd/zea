@@ -25,12 +25,29 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+- ADMIRE (Aperture Domain Model Image REconstruction), a model-based beamformer that suppresses off-axis and multipath clutter, as :class:`zea.ops.ADMIRE` or ``zea.ops.Beamform(beamformer="admire")``. See :mod:`zea.beamform.admire` (:gh:`650` by :user:`tristan-deep`)
+- UltraPIPS, a perceptual metric for B-mode ultrasound built on an ultrasound foundation model: :class:`zea.models.ultrapips.UltraPIPS`, or the ``ultrapips`` metric in :mod:`zea.metrics`, used like ``lpips`` (:gh:`649` by :user:`tristan-deep`)
+- Transparent GIFs from RGBA frames with ``transparent=True`` in :func:`zea.io_lib.save_video` and :func:`zea.io_lib.save_to_gif` (:gh:`663` by :user:`tristan-deep`)
+- GIFs that play once, with ``loop=None`` in :func:`zea.io_lib.save_to_gif` (:gh:`680` by :user:`wesselvannierop`)
+- ``zea app`` can serve over HTTPS with ``--ssl-certfile`` and ``--ssl-keyfile`` (:gh:`648` by :user:`Louisvh`)
 
 Changed
 ^^^^^^^
+- Streaming ``hf://`` datasets no longer runs into the Hugging Face rate limit, so you can train on many batches with many workers without downloading the data. The API is unchanged; two new environment variables, ``ZEA_MAX_CONCURRENT_REQUESTS`` and ``ZEA_FIND_H5_SHAPES_WORKERS``, tune it (see :doc:`environment`) (:gh:`671` by :user:`tristan-deep`)
+- Conversion scripts for EchoNet-Dynamic, CAMUS and PICMUS accept the ``.zip`` file itself. EchoNet-Dynamic reproduces the published split by default, and its polar conversion is about 15 times faster (:gh:`676` by :user:`wesselvannierop`)
+- (Breaking) In ``compute_pfield``, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
+- ``Parameters.copy()`` and ``set_transmits`` are much faster (:gh:`656` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
+- The pressure field uses the one-way transmit spectrum, averages over frequencies instead of summing, and takes the element positions from ``probe_geometry`` (:gh:`657` by :user:`wesselvannierop`)
+- ``t_peak`` estimated from ``waveforms_two_way`` uses the envelope peak; values change where the carrier peak differs from it (:gh:`656` by :user:`wesselvannierop`)
+- Conversion of Verasonics ``BS100BW`` and ``BS50BW`` data samples I and Q at the same time instants. Data converted with earlier versions, such as some Open-H-RF data, may be affected (:gh:`672` by :user:`vincentvdschaft`)
+- :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`wesselvannierop`)
+- ``waveforms_one_way`` and ``waveforms_two_way`` follow ``selected_transmits``, like the other per-transmit parameters (:gh:`683` by :user:`wesselvannierop`)
+- The shared GIF palette keeps exact colors, so pure black stays ``(0, 0, 0)`` (:gh:`680` by :user:`wesselvannierop`)
+- Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
+- Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)
 
 
 v0.1.8 (2026-10-01)

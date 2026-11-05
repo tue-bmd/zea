@@ -55,6 +55,7 @@ PRE_RELEASE = re.compile(r"\d+\.\d+\.\d+(a|b|rc)\d+")
 # An RST comment: ".." alone or followed by text, but not a directive (".. note::"),
 # link target (".. _label:") or footnote (".. [1]").
 COMMENT = re.compile(r"\.\.(?:\s+(?!_|\[)(?!\S+::).*)?")
+CODE_BLOCK = re.compile(r"\.\.\s+(?:code-block|code|sourcecode)::.*")
 
 
 def heading(title, char):
@@ -126,10 +127,17 @@ def strip_comments(body):
 
 
 def entries(body):
-    """The bullet lines of a section, ignoring comments."""
-    return [
-        line.strip() for line in strip_comments(body).splitlines() if re.match(r"\s*- \S", line)
-    ]
+    """The bullet lines of a section, ignoring comments and code examples."""
+    found, code_indent = [], None
+    for line in strip_comments(body).splitlines():
+        indent = len(line) - len(line.lstrip())
+        # A code block runs on over blank lines and lines indented deeper than its "..".
+        if code_indent is not None and (not line.strip() or indent > code_indent):
+            continue
+        code_indent = indent if CODE_BLOCK.fullmatch(line.strip()) else None
+        if code_indent is None and re.match(r"\s*- \S", line):
+            found.append(line.strip())
+    return found
 
 
 def has_entries(body):

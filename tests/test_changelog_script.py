@@ -100,6 +100,7 @@ def test_release_leaves_rest_of_file_unchanged(changelog_file):
         pytest.param("", id="empty"),
         pytest.param("..\n   - A commented-out draft entry", id="only-comments"),
         pytest.param("  .. draft\n     - An indented commented-out entry", id="indented-comment"),
+        pytest.param(".. code-block:: rst\n\n   - An example entry", id="code-block"),
     ],
 )
 def test_release_refuses_without_entries(changelog_file, current_fixed):
