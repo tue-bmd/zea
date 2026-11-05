@@ -204,27 +204,36 @@ class _RedactQueryStrings(logging.Filter):
 
 
 class RemoteReadError(OSError):
-    """A failed range request whose message had a signed URL in it (now redacted)."""
+    """A range request that failed for good, with any signed URL in its message redacted.
+
+    An ``OSError``, so callers that catch ``OSError`` to reopen a file (like
+    :class:`~zea.data.dataloader.H5DataSource`) also catch a dropped connection or a 503 that
+    outlasted the retries. aiohttp's own errors are not ``OSError``.
+    """
 
     def __init__(self, message: str, status: int | None = None):
         super().__init__(message)
         self.status = status
 
 
-def _redacted(exc: Exception) -> Exception | None:
-    """``exc`` with the query strings of its URLs redacted, or ``None`` if it has none.
+def _as_os_error(exc: Exception) -> OSError:
+    """``exc`` as an ``OSError``, with the query strings of its URLs redacted.
 
     fsspec and aiohttp put the requested URL in their errors, and a signed URL is a credential.
     """
     message = str(exc)
     redacted = _RedactQueryStrings._url.sub(r"\1?<redacted>", message)
-    if redacted == message:
-        return None
+    if redacted == message and isinstance(exc, OSError):
+        return exc
     if isinstance(exc, FileNotFoundError):
-        return FileNotFoundError(redacted)
-    if isinstance(exc, PermissionError):
-        return PermissionError(redacted)
-    return RemoteReadError(redacted, getattr(exc, "status", None))
+        error = FileNotFoundError(redacted)
+    elif isinstance(exc, PermissionError):
+        error = PermissionError(redacted)
+    else:
+        error = RemoteReadError(f"{type(exc).__name__}: {redacted}", getattr(exc, "status", None))
+    # Hide the original from the traceback only if it shows the signed URL.
+    error.__suppress_context__ = redacted != message
+    return error
 
 
 _redaction_lock = threading.Lock()
@@ -472,10 +481,7 @@ class HTTPFetcher(Fetcher):
                         url, headers = await asyncio.to_thread(self.location.current)
                         continue
                 if not _is_transient(exc) or attempt >= MAX_RETRIES:
-                    redacted = _redacted(exc)
-                    if redacted is None:
-                        raise
-                    raise redacted from None
+                    raise _as_os_error(exc)
                 from zea import log  # local, like the fallback warning below: zea imports us
 
                 status = getattr(exc, "status", None)
