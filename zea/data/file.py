@@ -1029,9 +1029,10 @@ class File(h5py.File):
                 coalesces more chunk reads into a single HTTP request — faster for
                 whole-frame reads, at the cost of more over-fetch for sparse reads.
                 Only used when ``name`` starts with ``hf://`` and ``stream=True``.
-            cache_type (str, optional): fsspec cache strategy for streaming reads
-                (default ``"blockcache"``). Only used when ``name`` starts with
-                ``hf://`` and ``stream=True``.
+            cache_type (str, optional): ``"none"`` to read exactly the requested bytes when
+                streaming, instead of whole blocks that are kept for later reads (any other
+                fsspec cache type, default ``"blockcache"``). Only used when ``name`` starts
+                with ``hf://`` and ``stream=True``.
             progress (bool or callable, optional): Report progress while streaming chunks.
                 Also settable after opening (``file.progress = True``). Defaults to ``True``
                 for streamed files, ``False`` otherwise. Reads that fall back to h5py
@@ -1134,6 +1135,12 @@ class File(h5py.File):
 
         # Initialize the h5py.File
         try:
+            # zea files keep their HDF5 metadata at the start. Fetch that block now, before
+            # h5py opens the file and takes its global lock, so threads opening different
+            # files fetch in parallel instead of one after another. Reading one byte fetches
+            # the whole block, from the chunk cache if it is there.
+            if stream_fileobj is not None and getattr(stream_fileobj, "keeps_blocks", False):
+                stream_fileobj.read_at(0, 1)
             super().__init__(name, mode, *args, **kwargs)
         except Exception:
             if stream_fileobj is not None:

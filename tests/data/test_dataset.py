@@ -479,8 +479,8 @@ def test_dataloader_lazy_hf_reads_the_requested_revision(tmp_path):
     np.testing.assert_array_equal(sample, expected)
 
 
-def test_dataloader_warns_when_stream_exceeds_chunk_cache():
-    """Streaming more than the chunk cache holds re-fetches every epoch, so it warns."""
+def test_dataloader_notes_when_stream_exceeds_chunk_cache():
+    """Streaming more than the chunk cache holds re-downloads every epoch, so it says so."""
     from zea.data import dataloader as dataloader_module
     from zea.data.dataloader import H5DataSource
 
@@ -489,31 +489,52 @@ def test_dataloader_warns_when_stream_exceeds_chunk_cache():
     with (
         patch("zea.data.datasets._hf_list_h5_files", return_value=[("file1.hdf5", oversized)]),
         patch("zea.data.datasets.Dataset.load_file_shapes", return_value=_FAKE_SHAPES),
-        patch.object(dataloader_module, "_warned_about_streaming", False),
+        patch.object(dataloader_module, "_noted_streaming", False),
+        patch.object(dataloader_module.chunk_cache, "ENABLED", True),
         patch("zea.data.dataloader.log") as mock_log,
     ):
         H5DataSource("hf://org/myrepo", key="data/image", lazy=True)
-        # Only the first loader warns: the message is about the data, not the loader.
+        # Only the first loader notes it: the message is about the data, not the loader.
         H5DataSource("hf://org/myrepo", key="data/image", lazy=True)
 
-    assert mock_log.warning.call_count == 1
-    assert "chunk cache" in mock_log.warning.call_args[0][0]
+    mock_log.warning.assert_not_called()
+    assert mock_log.info.call_count == 1
+    assert "chunk cache" in mock_log.info.call_args[0][0]
 
 
-def test_dataloader_does_not_warn_when_stream_fits_chunk_cache():
-    """A dataset the cache can hold streams without complaint."""
+def test_dataloader_does_not_note_when_stream_fits_chunk_cache():
+    """A dataset the cache can hold streams without comment."""
     from zea.data import dataloader as dataloader_module
     from zea.data.dataloader import H5DataSource
 
     with (
         patch("zea.data.datasets._hf_list_h5_files", return_value=[("file1.hdf5", 1024)]),
         patch("zea.data.datasets.Dataset.load_file_shapes", return_value=_FAKE_SHAPES),
-        patch.object(dataloader_module, "_warned_about_streaming", False),
+        patch.object(dataloader_module, "_noted_streaming", False),
         patch("zea.data.dataloader.log") as mock_log,
     ):
         H5DataSource("hf://org/myrepo", key="data/image", lazy=True)
 
-    mock_log.warning.assert_not_called()
+    mock_log.info.assert_not_called()
+
+
+def test_dataloader_does_not_note_when_chunk_cache_is_off():
+    """Without a chunk cache there is nothing to exceed."""
+    from zea.data import dataloader as dataloader_module
+    from zea.data.dataloader import H5DataSource
+
+    oversized = dataloader_module.chunk_cache.MAX_BYTES + 1
+
+    with (
+        patch("zea.data.datasets._hf_list_h5_files", return_value=[("file1.hdf5", oversized)]),
+        patch("zea.data.datasets.Dataset.load_file_shapes", return_value=_FAKE_SHAPES),
+        patch.object(dataloader_module, "_noted_streaming", False),
+        patch.object(dataloader_module.chunk_cache, "ENABLED", False),
+        patch("zea.data.dataloader.log") as mock_log,
+    ):
+        H5DataSource("hf://org/myrepo", key="data/image", lazy=True)
+
+    mock_log.info.assert_not_called()
 
 
 def test_dataset_hf_large_warns_about_gb_size(tmp_path):
@@ -643,3 +664,36 @@ class TestValidation:
 
         with pytest.raises(ValueError, match="broken.hdf5"):
             Folder(folder, validate=True)
+
+
+class TestSweepWorkers:
+    """The parallel per-file sweeps use a bounded, configurable number of processes."""
+
+    def test_default_is_bounded(self, monkeypatch):
+        from zea.data import datasets
+
+        monkeypatch.delenv("ZEA_FIND_H5_SHAPES_WORKERS", raising=False)
+        monkeypatch.setattr(datasets.os, "cpu_count", lambda: 256)
+        assert datasets._sweep_workers(10_000) == datasets._DEFAULT_SWEEP_WORKERS
+
+    def test_environment_variable(self, monkeypatch):
+        from zea.data import datasets
+
+        monkeypatch.setenv("ZEA_FIND_H5_SHAPES_WORKERS", "5")
+        monkeypatch.setattr(datasets.os, "cpu_count", lambda: 256)
+        assert datasets._sweep_workers(10_000) == 5
+
+    def test_never_more_than_cores_or_files(self, monkeypatch):
+        from zea.data import datasets
+
+        monkeypatch.setenv("ZEA_FIND_H5_SHAPES_WORKERS", "64")
+        monkeypatch.setattr(datasets.os, "cpu_count", lambda: 8)
+        assert datasets._sweep_workers(10_000) == 8
+        assert datasets._sweep_workers(3) == 3
+
+    def test_bad_value_falls_back(self, monkeypatch):
+        from zea.data import datasets
+
+        monkeypatch.setenv("ZEA_FIND_H5_SHAPES_WORKERS", "lots")
+        monkeypatch.setattr(datasets.os, "cpu_count", lambda: 256)
+        assert datasets._sweep_workers(10_000) == datasets._DEFAULT_SWEEP_WORKERS
