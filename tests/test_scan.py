@@ -951,9 +951,11 @@ def test_bandwidth_per_transmit_center_frequency():
     assert np.ndim(uniform.bandwidth) == 0
     assert uniform.bandwidth == pytest.approx(3e6)
 
-    # Varying per transmit: the derived bandwidth stays per transmit.
+    # Varying per transmit: no bandwidth is derived, but an explicit one is still used.
     varying = Parameters(center_frequency=np.array([4e6, 5e6]), probe_bandwidth_percent=50.0)
-    np.testing.assert_allclose(varying.bandwidth, [2e6, 2.5e6])
+    assert varying.bandwidth is None
+    varying.bandwidth = 2e6
+    assert varying.bandwidth == pytest.approx(2e6)
 
 
 # --- distance_to_apex ---

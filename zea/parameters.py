@@ -861,8 +861,8 @@ class Parameters(BaseParameters):
 
         The filter operations design one set of taps, so they need a scalar. A per-transmit
         ``center_frequency`` that is the same for every transmit gives a scalar bandwidth; when
-        it varies across transmits, the derived bandwidth is per transmit as well, and
-        ``bandwidth`` should be set explicitly for these filters.
+        it varies across transmits, no bandwidth is derived (``None``), and ``bandwidth`` must be
+        set explicitly for these filters.
         """
         if self._params.get("bandwidth") is not None:
             return self._params["bandwidth"]
@@ -870,8 +870,9 @@ class Parameters(BaseParameters):
         bandwidth = self.center_frequency * self.probe_bandwidth_percent / 100
         if np.ndim(bandwidth) > 0:
             per_transmit = np.asarray(bandwidth)
-            if per_transmit.size > 0 and np.all(per_transmit == per_transmit.flat[0]):
-                return per_transmit.flat[0]
+            if per_transmit.size == 0 or np.any(per_transmit != per_transmit.flat[0]):
+                return None
+            return per_transmit.flat[0]
         return bandwidth
 
     @cache_with_dependencies("selected_transmits")

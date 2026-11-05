@@ -386,6 +386,35 @@ def test_filter_bandwidth_from_parameters():
         np.testing.assert_allclose(overridden, call_level, rtol=1e-5, atol=1e-6)
 
 
+@pytest.mark.parametrize(
+    "operation, kwargs",
+    [
+        (
+            ops.LowPassFilterIQ(num_taps=31),
+            {"center_frequency": 0.0, "bandwidth": np.array([2e6, 2.5e6])},
+        ),
+        (
+            ops.LowPassFilterIQ(num_taps=31),
+            {"center_frequency": 0.0, "bandwidth": None},
+        ),
+        (
+            ops.BandPassFilter(num_taps=31),
+            {"demodulation_frequency": np.array([4e6, 5e6]), "bandwidth": 2e6},
+        ),
+        (
+            ops.BandPassFilter(num_taps=31),
+            {"demodulation_frequency": 5e6, "bandwidth": None},
+        ),
+    ],
+)
+def test_filters_reject_per_transmit_inputs(operation, kwargs):
+    """The filters design one set of taps, so per-transmit or missing inputs raise clearly."""
+    n_ch = 2 if isinstance(operation, ops.LowPassFilterIQ) else 1
+    data = np.ones((1, 64, 2, n_ch), dtype=np.float32)
+    with pytest.raises(ValueError, match="bandwidth|scalar"):
+        operation(data=data, sampling_frequency=20e6, **kwargs)
+
+
 def test_fixed_band_pass_filter_without_center_frequency():
     """A fixed passband does not require deriving a bandwidth."""
     pipeline = Pipeline([ops.BandPassFilter(passband=(3e6, 7e6), num_taps=31)])
