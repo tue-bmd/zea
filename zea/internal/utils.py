@@ -227,6 +227,36 @@ def atomic_write(path, suffix=None):
         raise
 
 
+def load_json_cache(path, max_age: float):
+    """The JSON stored at `path` by :func:`store_json_cache`, or ``None`` if it is missing,
+    unreadable or older than `max_age` seconds."""
+    import json
+    import time
+
+    path = Path(path)
+    try:
+        if time.time() - path.stat().st_mtime >= max_age:
+            return None
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def store_json_cache(path, data) -> None:
+    """Store `data` as JSON at `path`, readable only by this user, for
+    :func:`load_json_cache`. A failure is logged, not raised: the cache is optional."""
+    import json
+
+    path = Path(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # atomic_write goes through mkstemp, so the file is private to this user (0600).
+        with atomic_write(path, suffix=".part") as tmp:
+            tmp.write_text(json.dumps(data))
+    except OSError as exc:
+        log.debug(f"Could not write the cache file {path}: {exc}")
+
+
 def calculate_file_hash(file_path, omit_line_str=None):
     """Calculates the hash of a file.
 
