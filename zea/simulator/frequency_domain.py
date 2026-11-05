@@ -8,8 +8,8 @@ of the record, with the one-way responses shared by every transmit.
    and the probe and freeze them.
 3. ``_scene_positions`` casts the scatterers and, in 2D, moves them into the imaging plane.
 4. ``n_fft`` is taken as given or bounded from the concrete inputs (``_fft_bound`` and
-   :func:`~zea.simulator.smooth_size` of :mod:`~zea.simulator.record`).
-5. :func:`~zea.simulator.band_bins` keeps the bins the pulses and the scattering reach.
+   :func:`~zea.simulator.record.smooth_size` of :mod:`~zea.simulator.record`).
+5. :func:`~zea.simulator.record.band_bins` keeps the bins the pulses and the scattering reach.
 6. Scatterers are chunked to the memory budget. Per chunk, ``_ray_means`` takes the mean
    slowness and attenuation of every ray once, then ``_band_spectrum`` loops over frequency
    blocks calling ``_rf_block``: the element responses, the record gate, and the two einsums
@@ -336,12 +336,14 @@ def simulate_rf(
                 "zea.Parameters.n_fft)."
             )
         n_fft = smooth_size(bound())
-    elif map_np is not None and is_concrete and int(n_fft) < bound():
+    elif map_np is not None and is_concrete:
         # A map stretches the echoes of a scatterer; a length sized without it may wrap them.
-        log.warning(
-            f"n_fft ({int(n_fft)}) is shorter than the {bound()} samples the sound speed map "
-            "needs to keep every echo from wrapping into the record; see fft_length."
-        )
+        needed = bound()
+        if int(n_fft) < needed:
+            log.warning(
+                f"n_fft ({int(n_fft)}) is shorter than the {needed} samples the sound speed map "
+                "needs to keep every echo from wrapping into the record; see fft_length."
+            )
     n_fft = int(n_fft)
     if n_fft < int(n_ax):
         raise ValueError(f"n_fft ({n_fft}) must be at least n_ax ({int(n_ax)}).")

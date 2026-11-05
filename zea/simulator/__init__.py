@@ -140,13 +140,11 @@ from zea.simulator.pulse import (
     transmit_pulses,
 )
 from zea.simulator.record import (
-    band_bins,
     fft_length,
     in_record,
     record_bounds,
     record_reach,
     scatter_exponent_bounds,
-    smooth_size,
 )
 from zea.simulator.response import attenuate, min_distance, obliquity_factor, spread
 from zea.simulator.time_domain import simulate_rf_td
@@ -181,7 +179,5 @@ __all__ = [
     "record_bounds",
     "in_record",
     "fft_length",
-    "smooth_size",
-    "band_bins",
     "scatter_exponent_bounds",
 ]

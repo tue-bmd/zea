@@ -572,7 +572,7 @@ def _ray_means(
         map_grid_x,
         map_grid_z,
         medium.attenuation_coef,
-        grid_y=map_grid_y,
+        map_grid_y=map_grid_y,
         n_samples=int(n_samples),
     )
     return slowness, attenuation

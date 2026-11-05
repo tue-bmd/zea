@@ -353,7 +353,6 @@ class Parameters(BaseParameters):
     # Add some defaults that are not stored in a file
     _RENAMED_PARAMS: ClassVar[dict[str, str]] = {
         "sos_grid_x": "map_grid_x",
-        "sos_grid_y": "map_grid_y",
         "sos_grid_z": "map_grid_z",
     }
 

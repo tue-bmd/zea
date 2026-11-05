@@ -15,6 +15,7 @@ import pytest
 import zea
 from zea.ops import Pipeline, Simulate
 from zea.probes import create_curved_probe_geometry, curved_probe_normals
+from zea.simulator.record import smooth_size
 from zea.simulator import (
     fft_length,
     in_record,
@@ -22,7 +23,6 @@ from zea.simulator import (
     record_reach,
     simulate_rf,
     simulate_rf_td,
-    smooth_size,
     transmit_pulse,
     transmit_pulses,
 )
@@ -454,13 +454,12 @@ def test_simulate_op_methods():
         op(**kwargs, method="exact_slab")
 
 
-def test_simulate_op_rejects_the_removed_elevation_keywords():
-    """``call`` takes ``**kwargs``, which would swallow the removed names."""
+def test_simulate_op_rejects_the_removed_elevation_keyword():
+    """``call`` takes ``**kwargs``, which would swallow the removed name."""
     kwargs = tensors(CASES["linear"])
     op = Simulate(jit_compile=False, with_batch_dim=False)
-    for name in ("elevation_lens", "elevation_slab_2d"):
-        with pytest.raises(TypeError, match=name):
-            op(**kwargs, **{name: True})
+    with pytest.raises(TypeError, match="elevation_lens"):
+        op(**kwargs, elevation_lens=True)
 
 
 def test_simulate_op_accepts_the_old_method_names(caplog, reset_warning_once):

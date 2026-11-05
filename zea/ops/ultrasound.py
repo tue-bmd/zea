@@ -260,8 +260,6 @@ class Simulate(Operation):
                 "`elevation_lens` was removed. Use `two_dimensional` for a 2D simulation, or "
                 "`elevation_focus` for a physical cylindrical elevation lens."
             )
-        if "elevation_slab_2d" in merged:
-            raise TypeError("`elevation_slab_2d` was renamed to `two_dimensional`.")
         if isinstance(merged.get("scatter_exponent"), (list, tuple)):
             # As an array it is traced whole; jit would trace a list element by element.
             merged["scatter_exponent"] = np.asarray(merged["scatter_exponent"])

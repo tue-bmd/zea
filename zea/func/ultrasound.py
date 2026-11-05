@@ -695,10 +695,10 @@ def straight_ray_mean(
     positions,
     element_positions,
     values,
-    grid_x,
-    grid_z,
+    map_grid_x,
+    map_grid_z,
     background,
-    grid_y=None,
+    map_grid_y=None,
     n_samples=64,
 ):
     """Mean of a map along the straight ray from each element to each position.
@@ -716,9 +716,9 @@ def straight_ray_mean(
         positions,
         element_positions,
         values,
-        grid_x,
-        grid_z,
-        grid_y,
+        map_grid_x,
+        map_grid_z,
+        map_grid_y,
         n_samples,
         lambda v, inside: ops.where(inside, v, background),
     )
