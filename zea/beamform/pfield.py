@@ -112,7 +112,12 @@ def compute_pfield(
             of shape (n_tx, grid_size_z, grid_size_x).
     """
     # medium params: attenuation dB/(cm·MHz) -> Np/(cm·MHz) -> Np/(m·Hz)
-    attenuation_coef = float(attenuation_coef) / 8.686 * 1e2 / 1e6
+    attenuation_coef = float(attenuation_coef)
+    if not (np.isfinite(attenuation_coef) and attenuation_coef >= 0):
+        raise ValueError(
+            f"`attenuation_coef` must be finite and non-negative, got {attenuation_coef!r}"
+        )
+    attenuation_coef = attenuation_coef / 8.686 * 1e2 / 1e6
 
     # Element orientation (theta) is assumed zero and sub-elements are laid out along x.
     geometry = ops.convert_to_numpy(probe_geometry)
@@ -335,8 +340,9 @@ def compute_pfield(
     # itself set above from max(t0_delays), so a bare sum would depend on which
     # transmits are in the stack -- times the element width, whose square root is the
     # amplitude factor of Eq. (36). Like PFIELD we integrate over ordinary frequency,
-    # so there is no 2 pi against Eq. (42)'s Δω. No effect when norm=True.
-    pressure_squared = pressure_squared * freq_step * element_width
+    # so there is no 2 pi against Eq. (42)'s Δω. The step is taken at the true frequency,
+    # since downmixing shrinks the band by the same factor. No effect when norm=True.
+    pressure_squared = pressure_squared * (freq_step * downmix) * element_width
 
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
