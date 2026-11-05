@@ -7,6 +7,7 @@ check that a pull request adds an entry.
 
 import importlib.util
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -173,3 +174,46 @@ def test_check_requires_a_new_entry_under_current(changelog_file, tmp_path):
         changelog.check(base)
     changelog_file.write_text(make_changelog(f"{ENTRY}\n- Another fix (:gh:`700` by :user:`b`)"))
     changelog.check(base)
+
+
+def test_load_inventory(tmp_path):
+    """Reads a Sphinx objects.inv; urllib also opens file:// URLs, so no network is needed."""
+    lines = [
+        "zea.ops.Normalize py:class 1 _autosummary/zea.ops.html#$ -",
+        "environment std:doc -1 environment.html Environment variables",
+    ]
+    header = b"# Sphinx inventory version 2\n# Project: zea\n# Version: \n# zlib below\n"
+    inventory_path = tmp_path / "objects.inv"
+    inventory_path.write_bytes(header + zlib.compress("\n".join(lines).encode()))
+
+    inventory = changelog.load_inventory(inventory_path.as_uri())
+    assert inventory["zea.ops.Normalize"] == [
+        ("py:class", "_autosummary/zea.ops.html#zea.ops.Normalize", "zea.ops.Normalize")
+    ]
+    assert inventory["environment"] == [("std:doc", "environment.html", "Environment variables")]
+
+    # An unreadable inventory gives notes without links instead of failing a release.
+    inventory_path.write_bytes(b"not an inventory")
+    assert changelog.load_inventory(inventory_path.as_uri()) == {}
+    assert changelog.load_inventory((tmp_path / "missing.inv").as_uri()) == {}
+
+
+def test_command_line(changelog_file, tmp_path, monkeypatch, capsys):
+    def run(*args):
+        monkeypatch.setattr(sys, "argv", ["changelog.py", *args])
+        changelog.main()
+
+    changelog_file.write_text(make_changelog(ENTRY))
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+
+    run("check", str(base))
+    run("release", "v0.1.9", "--date", "2026-11-05")
+    assert "v0.1.9 (2026-11-05)" in changelog_file.read_text()
+
+    capsys.readouterr()
+    run("notes", "0.1.9", "--docs-version", "latest")
+    assert "/en/latest/" in capsys.readouterr().out
+
+    with pytest.raises(SystemExit, match="invalid version"):
+        run("release", "0.1.9foo")
