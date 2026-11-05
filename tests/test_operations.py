@@ -386,6 +386,15 @@ def test_filter_bandwidth_from_parameters():
         np.testing.assert_allclose(overridden, call_level, rtol=1e-5, atol=1e-6)
 
 
+def test_fixed_band_pass_filter_without_center_frequency():
+    """A fixed passband does not require deriving a bandwidth."""
+    pipeline = Pipeline([ops.BandPassFilter(passband=(3e6, 7e6), num_taps=31)])
+    parameters = Parameters(sampling_frequency=20e6, demodulation_frequency=5e6)
+    inputs = pipeline.prepare_parameters(parameters)
+    data = np.ones((1, 64, 2, 1), dtype=np.float32)
+    assert pipeline(data=data, **inputs)["data"].shape == data.shape
+
+
 @pytest.mark.parametrize(
     "factor, batch_size",
     [

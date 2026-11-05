@@ -738,6 +738,14 @@ class BandPassFilter(FirFilter):
         self.num_taps = num_taps
         self.passband = passband
 
+    @property
+    def needs_keys(self):
+        keys = super().needs_keys
+        if self.passband is not None:
+            # A manually set passband bypasses automatic frequency and bandwidth computation.
+            return keys - {"bandwidth", "demodulation_frequency"}
+        return keys
+
     def call(
         self,
         sampling_frequency,
