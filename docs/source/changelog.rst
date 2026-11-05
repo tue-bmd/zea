@@ -3,7 +3,7 @@
 Changelog
 =========
 
-This changelog is for the ``main`` branch. It lists the changes in each release, with the pull request and author of each change. Changes merged since the last release are listed under **Current**. Older releases are also on `GitHub Releases <https://github.com/tue-bmd/zea/releases>`_.
+This changelog is for the ``main`` branch. It lists the changes in each release, with the pull request and author of each change. Changes merged since the last release are listed under **Current**; to add one, see :ref:`changelog-entry` in the contributing guide. Older releases are also on `GitHub Releases <https://github.com/tue-bmd/zea/releases>`_.
 
 ..
    To add an entry, follow the "Log your changes" step in contributing.rst: one bullet
