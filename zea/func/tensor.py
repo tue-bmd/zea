@@ -487,9 +487,10 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
         none_indexes = [i for i, arg in enumerate(args) if arg is None]
         args = _moveaxes(args, _in_axes, zeros)
 
-        # Build function with None arguments prefilled
+        # Build function with None arguments prefilled. The last wrapper created runs first,
+        # so wrap in reverse order to insert the None arguments from the lowest index up.
         _prefilled_none_fn = fun
-        for none_idx in none_indexes:
+        for none_idx in reversed(none_indexes):
             _prefilled_none_fn = _partial_at(_prefilled_none_fn, none_idx, None)
 
         def _fun(args):

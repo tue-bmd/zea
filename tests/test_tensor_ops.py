@@ -637,6 +637,60 @@ def test_vmap_none_arg():
     return result
 
 
+@pytest.mark.parametrize(
+    "none_pattern",
+    [
+        (False, True),
+        (True, False),
+        (False, True, True),
+        (True, True, False),
+        (True, False, True),
+        (False, True, True, False),
+        (True, True, True, False),
+        (False, True, False, True, False),
+        (True, False, True, False, True),
+    ],
+)
+@pytest.mark.parametrize(
+    "vmap_kwargs",
+    [
+        {},
+        {"disable_jit": True},
+        {"batch_size": 2},
+        {"chunks": 2},
+        {"batch_size": 2, "fn_supports_batch": True, "disable_jit": True},
+    ],
+)
+@backend_equality_check()
+def test_vmap_none_arg_positions(none_pattern, vmap_kwargs):
+    """`vmap` should pass every argument at its own position, wherever the `None`s are."""
+    from keras import ops
+
+    import zea
+
+    n_samples = 4
+    # A distinct value per argument, so that a shifted argument changes the result.
+    args = [
+        None if is_none else ops.full((n_samples, 1), float(i + 1))
+        for i, is_none in enumerate(none_pattern)
+    ]
+
+    def func(*fn_args):
+        assert [arg is None for arg in fn_args] == list(none_pattern)
+        real_arg = next(arg for arg in fn_args if arg is not None)
+        return ops.stack(
+            [ops.zeros_like(real_arg) if arg is None else arg for arg in fn_args], axis=-1
+        )
+
+    result = ops.convert_to_numpy(zea.func.vmap(func, **vmap_kwargs)(*args))
+
+    expected = [0.0 if is_none else float(i + 1) for i, is_none in enumerate(none_pattern)]
+    assert result.shape == (n_samples, 1, len(none_pattern))
+    np.testing.assert_array_equal(result[0, 0], expected)
+
+    return result
+
+
 @backend_equality_check()
 def test_simple_map_one_input():
     """Test the `zea` `simple_map` function against `keras.ops.map`."""
