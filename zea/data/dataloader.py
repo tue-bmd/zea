@@ -64,30 +64,34 @@ _MAX_LISTED_FILES = 5
 #: What a loader does with files it cannot serve: refuse to build, or drop them.
 _FILE_POLICIES = ("error", "skip")
 
-#: Whether this process already warned about streaming more than the chunk cache holds.
+#: Whether this process already noted that the streamed data exceeds the chunk cache.
 #: That is a property of the data, so repeating it for every loader only adds noise.
-_warned_about_streaming = False
+_noted_streaming = False
 
 
-def _warn_if_stream_exceeds_chunk_cache(remote_bytes: int) -> None:
-    """Warn when streamed files cannot all fit in the on-disk chunk cache.
+def _note_if_stream_exceeds_chunk_cache(remote_bytes: int) -> None:
+    """Note when the streamed files are larger than the on-disk chunk cache.
 
-    Only the chunks a read touches are ever fetched, so a loader that reads a slice of
-    each file (``axis_selections``, ``limit_n_frames``) stays well under this bound -- but
-    when the part being read does exceed the cache, an LRU that never gets to serve a hit
-    turns every epoch into a fresh download. Downloading the files once is cheaper then.
+    Then each epoch downloads again whatever it reads. That is fine (streamed reads go to the
+    CDN and are not rate limited, see :mod:`zea.data.hf_remote`), but for many epochs over a
+    dataset that fits on disk, downloading it once with ``lazy=False`` is cheaper. Compares
+    whole file sizes, so a loader that reads only part of each file (``axis_selections``,
+    ``limit_n_frames``) may well fit anyway.
     """
-    global _warned_about_streaming
-    if _warned_about_streaming or not remote_bytes or remote_bytes <= chunk_cache.MAX_BYTES:
+    global _noted_streaming
+    if (
+        _noted_streaming
+        or not chunk_cache.ENABLED
+        or not remote_bytes
+        or remote_bytes <= chunk_cache.MAX_BYTES
+    ):
         return
-    _warned_about_streaming = True
-    log.warning(
+    _noted_streaming = True
+    log.info(
         f"Streaming {remote_bytes / 1e9:.1f} GB of hf:// files, more than the "
-        f"{chunk_cache.MAX_BYTES / 1e9:.1f} GB chunk cache "
-        "(zea.data.chunk_cache, ZEA_CHUNK_CACHE_SIZE). Reading all of it repeatedly will "
-        "evict chunks before they are re-read, so every epoch re-fetches them. Pass "
-        "lazy=False to download the files once instead. Reading only part of each file "
-        "(axis_selections, limit_n_frames) may still fit."
+        f"{chunk_cache.MAX_BYTES / 1e9:.1f} GB chunk cache (ZEA_CHUNK_CACHE_SIZE), so each "
+        "epoch downloads the data it reads again. For many epochs over a dataset that fits "
+        "on disk, lazy=False downloads it once instead."
     )
 
 
@@ -604,7 +608,7 @@ class H5DataSource:
             _suggest_lazy=False,
             **kwargs,
         )
-        _warn_if_stream_exceeds_chunk_cache(_dataset.remote_bytes)
+        _note_if_stream_exceeds_chunk_cache(_dataset.remote_bytes)
         self.file_paths = _dataset.file_paths
         # Requested metadata paths are checked in the same sweep that reads the shapes,
         # so a file that cannot answer surfaces here rather than mid-epoch.
@@ -1079,13 +1083,13 @@ class Dataloader:
         revision: HuggingFace revision (branch, tag, or commit hash) for ``hf://`` paths.
             Defaults to ``None`` (uses the default branch, typically ``"main"``).
         lazy: Stream ``hf://`` files over HTTP instead of downloading them up front.
-            Default is ``True``: a read fetches only the chunks it touches, so reading a
-            slice of a few large files costs a fraction of them, and the bytes land in the
+            Default is ``True``: a read fetches only the chunks it touches, so you can train
+            on datasets too large to download. Streamed reads go to the Hugging Face CDN,
+            which is not rate limited (see :mod:`zea.data.hf_remote`), and land in the
             on-disk chunk cache (:mod:`zea.data.chunk_cache`) for the next read. Pass
-            ``False`` to download every file in full before the pipeline is built, which
-            is the better trade for training: shuffled access over a dataset larger than
-            that cache re-fetches it every epoch, and a bulk download is both faster per
-            byte and resumable. Ignored for local paths.
+            ``False`` to download every file in full before the pipeline is built. That pays
+            off for many epochs over a dataset that fits on disk, since streaming downloads
+            again whatever no longer fits in the cache. Ignored for local paths.
         shard_index: Shard index to select when ``num_shards > 1``.
             Must satisfy ``0 <= shard_index < num_shards``.
         num_shards: Total number of shards for distributed loading.
