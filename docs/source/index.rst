@@ -64,6 +64,7 @@ Check out the :doc:`about` page for the motivation behind ``zea`` and the :ref:`
    getting-started
    installation
    examples
+   best-practices
 
 .. toctree::
    :caption: Development
