@@ -110,38 +110,29 @@ def drop_empty_subsections(body):
     return "\n\n".join(part for part in kept if part)
 
 
-def strip_comments(body):
-    """Remove RST comments, e.g. commented-out draft entries, which never render."""
-    kept, comment_indent = [], None
+def strip_blocks(body, start):
+    """Remove each block whose first line matches `start`, e.g. a comment or code block."""
+    kept, block_indent = [], None
     for line in body.splitlines():
         indent = len(line) - len(line.lstrip())
-        # A comment runs on over blank lines and lines indented deeper than its "..".
-        if comment_indent is not None and (not line.strip() or indent > comment_indent):
+        # A block runs on over blank lines and lines indented deeper than its "..".
+        if block_indent is not None and (not line.strip() or indent > block_indent):
             continue
-        if COMMENT.fullmatch(line.strip()):
-            comment_indent = indent
-        else:
-            comment_indent = None
+        block_indent = indent if start.fullmatch(line.strip()) else None
+        if block_indent is None:
             kept.append(line)
     return "\n".join(kept)
 
 
+def strip_comments(body):
+    """Remove RST comments, e.g. commented-out draft entries, which never render."""
+    return strip_blocks(body, COMMENT)
+
+
 def entries(body):
     """The bullet lines of a section, ignoring comments and code examples."""
-    found, code_indent = [], None
-    for line in strip_comments(body).splitlines():
-        indent = len(line) - len(line.lstrip())
-        # A code block runs on over blank lines and lines indented deeper than its "..".
-        if code_indent is not None and (not line.strip() or indent > code_indent):
-            continue
-        code_indent = indent if CODE_BLOCK.fullmatch(line.strip()) else None
-        if code_indent is None and re.match(r"\s*- \S", line):
-            found.append(line.strip())
-    return found
-
-
-def has_entries(body):
-    return bool(entries(body))
+    body = strip_blocks(strip_comments(body), CODE_BLOCK)
+    return [line.strip() for line in body.splitlines() if re.match(r"\s*- \S", line)]
 
 
 def release(version, date):
@@ -157,7 +148,7 @@ def release(version, date):
     if index is None:
         sys.exit(f"{CHANGELOG.name} has no {CURRENT!r} section")
     body = strip_comments(body)
-    if not has_entries(body):
+    if not entries(body):
         sys.exit(f"the {CURRENT!r} section of {CHANGELOG.name} has no entries to release")
 
     empty_current = "\n".join(heading(title, "^") for title in SUBSECTIONS).rstrip("\n")
@@ -258,7 +249,7 @@ def notes(version, docs_version):
             sys.exit(f"{CHANGELOG.name} has no section for v{version}")
         _, body = find_section(sections, CURRENT)
     body = strip_comments(body or "")
-    if not has_entries(body):
+    if not entries(body):
         sys.exit(f"no changelog entries for v{version}")
     docs_url = DOCS_URL.format(version=docs_version or f"v{version}")
     sys.stdout.write(rst_to_markdown(body, load_inventory(), docs_url))

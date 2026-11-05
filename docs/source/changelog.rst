@@ -6,13 +6,8 @@ Changelog
 This changelog is for the ``main`` branch. It lists the changes in each release, with the pull request and author of each change. Changes merged since the last release are listed under **Current**. Older releases are also on `GitHub Releases <https://github.com/tue-bmd/zea/releases>`_.
 
 ..
-   How to add an entry (see also the "Log your changes" step in contributing.rst):
-
-   - Add one bullet under the matching subsection of "Current": New Features, Changed or Fixed.
-   - Write it for users: what changed and how it affects them, in one or two sentences.
-   - Reference the API with roles, e.g. :class:`zea.ops.Normalize`, :func:`zea.func.vmap`, :mod:`zea.simulator`.
-   - End with the PR number and your GitHub handle: (:gh:`681` by :user:`your-handle`).
-   - Prefix breaking changes with "(Breaking)". Deprecations go under Changed, starting with "Deprecate".
+   To add an entry, follow the "Log your changes" step in contributing.rst: one bullet
+   under the matching subsection of "Current", ending with (:gh:`681` by :user:`your-handle`).
 
    The "Release PR" workflow moves "Current" under a new version heading. It uses
    .github/scripts/changelog.py, which relies on the heading layout below: keep the

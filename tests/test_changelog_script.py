@@ -79,7 +79,7 @@ def test_release_moves_current_under_new_version(changelog_file):
     assert titles == ["Current", "v0.1.9 (2026-11-05)", "v0.1.8 (2026-10-01)"]
 
     current, released = sections[0][1], sections[1][1]
-    assert not changelog.has_entries(current)
+    assert not changelog.entries(current)
     assert "Changed" in current  # a fresh Current has all subsections
     assert ENTRY in released
     assert "New Features" not in released  # empty subsections are dropped

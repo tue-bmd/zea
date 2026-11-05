@@ -332,7 +332,7 @@ how it affects them, in one or two sentences.
   so the entry links to its documentation.
 - End with the pull request number and your GitHub handle: ``(:gh:`681` by :user:`your-handle`)``.
   You can add the number once the pull request is open.
-- Start breaking changes with "(Breaking)", and deprecations with "Deprecate".
+- Start breaking changes with "(Breaking)". Deprecations go under **Changed**, starting with "Deprecate".
 
 .. code-block:: rst
 
