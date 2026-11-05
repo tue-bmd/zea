@@ -10,7 +10,7 @@ import keras
 import numpy as np
 from keras import ops
 
-from zea.beamform.geometry import compute_element_normals, is_focused
+from zea.beamform.geometry import _is_focused, compute_element_normals, is_focused
 from zea.beamform.lens_correction import compute_lens_corrected_travel_times
 from zea.func.tensor import vmap
 from zea.internal.checks import _check_raw_data
@@ -811,8 +811,9 @@ def transmit_delays(
         weight = ops.clip((signed + half_length) / denom, 0.0, 1.0)
         blended = (1.0 - weight) * t_first + weight * t_last
 
-        is_focused = ops.logical_and(ops.isfinite(focus_distance), focus_distance > 0.0)
-        in_focal_region = ops.logical_and(is_focused, ops.abs(signed) < half_length)
+        in_focal_region = ops.logical_and(
+            _is_focused(focus_distance, xp=ops), ops.abs(signed) < half_length
+        )
         apply_blend = ops.logical_and(use_blend, in_focal_region)
         tx_delay = ops.where(apply_blend, blended, tx_delay)
 
