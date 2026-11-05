@@ -306,9 +306,7 @@ def aliasing_limits(
     ``f`` over the band, ``r`` over the receive cone (set by ``f_number``) and
     ``t`` over the transmit rays (see :func:`transmit_direction_bounds`) gives the
     image's k-space support, as in the k-space description of pulse-echo imaging by
-    Walker and Trahey, IEEE Trans. Ultrason. Ferroelectr. Freq. Control 45 (3),
-    pp. 541-558, 1998, https://doi.org/10.1109/58.677599. The limits follow from
-    its bounding box:
+    Walker and Trahey. The limits follow from its bounding box:
 
     - Lateral: ``dx <= 1 / (k_x_max - k_x_min)``, about ``lambda_min * F / 2``
       for equal transmit and receive apertures. Elevational ``dy`` likewise.
@@ -323,6 +321,8 @@ def aliasing_limits(
     normal (as in :func:`zea.beamform.beamformer.fnumber_mask`), so it is widened
     by the largest tilt. Directivity is then not applied, since it too is relative
     to each element's normal.
+
+    .. citation:: walker1998application
 
     Args:
         sound_speed: Speed of sound in m/s.
