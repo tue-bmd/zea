@@ -585,7 +585,7 @@ def vmap(
             otherwise it should match the length of the mapped inputs.
         _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
             Advantage: you can apply `vmap` multiple times without issues.
-            Disadvantage: does not support None arguments.
+            Disadvantage: does not support None arguments or outputs.
     Returns:
         A function that applies `fun` in a batched manner over the specified axes.
     """
