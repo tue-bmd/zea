@@ -27,6 +27,7 @@ New Features
 - Transparent GIFs from RGBA frames with ``transparent=True`` in :func:`zea.io_lib.save_video` and :func:`zea.io_lib.save_to_gif` (:gh:`663` by :user:`tristan-deep`)
 - GIFs that play once, with ``loop=None`` in :func:`zea.io_lib.save_to_gif` (:gh:`680` by :user:`wesselvannierop`)
 - ``zea app`` can serve over HTTPS with ``--ssl-certfile`` and ``--ssl-keyfile`` (:gh:`648` by :user:`Louisvh`)
+- Frequency-dependent attenuation in the pressure field, with ``attenuation_coef`` in dB/(cm·MHz) in :func:`zea.beamform.pfield.compute_pfield`. It defaults to 0 (lossless) (:gh:`682` by :user:`wesselvannierop`)
 
 Changed
 ^^^^^^^

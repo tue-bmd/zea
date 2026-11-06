@@ -87,7 +87,7 @@ def compute_pfield(
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
-            Default is 1.
+            Default is 1. Values above roughly 10 can overflow float32, giving NaN.
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
             Higher is more aggressive. Default is 10.
         norm (bool, optional): per pixel normalization over the transmit axis (True)
