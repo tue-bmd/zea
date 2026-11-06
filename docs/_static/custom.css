@@ -38,3 +38,17 @@ body[data-theme="dark"] .admonition.citation-admonition {
 .admonition.citation-admonition p.citation-entry:last-child {
   margin-bottom: 0;
 }
+
+/* examples.rst -- each section heading already names its group, so hide the
+   group page's own toctree entry and list its notebooks directly below the
+   heading. The entry is still needed for the sidebar's grouping. */
+.notebook-group > ul,
+.notebook-group > ul > li {
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.notebook-group > ul > li > a {
+  display: none;
+}
