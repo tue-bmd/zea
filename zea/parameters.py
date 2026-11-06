@@ -928,6 +928,31 @@ class Parameters(BaseParameters):
 
         return self.center_frequency
 
+    @cache_with_dependencies("center_frequency", "probe_bandwidth_percent")
+    def bandwidth(self):
+        """The signal bandwidth in Hz, used by filter operations such as
+        :class:`~zea.ops.LowPassFilterIQ` and :class:`~zea.ops.BandPassFilter`.
+
+        If not set explicitly, it is derived from the probe metadata as
+        ``center_frequency * probe_bandwidth_percent / 100``. When the file does not store
+        ``probe_bandwidth_percent``, its default applies.
+
+        The filter operations design one set of taps, so they need a scalar. A per-transmit
+        ``center_frequency`` that is the same for every transmit gives a scalar bandwidth; when
+        it varies across transmits, no bandwidth is derived (``None``), and ``bandwidth`` must be
+        set explicitly for these filters.
+        """
+        if self._params.get("bandwidth") is not None:
+            return self._params["bandwidth"]
+
+        bandwidth = self.center_frequency * self.probe_bandwidth_percent / 100
+        if np.ndim(bandwidth) > 0:
+            per_transmit = np.asarray(bandwidth)
+            if per_transmit.size == 0 or np.any(per_transmit != per_transmit.flat[0]):
+                return None
+            return per_transmit.flat[0]
+        return bandwidth
+
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
         """Polar angles for each transmit event in radians of shape (n_tx,).

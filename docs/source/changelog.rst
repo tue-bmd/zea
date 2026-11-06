@@ -27,6 +27,7 @@ New Features
 - Transparent GIFs from RGBA frames with ``transparent=True`` in :func:`zea.io_lib.save_video` and :func:`zea.io_lib.save_to_gif` (:gh:`663` by :user:`tristan-deep`)
 - GIFs that play once, with ``loop=None`` in :func:`zea.io_lib.save_to_gif` (:gh:`680` by :user:`wesselvannierop`)
 - ``zea app`` can serve over HTTPS with ``--ssl-certfile`` and ``--ssl-keyfile`` (:gh:`648` by :user:`Louisvh`)
+- :class:`zea.ops.BandPassFilter` and :class:`zea.ops.LowPassFilterIQ` take their ``bandwidth`` from the new :attr:`zea.Parameters.bandwidth`, derived as ``center_frequency * probe_bandwidth_percent / 100`` unless set or ``center_frequency`` varies across transmits (:gh:`644` by :user:`tristan-deep`)
 
 Changed
 ^^^^^^^
@@ -35,6 +36,7 @@ Changed
 - (Breaking) In ``compute_pfield``, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
 - ``Parameters.copy()`` and ``set_transmits`` are much faster (:gh:`656` by :user:`wesselvannierop`)
 - (Breaking) The check on cartesian beamforming grids uses per-axis limits from the image's k-space support instead of λ/2, see :doc:`notebooks/pipeline/kspace_aliasing_example`. Auto-sized grids get one more pixel per axis (:gh:`673` by :user:`wesselvannierop`)
+- The default ``probe_bandwidth_percent`` is 100 instead of 200, which also narrows the band used by ``compute_pfield`` (:gh:`644` by :user:`tristan-deep`)
 
 Fixed
 ^^^^^
