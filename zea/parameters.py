@@ -153,7 +153,12 @@ class Parameters(BaseParameters):
     """Nominal center frequency of the probe [Hz]."""
 
     probe_bandwidth_percent: float
-    """Probe bandwidth as a percentage of the center frequency. Defaults to 200.0."""
+    """Probe bandwidth as a percentage of the center frequency. Defaults to 100.0."""
+
+    bandwidth: float
+    """Width of the RF band kept by processing [Hz], centered on the
+    ``demodulation_frequency``. Used by :class:`~zea.ops.BandPassFilter` and by
+    :meth:`check_for_aliasing`."""
 
     n_el: int
     """Number of elements in the transducer array."""
@@ -312,6 +317,7 @@ class Parameters(BaseParameters):
         "n_tx": {"dtype": np.int32},
         "n_ax": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
+        "bandwidth": {"dtype": np.float32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
@@ -325,7 +331,7 @@ class Parameters(BaseParameters):
 
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
-    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
+    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 100.0
     # Give these a default of None (rather than leaving them unset) so that they can be
     # declared as dependencies of computed properties (e.g. t_peak, n_waveforms) without
     # tripping MissingDependencyError
@@ -843,6 +849,31 @@ class Parameters(BaseParameters):
             return self._params["demodulation_frequency"]
 
         return self.center_frequency
+
+    @cache_with_dependencies("center_frequency", "probe_bandwidth_percent")
+    def bandwidth(self):
+        """The signal bandwidth in Hz, used by filter operations such as
+        :class:`~zea.ops.LowPassFilterIQ` and :class:`~zea.ops.BandPassFilter`.
+
+        If not set explicitly, it is derived from the probe metadata as
+        ``center_frequency * probe_bandwidth_percent / 100``. When the file does not store
+        ``probe_bandwidth_percent``, its default applies.
+
+        The filter operations design one set of taps, so they need a scalar. A per-transmit
+        ``center_frequency`` that is the same for every transmit gives a scalar bandwidth; when
+        it varies across transmits, no bandwidth is derived (``None``), and ``bandwidth`` must be
+        set explicitly for these filters.
+        """
+        if self._params.get("bandwidth") is not None:
+            return self._params["bandwidth"]
+
+        bandwidth = self.center_frequency * self.probe_bandwidth_percent / 100
+        if np.ndim(bandwidth) > 0:
+            per_transmit = np.asarray(bandwidth)
+            if per_transmit.size == 0 or np.any(per_transmit != per_transmit.flat[0]):
+                return None
+            return per_transmit.flat[0]
+        return bandwidth
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):

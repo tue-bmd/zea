@@ -28,6 +28,7 @@ New Features
 - GIFs that play once, with ``loop=None`` in :func:`zea.io_lib.save_to_gif` (:gh:`680` by :user:`wesselvannierop`)
 - ``zea app`` can serve over HTTPS with ``--ssl-certfile`` and ``--ssl-keyfile`` (:gh:`648` by :user:`Louisvh`)
 - Frequency-dependent attenuation in the pressure field, with ``attenuation_coef`` in dB/(cm·MHz) in :func:`zea.beamform.pfield.compute_pfield`. It defaults to 0 (lossless) (:gh:`682` by :user:`wesselvannierop`)
+- :class:`zea.ops.BandPassFilter` and :class:`zea.ops.LowPassFilterIQ` take their ``bandwidth`` from the new :attr:`zea.Parameters.bandwidth`, derived as ``center_frequency * probe_bandwidth_percent / 100`` unless set or ``center_frequency`` varies across transmits (:gh:`644` by :user:`tristan-deep`)
 
 Changed
 ^^^^^^^
@@ -35,6 +36,7 @@ Changed
 - Conversion scripts for EchoNet-Dynamic, CAMUS and PICMUS accept the ``.zip`` file itself. EchoNet-Dynamic reproduces the published split by default, and its polar conversion is about 15 times faster (:gh:`676` by :user:`wesselvannierop`)
 - (Breaking) In ``compute_pfield``, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
 - ``Parameters.copy()`` and ``set_transmits`` are much faster (:gh:`656` by :user:`wesselvannierop`)
+- The default ``probe_bandwidth_percent`` is 100 instead of 200, which also narrows the band used by ``compute_pfield`` (:gh:`644` by :user:`tristan-deep`)
 
 Fixed
 ^^^^^
