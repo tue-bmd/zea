@@ -7,9 +7,15 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from zea.beamform.geometry import element_pitch
 from zea.data.file import File
 from zea.internal.registry import probe_registry
-from zea.probes import Probe, _resolve_element_width
+from zea.probes import (
+    Probe,
+    _resolve_element_width,
+    create_curved_probe_geometry,
+    create_probe_geometry,
+)
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
@@ -136,6 +142,32 @@ def test_pitch_rejects_coinciding_elements():
         Probe.get_pitch(np.zeros((4, 3), dtype=np.float32))
 
 
+def test_pitch_of_curved_array():
+    """The pitch of a curved array is measured along the array, and gives a kerf too."""
+    geometry = create_curved_probe_geometry(n_el=64, pitch=0.3e-3, radius=0.05)
+    probe = Probe(probe_geometry=geometry, element_width=0.27e-3)
+    assert probe.pitch == pytest.approx(0.3e-3, rel=1e-4)
+    assert probe.kerf == pytest.approx(0.03e-3, rel=1e-2)
+
+
+def test_pitch_rejects_non_uniform_spacing():
+    """Unevenly spaced elements and matrix arrays have no single pitch."""
+    uneven = create_probe_geometry(n_el=8, pitch=0.3e-3)
+    uneven[4:, 0] += 1e-3
+    x, y = np.meshgrid(np.arange(4) * 0.3e-3, np.arange(4) * 0.3e-3)
+    matrix = np.stack([x.ravel(), y.ravel(), np.zeros(16)], axis=1)
+    for geometry in (uneven, matrix):
+        with pytest.raises(ValueError, match="not uniformly spaced"):
+            Probe.get_pitch(geometry)
+
+
+def test_pitch_matches_element_pitch():
+    """Probe.pitch and the element-width inference use the same pitch on float32 geometry."""
+    geometry = create_probe_geometry(n_el=128, pitch=0.3e-3).astype(np.float32)
+    assert Probe.get_pitch(geometry) == element_pitch(geometry)
+    assert _resolve_element_width(geometry, None) == 0.9 * Probe.get_pitch(geometry)
+
+
 def test_resolve_element_width():
     """An explicit element width is returned as is; otherwise 90% of the pitch."""
     pg = np.zeros((4, 3), dtype=np.float32)
@@ -148,6 +180,17 @@ def test_resolve_element_width_invalid_geometry():
     """Inference from a geometry without a pitch raises a helpful error."""
     with pytest.raises(ValueError, match="automatic estimation failed"):
         _resolve_element_width(np.zeros((1, 3), dtype=np.float32), None)
+
+
+def test_resolve_element_width_curved_and_coinciding_geometry():
+    """The pitch is measured along the array, so a curved array gets an estimate too;
+    coinciding elements have no pitch to estimate from."""
+    from zea.probes import create_curved_probe_geometry
+
+    curved = create_curved_probe_geometry(n_el=64, pitch=0.3e-3, radius=0.05)
+    assert _resolve_element_width(curved, None) == pytest.approx(0.27e-3, rel=1e-3)
+    with pytest.raises(ValueError, match="automatic estimation failed"):
+        _resolve_element_width(np.zeros((4, 3), dtype=np.float32), None)
 
 
 def test_resolve_element_width_unconvertible_geometry():

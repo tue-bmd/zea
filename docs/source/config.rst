@@ -154,38 +154,158 @@ are accepted and passed through unchanged.
 Defining a beamforming grid
 ----------------------------
 
-The extent of the final produced image is defined by :attr:`~zea.Parameters.xlims` and :attr:`~zea.Parameters.zlims`. For a cartesian beamforming grid (``grid_type="cartesian"``) this is also the extent of the beamforming grid. For a polar grid (``grid_type="polar"``) the rays fan out from an apex a distance :attr:`~zea.Parameters.distance_to_apex` *behind* the transducer surface. The ``rlims`` (radii from the apex) are then derived from :attr:`~zea.Parameters.zlims` and the ``distance_to_apex`` offset. The final image after scan conversion is then defined by :attr:`~zea.Parameters.xlims` and :attr:`~zea.Parameters.zlims` again.
+A :class:`zea.Parameters` object builds a default beamforming grid from what a file
+records: the probe geometry, the transmits (``polar_angles``, ``transmit_origins`` and
+``focus_distances``) and the record length. You choose the grid type with ``grid_type``
+and ``enable_scanline``, and can tune the result with a few overrides. Positions are in
+the transducer frame: ``z = 0`` at the middle of the array, ``+z`` into the medium, and
+angles measured from ``+z``, positive toward ``+x`` (see :ref:`angle-conventions`).
+
+:attr:`~zea.Parameters.zlims`
+   Depths below the transducer. Defaults to the end of the record,
+   ``sound_speed * n_ax / sampling_frequency / 2``.
+
+:attr:`~zea.Parameters.xlims`
+   The lateral extent of the grid. For a cartesian grid it covers what the transmits
+   insonify down to ``zlims[1]``, and at least the probe width. For a polar grid it is the
+   width of the sector; an explicit value sets the width of the scan-converted image
+   instead (crop or pad).
+
+:attr:`~zea.Parameters.grid_apex`
+   The point a polar grid fans out from, ``(0, 0, -d)`` on the central axis at or behind
+   the array. It is derived from where the transmits fan out from: the point where steered
+   transmit axes meet (the middle of the array, a virtual apex behind a flat array whose
+   transmits are spread over it, or a curved array's centre of curvature), the virtual
+   source of unsteered diverging waves, or else a curved array's centre of curvature.
+
+:attr:`~zea.Parameters.polar_limits`
+   The angles of the first and last column of a polar grid: the range of the transmit
+   angles, widened to cover what the transmits insonify at ``zlims[1]``. A focused
+   transmit adds no margin; plane and diverging waves widen it. Set
+   :attr:`~zea.Parameters.polar_margin` to widen by a fixed angle instead.
+
+:attr:`~zea.Parameters.rlims`
+   The radii of the first and last row of a polar grid, measured from the apex:
+   ``zlims - grid_apex[2]``. Scan conversion reads the polar image through ``rlims`` and
+   ``polar_limits``.
+
+:attr:`~zea.Parameters.extent`
+   For a polar grid, the window the scan-converted image fills: ``xlims`` wide, and on a
+   flat array starting at ``zlims[0]``, which crops what a virtual apex places behind the
+   array.
+
+:attr:`~zea.Parameters.enable_scanline`
+   One column per focused transmit: a polar grid at the transmit angles when their axes
+   meet in one point, or a vertical column under each transmit when they are parallel.
+
+:attr:`~zea.Parameters.f_number`
+   The receive cone of each element. Defaults to the element's -6 dB acceptance angle, so
+   0 (no cone) for most phased arrays. It masks pixels but does not change the grid.
+
+Both figures below are drawn by the pixel grid explorer, a JavaScript port of the code
+checked against reference values computed by zea (``docs/explorer``). **Open the
+explorer** on either one to change the probe, transmits and overrides; the address then
+holds every setting, so you can share a link to the exact grid.
 
 .. raw:: html
 
-   <div style="display: flex; flex-direction: column; align-items: center; margin: 3em 0;">
-     <!-- Dark mode image -->
-     <img
-       src="_static/pixelgrid-Dark.svg"
-       alt="Polar pixel grid geometry: xlims, zlims, rlims and distance_to_apex"
-       style="display: none; width: 85%; padding-bottom: 1em;"
-       class="only-dark"
-     />
-     <!-- Light mode image -->
-     <img
-       src="_static/pixelgrid-Light.svg"
-       alt="Polar pixel grid geometry: xlims, zlims, rlims and distance_to_apex"
-       style="display: none; width: 85%; padding-bottom: 1em;"
-       class="only-light"
-     />
-     <div style="text-align: center; font-style: italic; color: var(--color-foreground-secondary, #666);">
-        The pixel grid of a polar <code>zea.Parameters</code> object on a curved probe.
-     </div>
-   </div>
+   <script>
+     // The explorer posts its content height, so each iframe fits the compact or
+     // expanded view.
+     window.addEventListener("message", (event) => {
+       if (!event.data || event.data.type !== "zea-explorer-height") return;
+       for (const frame of document.querySelectorAll("iframe.pixel-grid-explorer")) {
+         if (frame.contentWindow === event.source) frame.style.height = `${event.data.height}px`;
+       }
+     });
+   </script>
    <style>
-     @media (prefers-color-scheme: dark) {
-       .only-dark { display: block !important; }
-     }
-     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
-       .only-light { display: block !important; }
-     }
+     iframe.pixel-grid-explorer { display: block; width: 100%; height: 520px; border: 0; }
    </style>
 
+   <figure style="margin: 2em 0;">
+     <iframe class="pixel-grid-explorer" loading="lazy"
+             src="_static/pixel-grid-explorer.html?preset=curved-docs-figure&amp;view=compact"
+             title="Polar pixel grid of a curved array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"></iframe>
+     <figcaption><p>A polar grid on a curved array fans out from its centre of curvature.</p></figcaption>
+   </figure>
+
+   <figure style="margin: 2em 0;">
+     <iframe class="pixel-grid-explorer" loading="lazy"
+             src="_static/pixel-grid-explorer.html?preset=phased-docs-figure&amp;view=compact"
+             title="Polar pixel grid of a flat phased array: probe_geometry, grid_apex, rlims, polar_limits, zlims, xlims and extent"></iframe>
+     <figcaption><p>Focused lines that leave from across a phased array: their axes meet behind it in a virtual apex, and the grid fans out from there.</p></figcaption>
+   </figure>
+
+
+.. _angle-conventions:
+
+Angle and radius names
+~~~~~~~~~~~~~~~~~~~~~~
+
+zea uses two kinds of angles, in radians, both in the transducer frame (``x`` along
+the array, ``y`` across it, ``+z`` into the medium):
+
+- **Transmit directions** are `spherical coordinates <https://en.wikipedia.org/wiki/Spherical_coordinate_system>`_, as stored in the file format.
+- **Grid and scan-conversion angles** are projections onto the x-z and y-z planes, so
+  a 3D volume is a frustum that extends the 2D sector in elevation.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 30 56
+
+   * - Symbol
+     - Name
+     - Meaning
+   * - :math:`\theta`
+     - ``polar_angles``
+     - Spherical polar angle of each transmit: the angle between its direction and
+       ``+z``, signed, positive toward ``+x``.
+   * - :math:`\phi`
+     - ``azimuth_angles``
+     - Spherical azimuth angle of each transmit: the rotation of its direction around
+       ``z``, from ``+x``. Zero for 2D imaging.
+   * - :math:`r`, :math:`\rho`
+     - ``rlims``
+     - Radius from :attr:`~zea.Parameters.grid_apex`, of the first and last row [m].
+       Not the depth: :attr:`~zea.Parameters.zlims` is measured from the array, so
+       ``rlims = zlims - grid_apex[2]``.
+   * - :math:`\operatorname{atan}(x/z)`
+     - ``polar_limits``
+     - Polar angle of the first and last column of a polar grid, signed, positive toward
+       ``+x``. In 3D, the angle of the projection onto the x-z plane.
+   * - :math:`\operatorname{atan}(y/z)`
+     - ``elevation_limits``
+     - Elevation angle of the first and last sample of a 3D frustum, signed, positive
+       toward ``+y``. Only in 3D. Defaults to the transmits' elevation angles, widened
+       by 15 % of their range, or by :attr:`~zea.Parameters.elevation_margin`.
+
+To find where a transmit falls on the grid, convert its spherical angles:
+
+.. math::
+
+   \text{polar} = \operatorname{atan}(\tan\theta\cos\phi), \qquad
+   \text{elevation} = \operatorname{atan}(\tan\theta\sin\phi)
+
+A transmit steered only along the array has a grid polar angle equal to :math:`\theta`.
+Once it is also steered in elevation, the two differ.
+
+**Signed** :math:`\theta`\ **.** :math:`\theta` is stored with a sign, positive toward
+``+x``. 2D data stores :math:`\phi = 0`. 3D data keeps :math:`\phi` in :math:`(-\pi/2, \pi/2]`, so the sign of :math:`\theta` still
+gives the side in ``x``.
+
+.. note::
+
+   **Physics vs. mathematics convention.** zea uses the physics convention (ISO 80000-2):
+   :math:`\theta` is the polar angle from ``+z`` and :math:`\phi` the azimuth around
+   ``z``.
+
+.. note::
+
+   **Ultrasound jargon.** In ultrasound, "azimuth" usually names the *lateral* direction,
+   along the array (``x``). We instead follow the
+   `spherical coordinate system <https://en.wikipedia.org/wiki/Spherical_coordinate_system>`_ where
+   azimuth :math:`\phi` is the rotation around the ``z`` axis.
 
 
 ----------------------------

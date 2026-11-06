@@ -8,10 +8,11 @@ import pytest
 from keras import ops
 
 from zea import Parameters
+from zea.beamform.geometry import element_pitch
 from zea.beamform.pfield import compute_pfield
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
-from zea.probes import Probe, create_curved_probe_geometry
+from zea.probes import create_curved_probe_geometry
 
 scan_args = {
     "n_tx": 10,
@@ -256,62 +257,46 @@ def test_xlims_unsteered_hugs_aperture(focus):
     assert np.allclose(parameters.xlims, aperture)
 
 
-@pytest.mark.parametrize(
-    "focus_distances, polar_angles",
-    [
-        ([-np.inf], [0.25]),
-        ([0.05, 0.05], [0.75, 0]),
-        ([-0.05], [0.0]),
-    ],
-)
-def test_xlims_fans_out_by_fnumber(focus_distances, polar_angles):
-    """Steered or diverging transmits use the f-number cone to select xlims."""
-    parameters = Parameters(**_xlims_scan_args(focus_distances, polar_angles))
+def test_xlims_covers_a_steered_plane_wave():
+    """A plane wave insonifies the strip leaving the array ends along its angle, so the
+    far edge of that strip at the deepest pixel sets xlims; the probe sets the other side."""
+    angle, depth, edge = 0.25, 0.12, 0.019
+    parameters = Parameters(**_xlims_scan_args([np.inf], [angle]))
 
-    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
-    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
-    reach = max(parameters.zlims) / (2 * parameters.f_number)
-    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
+    assert np.allclose(parameters.xlims, (-edge, edge + depth * np.tan(angle)))
 
 
-def test_xlims_scales_with_fnumber():
+def test_xlims_covers_a_diverging_wave():
+    """A diverging wave fans out from its virtual source through the array ends."""
+    focus, depth, edge = -0.05, 0.12, 0.019
+    parameters = Parameters(**_xlims_scan_args([focus], [0.0]))
+
+    reach = edge * (depth - focus) / -focus
+    assert np.allclose(parameters.xlims, (-reach, reach))
+
+
+def test_xlims_covers_focused_axes():
+    """A focused transmit insonifies a narrow beam along its axis, adding no width."""
+    angle, depth, edge = 0.75, 0.12, 0.019
+    parameters = Parameters(**_xlims_scan_args([0.05, 0.05], [angle, 0.0]))
+
+    assert np.allclose(parameters.xlims, (-edge, depth * np.tan(angle)))
+
+
+def test_xlims_ignores_the_receive_cone():
+    """xlims follows what the transmits insonify; f_number only masks the receive side."""
     args = _xlims_scan_args([-0.02], [0.0])
     narrow = Parameters(**args, f_number=2.0)
-    wide = Parameters(**args, f_number=1.0)
+    wide = Parameters(**args, f_number=0.5)
 
-    assert narrow.xlims[0] > wide.xlims[0]
-    assert narrow.xlims[1] < wide.xlims[1]
-
-
-def test_xlims_zero_fnumber_uses_45_degree_cone():
-    """``f_number=0`` disables the receive mask, so a 45 degree cone is used instead."""
-    args = _xlims_scan_args([-0.02], [0.0])
-    parameters = Parameters(**args, f_number=0.0)
-
-    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
-    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
-    reach = max(parameters.zlims)
-    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
-
-
-def test_xlims_limited_by_record_length():
-    args = _xlims_scan_args([-0.02], [0.0])
-    args["n_ax"] = 1024
-    parameters = Parameters(**args, f_number=0.0)  # 45 degree cone
-
-    max_range = args["sound_speed"] * args["n_ax"] / args["sampling_frequency"] / 2
-    reach = max_range * np.sin(np.pi / 4)
-    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
-    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
-
-    assert reach < max(parameters.zlims)  # the depth-limited cone would reach further
-    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
+    assert np.allclose(narrow.xlims, wide.xlims)
 
 
 def test_xlims_curved_probe_widens_with_element_tilt():
-    """A curved array's edge elements tilt outward, so xlims should also widen."""
+    """An unsteered plane wave on a curved array leaves the end elements along their
+    outward-tilted normals, so xlims widens with the tilt."""
     n_el, pitch, radius = 64, 1.6e-4, 0.03  # arc of +-10 degrees
-    args = _xlims_scan_args([np.inf, np.inf], np.asarray([-0.3, 0.0], dtype=np.float32))
+    args = _xlims_scan_args([np.inf], [0.0])
     args.update(
         n_el=n_el,
         n_ax=16384,
@@ -322,11 +307,31 @@ def test_xlims_curved_probe_widens_with_element_tilt():
 
     tilt = (n_el - 1) * pitch / 2 / radius
     edge_x, edge_z = radius * np.sin(tilt), radius * np.cos(tilt) - radius
-    half_angle = np.arctan(1 / (2 * parameters.f_number))
-    expected = edge_x + (max(parameters.zlims) - edge_z) * np.tan(tilt + half_angle)
+    expected = edge_x + (max(parameters.zlims) - edge_z) * np.tan(tilt)
 
-    assert np.allclose(parameters.xlims, (-expected, expected), rtol=1e-2)
-    assert expected > edge_x + max(parameters.zlims) / (2 * parameters.f_number)
+    assert np.allclose(parameters.xlims, (-expected, expected), rtol=1e-3)
+
+
+def test_xlims_of_a_polar_grid_is_the_sector_width():
+    """For a polar grid, xlims describes the sector: its corners at the deepest row."""
+    args = _xlims_scan_args([0.05] * 3, [-0.4, 0.0, 0.4])
+    parameters = Parameters(**args, grid_type="polar")
+
+    outer_radius = max(parameters.zlims) - parameters.grid_apex[2]
+    sector = outer_radius * np.sin(0.4)
+    assert np.allclose(parameters.xlims, (-sector, sector), rtol=1e-5)
+    grid_x = parameters.grid[..., 0]
+    assert np.allclose(parameters.xlims, (grid_x.min(), grid_x.max()), rtol=1e-5)
+
+
+def test_xlims_of_a_cartesian_scanline_grid_spans_its_columns():
+    """Unsteered focused lines walking across the array: xlims spans the line positions."""
+    origins = np.zeros((5, 3), np.float32)
+    origins[:, 0] = np.linspace(-0.01, 0.01, 5)
+    args = _xlims_scan_args([0.03] * 5, [0.0] * 5)
+    parameters = Parameters(**args, transmit_origins=origins, enable_scanline=True)
+
+    assert np.allclose(parameters.xlims, (-0.01, 0.01))
 
 
 def test_xlims_unsteered_ignores_angle_noise():
@@ -819,7 +824,7 @@ def test_pfield_infers_element_width():
         grid=parameters.grid,
         t0_delays=parameters.t0_delays,
     )
-    pitch = Probe.get_pitch(parameters.probe_geometry)
+    pitch = element_pitch(parameters.probe_geometry)
     inferred = ops.convert_to_numpy(compute_pfield(**kwargs))
     explicit = ops.convert_to_numpy(compute_pfield(**kwargs, element_width=0.9 * pitch))
     np.testing.assert_allclose(inferred, explicit)
@@ -958,49 +963,265 @@ def test_bandwidth_per_transmit_center_frequency():
     assert varying.bandwidth == pytest.approx(2e6)
 
 
-# --- distance_to_apex ---
+# --- grid apex, polar limits and the image window ---
 
 
-def test_distance_to_apex_fitted_from_curved_probe():
-    """Left unset, the apex distance is the curved probe's radius of curvature."""
-    from zea.probes import create_curved_probe_geometry
+def _phased(n_tx=65, span_deg=45.0, focus=0.06, origins="middle", **kwargs):
+    """A flat 64-element phased array (0.3 mm pitch, 2.5 MHz) with a sector of transmits.
 
+    ``origins="middle"`` launches every transmit from the middle of the array;
+    ``origins="spread"`` places them on the array so their axes meet behind it, with the
+    outermost transmit leaving an end element (a virtual-apex scan).
+    """
+    from zea.probes import create_probe_geometry
+
+    probe_geometry = create_probe_geometry(n_el=64, pitch=0.3e-3)
+    span = np.radians(span_deg)
+    angles = np.zeros(n_tx) if n_tx == 1 else np.linspace(-span, span, n_tx)
+    transmit_origins = np.zeros((n_tx, 3))
+    if origins == "spread":
+        half_aperture = np.ptp(probe_geometry[:, 0]) / 2
+        transmit_origins[:, 0] = half_aperture / np.tan(span) * np.tan(angles)
+    args = dict(
+        probe_geometry=probe_geometry,
+        n_el=64,
+        n_tx=n_tx,
+        center_frequency=2.5e6,
+        sampling_frequency=10e6,
+        n_ax=1300,
+        grid_type="polar",
+        polar_angles=angles,
+        transmit_origins=transmit_origins,
+        focus_distances=np.full(n_tx, focus),
+    )
+    args.update(kwargs)
+    return Parameters(**args)
+
+
+HALF_APERTURE = 63 * 0.3e-3 / 2
+
+
+def test_radius_of_curvature_is_fitted_from_a_curved_probe():
     radius = 49.57e-3
     parameters = Parameters(
         probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius)
     )
-    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
+    assert parameters.radius_of_curvature == pytest.approx(radius, rel=1e-5)
 
 
-def test_distance_to_apex_is_zero_for_a_flat_probe():
-    """A linear or phased array fans out from the transducer surface itself."""
+def test_radius_of_curvature_is_infinite_for_a_flat_probe_or_none():
     from zea.probes import create_probe_geometry
 
-    parameters = Parameters(probe_geometry=create_probe_geometry(n_el=128, pitch=0.3e-3))
-    assert parameters.distance_to_apex == 0.0
+    flat = Parameters(probe_geometry=create_probe_geometry(n_el=128, pitch=0.3e-3))
+    assert np.isinf(flat.radius_of_curvature)
+    assert np.isinf(Parameters().radius_of_curvature)
 
 
-def test_distance_to_apex_is_zero_without_probe_geometry():
-    """Nothing to fit, so fall back to an apex at the transducer surface."""
-    assert Parameters().distance_to_apex == 0.0
+def test_grid_apex_is_the_centre_of_curvature_of_a_curved_probe():
+    """Without transmits that define an apex, a curved array fans out from its centre."""
+    radius = 49.57e-3
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius)
+    )
+    assert parameters.grid_apex.shape == (3,)
+    np.testing.assert_allclose(parameters.grid_apex, (0.0, 0.0, -radius), rtol=1e-5)
 
 
-def test_distance_to_apex_explicit_value_wins():
-    """An explicit value overrides the fit, and both paths agree bit for bit."""
-    from zea.probes import create_curved_probe_geometry
+def test_grid_apex_is_the_array_middle_without_a_sector():
+    from zea.probes import create_probe_geometry
 
-    probe_geometry = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
-    assert Parameters(probe_geometry=probe_geometry, distance_to_apex=0.0).distance_to_apex == 0.0
+    flat = Parameters(probe_geometry=create_probe_geometry(n_el=128, pitch=0.3e-3))
+    np.testing.assert_array_equal(flat.grid_apex, (0.0, 0.0, 0.0))
+    np.testing.assert_array_equal(Parameters().grid_apex, (0.0, 0.0, 0.0))
 
-    fitted = Parameters(probe_geometry=probe_geometry).distance_to_apex
-    explicit = Parameters(probe_geometry=probe_geometry, distance_to_apex=fitted)
-    assert explicit.distance_to_apex == fitted
+
+def test_grid_apex_follows_transmits_from_the_array_middle():
+    np.testing.assert_allclose(_phased(origins="middle").grid_apex, (0.0, 0.0, 0.0), atol=1e-9)
+
+
+def test_grid_apex_follows_transmits_spread_over_the_array():
+    """Transmits spread over a flat array with axes meeting behind it: a virtual apex, the
+    old phased-array behaviour, and the sector edges pass through the array ends."""
+    parameters = _phased(origins="spread")
+    np.testing.assert_allclose(parameters.grid_apex, (0.0, 0.0, -HALF_APERTURE), rtol=1e-5)
+    np.testing.assert_allclose(parameters.polar_limits, np.radians([-45, 45]), rtol=1e-5)
+
+
+def test_transmit_apex_needs_unsteered_focused_transmits_on_the_central_axis():
+    """An unsteered focused axis runs straight down from its origin, so the transmits only
+    share an apex when it starts on the central axis."""
+    from zea.beamform.geometry import transmit_apex_distance
+
+    angles = np.array([-0.3, 0.0, 0.3])
+    focus = np.full(3, 0.05)
+    origins = np.zeros((3, 3))
+    assert transmit_apex_distance(origins, angles, focus, tol=1e-4) == pytest.approx(0.0)
+
+    origins[1, 0] = 0.005
+    assert transmit_apex_distance(origins, angles, focus, tol=1e-4) is None
+
+
+def test_grid_apex_is_the_virtual_source_of_a_diverging_wave():
+    """One unsteered diverging wave fans out from its virtual source, and the sector's edges
+    run from there through the array ends."""
+    focus = -0.012
+    parameters = _phased(n_tx=1, focus=focus)
+    np.testing.assert_allclose(parameters.grid_apex, (0.0, 0.0, focus), rtol=1e-5)
+    half_angle = np.arctan(HALF_APERTURE / -focus)
+    np.testing.assert_allclose(parameters.polar_limits, (-half_angle, half_angle), rtol=1e-5)
+
+
+def test_grid_apex_is_a_virtual_apex_for_an_overridden_sector():
+    """Unsteered plane waves define no apex; with an overridden sector the flat array fans
+    out from the virtual apex whose edges pass through the array ends."""
+    parameters = _phased(n_tx=1, focus=np.inf, polar_limits=np.radians([-45.0, 45.0]))
+    np.testing.assert_allclose(parameters.grid_apex, (0.0, 0.0, -HALF_APERTURE), rtol=1e-5)
+
+
+def test_grid_apex_ignores_a_sector_of_float_noise():
+    """Limits within the steering tolerance of 0 are no sector: the apex stays at the array
+    middle instead of ``(aperture / 2) / tan(1e-8)`` behind it."""
+    parameters = _phased(n_tx=1, focus=np.inf, polar_limits=(-1e-8, 1e-8))
+    np.testing.assert_array_equal(parameters.grid_apex, (0.0, 0.0, 0.0))
+
+
+def test_distance_to_apex_is_no_longer_a_parameter():
+    """Old configs that still set it load, with the value ignored."""
+    parameters = Parameters(distance_to_apex=0.01)
+    parameters.distance_to_apex = 0.01
+    parameters.update(distance_to_apex=0.01)
+    assert "distance_to_apex" not in parameters._params
+    assert "distance_to_apex" not in parameters._custom_params
+    with pytest.raises(AttributeError, match="grid_apex"):
+        _ = parameters.distance_to_apex
+
+
+def test_grid_apex_matches_the_derived_sector_of_unsteered_plane_waves():
+    """Unsteered plane waves on a flat array: the edge rays run straight down, so the sector
+    is seen from the array middle and spans what the waves insonify, the array width."""
+    parameters = _phased(n_tx=3, focus=np.inf, span_deg=0.0)
+    np.testing.assert_array_equal(parameters.grid_apex, (0.0, 0.0, 0.0))
+    # Not the 1.8x wider sector of a virtual apex at the imaging depth behind the array
+    assert 0.9 * HALF_APERTURE < parameters.xlims[1] <= HALF_APERTURE * (1 + 1e-5)
+
+
+def test_private_helpers_are_not_parameters():
+    """Shared private helpers (e.g. ``_edge_rays``) are not exported by ``to_tensor``."""
+    assert "_edge_rays" in vars(Parameters)
+    assert not [name for name in Parameters.get_properties() if name.startswith("_")]
+
+
+def test_renamed_scan_conversion_parameters():
+    """The former scan-conversion names map onto rlims, polar_limits and
+    elevation_limits."""
+    parameters = Parameters(rho_range=(0.0, 0.1), theta_range=(-0.5, 0.5))
+    np.testing.assert_allclose(parameters.rlims, (0.0, 0.1))
+    np.testing.assert_allclose(parameters.polar_limits, (-0.5, 0.5))
+    np.testing.assert_allclose(parameters.rho_range, parameters.rlims)
+    np.testing.assert_allclose(parameters.theta_range, parameters.polar_limits)
+
+    parameters.update(phi_range=(-0.2, 0.2))
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.2, 0.2))
+    parameters.phi_range = (-0.3, 0.3)
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3, 0.3))
+    assert "phi_range" not in parameters._custom_params
+
+
+def test_elevation_limits_from_spherical_transmit_angles():
+    """The default elevation_limits are the transmits' angles in the y-z plane, from the
+    spherical polar and azimuth angles, widened by 15 % on each side."""
+    # In the y-z plane (phi = pi/2), steered toward -y and +y by a signed theta, plus one
+    # transmit steered in x only: elevation is -theta, theta and 0
+    parameters = Parameters(
+        n_tx=3,
+        polar_angles=np.array([-0.3, 0.3, 0.3]),
+        azimuth_angles=np.array([np.pi / 2, np.pi / 2, 0.0]),
+    )
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3 * 1.3, 0.3 * 1.3))
+
+    # A 2D scan (azimuth zero) has no elevation, however far it steers in polar angle
+    parameters = Parameters(
+        n_tx=3, polar_angles=np.array([-0.4, 0.0, 0.4]), azimuth_angles=np.zeros(3)
+    )
+    np.testing.assert_allclose(parameters.elevation_limits, (0.0, 0.0))
+
+    assert Parameters(n_tx=3, polar_angles=np.zeros(3)).elevation_limits is None
+
+
+def test_ylims_of_a_2d_grid_skip_the_apex():
+    """Without an elevation range ylims follow the probe alone, so they do not fit the
+    transmit apex or derive the polar sector."""
+    from zea.probes import create_probe_geometry
+
+    parameters = Parameters(
+        probe_geometry=create_probe_geometry(n_el=128, pitch=0.3e-3),
+        grid_type="cartesian",
+        zlims=(0.0, 0.05),
+        n_tx=3,
+        polar_angles=np.zeros(3),
+    )
+    assert parameters.ylims == (0.0, 0.0)
+    assert not {"grid_apex", "_transmit_apex", "_derived_polar_sector"} & set(parameters._cache)
+
+
+def test_elevation_limits_follow_a_later_azimuth_angles():
+    """Setting azimuth_angles after elevation_limits was read recomputes it."""
+    parameters = Parameters(n_tx=2, polar_angles=np.array([-0.3, 0.3]))
+    assert parameters.elevation_limits is None
+
+    parameters.azimuth_angles = np.full(2, np.pi / 2)
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3 * 1.3, 0.3 * 1.3))
+
+
+def test_polar_sector_uses_the_transmit_angles_in_the_x_z_plane():
+    """Tilting a sector of transmits in elevation keeps their angles in the x-z plane, so
+    it leaves the derived polar sector unchanged."""
+    flat = _phased(n_tx=5, span_deg=20.0, focus=-0.02)
+
+    # The same x-z angles, all tilted 0.2 rad toward +y, as signed spherical angles with
+    # the azimuth in (-pi/2, pi/2]
+    x, y = np.tan(flat.polar_angles), np.tan(0.2)
+    polar, azimuth = np.arctan(np.hypot(x, y)), np.arctan2(y, x)
+    flip = azimuth > np.pi / 2
+    polar, azimuth = np.where(flip, -polar, polar), np.where(flip, azimuth - np.pi, azimuth)
+    tilted = _phased(n_tx=5, span_deg=20.0, focus=-0.02, polar_angles=polar, azimuth_angles=azimuth)
+
+    # Parameters stores the angles as float32
+    np.testing.assert_allclose(tilted._xz_polar_angles, flat.polar_angles, atol=1e-6)
+    np.testing.assert_allclose(tilted.polar_limits, flat.polar_limits, atol=1e-6)
+    np.testing.assert_allclose(tilted.grid_apex, flat.grid_apex, atol=1e-9)
+    np.testing.assert_allclose(tilted.xlims, flat.xlims, atol=1e-9)
+
+
+def test_elevation_margin_replaces_the_automatic_margin():
+    """``elevation_margin`` widens the default elevation_limits by a fixed angle, like
+    polar_margin, and leaves explicit limits alone."""
+    parameters = Parameters(
+        n_tx=2,
+        polar_angles=np.array([-0.3, 0.3]),
+        azimuth_angles=np.full(2, np.pi / 2),
+        elevation_margin=0.05,
+    )
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.35, 0.35))
+
+    parameters.elevation_margin = 0.0
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3, 0.3))
+
+    parameters.elevation_limits = (-0.1, 0.1)
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.1, 0.1))
+
+
+def test_azimuth_limits_is_a_deprecated_alias_of_elevation_limits():
+    """``azimuth_limits`` set ylims as an elevation angle, so it now maps onto
+    elevation_limits."""
+    parameters = Parameters(azimuth_limits=(-0.2, 0.2))
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.2, 0.2))
+    np.testing.assert_allclose(parameters.azimuth_limits, parameters.elevation_limits)
+    assert "azimuth_limits" not in parameters._custom_params
 
 
 def test_polar_grid_uses_the_fitted_apex():
     """The fitted apex reaches the grid: rays start one zlims[0] below the transducer."""
-    from zea.probes import create_curved_probe_geometry
-
     radius = 49.57e-3
     parameters = Parameters(
         probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius),
@@ -1013,7 +1234,209 @@ def test_polar_grid_uses_the_fitted_apex():
         sampling_frequency=20e6,
         n_ax=4096,
     )
-    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
-    assert parameters.rho_range[0] == pytest.approx(0.005 + radius, rel=1e-5)
+    assert parameters.grid_apex[2] == pytest.approx(-radius, rel=1e-5)
+    assert parameters.rlims[0] == pytest.approx(0.005 + radius, rel=1e-5)
     # Centre ray starts at zlims[0] below the transducer, not at the apex.
     assert parameters.grid[0, 64, 2] == pytest.approx(0.005, abs=1e-6)
+
+
+def test_polar_limits_of_focused_lines_is_their_angle_range():
+    """A focused transmit insonifies only its own line, so it adds no margin."""
+    np.testing.assert_allclose(_phased().polar_limits, np.radians([-45, 45]), rtol=1e-6)
+
+
+def test_sector_of_plane_waves_runs_along_their_outer_edges():
+    """Steered plane waves do not fan out from their origin, so they define no apex: the
+    sector edges run from the array ends along the outermost steering angle, which covers
+    every strip they insonify from the array down."""
+    parameters = _phased(n_tx=21, span_deg=20.0, focus=np.inf)
+    angle = np.radians(20)
+    np.testing.assert_allclose(parameters.polar_limits, (-angle, angle), rtol=1e-5)
+    np.testing.assert_allclose(
+        parameters.grid_apex, (0.0, 0.0, -HALF_APERTURE / np.tan(angle)), rtol=1e-5
+    )
+
+
+def test_steered_diverging_waves_from_the_middle_define_no_apex():
+    """Diverging waves fan out from their virtual sources, not from the array middle."""
+    parameters = _phased(n_tx=11, span_deg=30.0, focus=-0.02)
+    assert parameters.grid_apex[2] < 0
+    # Every edge ray from an array end lies inside the sector at the array.
+    half_angle = np.arctan(HALF_APERTURE / -parameters.grid_apex[2])
+    assert max(np.abs(parameters.polar_limits)) == pytest.approx(half_angle, rel=1e-5)
+
+
+def test_polar_margin_replaces_the_automatic_margin():
+    parameters = _phased(n_tx=21, span_deg=20.0, focus=np.inf, polar_margin=np.radians(2))
+    np.testing.assert_allclose(parameters.polar_limits, np.radians([-22, 22]), rtol=1e-5)
+
+
+def test_polar_limits_of_scanlines_ignore_margin_and_override():
+    parameters = _phased(enable_scanline=True, polar_limits=(-1.0, 1.0))
+    np.testing.assert_allclose(parameters.polar_limits, np.radians([-45, 45]), rtol=1e-6)
+
+
+def test_grid_size_x_of_a_polar_grid_follows_the_outer_arc():
+    parameters = _phased()
+    outer_arc = (max(parameters.zlims) - parameters.grid_apex[2]) * np.radians(90)
+    pixel = parameters.wavelength / parameters.pixels_per_wavelength
+    assert parameters.grid_size_x == int(np.ceil(outer_arc / pixel))
+
+
+def test_extent_of_a_flat_array_starts_at_zlims():
+    """With a virtual apex the first rows reach behind the flat array at the edges; the
+    image starts at zlims[0] instead, and scan conversion fills exactly that window."""
+    parameters = _phased(origins="spread", grid_size_x=64, grid_size_z=128)
+    assert parameters.grid[..., 2].min() < 0
+    assert parameters.extent[4] == pytest.approx(parameters.zlims[0])
+
+
+@pytest.mark.parametrize("origins", ["middle", "spread"])
+def test_extent_of_a_flat_array_starts_at_a_set_zlims(origins):
+    """A set zlims[0] is where the image starts: the parts of the first rows that reach
+    above it at the sector edges are cropped, also when they lie in front of the array."""
+    parameters = _phased(origins=origins, zlims=(0.01, 0.1), grid_size_x=64, grid_size_z=128)
+    assert 0 < parameters.grid[..., 2].min() < parameters.zlims[0]
+    assert parameters.extent[4] == pytest.approx(parameters.zlims[0])
+
+
+def test_extent_of_a_curved_array_follows_the_sector():
+    """A curved array's sector follows the array, so its image may start above zlims[0]."""
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=0.05),
+        grid_type="polar",
+        polar_limits=(-0.5, 0.5),
+        zlims=(0.01, 0.08),
+        grid_size_z=64,
+        grid_size_x=64,
+        center_frequency=3.5e6,
+        sampling_frequency=20e6,
+        n_ax=4096,
+    )
+    assert parameters.extent[4] == pytest.approx(parameters.grid[..., 2].min())
+    assert parameters.extent[4] < parameters.zlims[0]
+
+
+def test_xlims_override_sets_the_width_of_a_polar_image():
+    """An explicit xlims crops (or pads) the scan-converted image of a polar grid."""
+    parameters = _phased(grid_size_x=64, grid_size_z=128, xlims=(-0.02, 0.03))
+    assert parameters.extent[0] == pytest.approx(-0.02)
+    assert parameters.extent[1] == pytest.approx(0.03)
+    assert parameters.grid[..., 0].min() < -0.02  # the sector itself is unchanged
+
+
+# --- scanline grids ---
+
+
+def test_polar_scanline_grid_is_the_polar_grid_at_the_transmit_angles():
+    """Lines from the array middle: one column per transmit angle, rows at rlims."""
+    from zea.beamform.pixelgrid import polar_pixel_grid
+
+    parameters = _phased(n_tx=9, enable_scanline=True, grid_size_z=32)
+    expected = polar_pixel_grid(None, parameters.zlims, 32, 9, polar_angles=parameters.polar_angles)
+    np.testing.assert_allclose(parameters.grid, expected, atol=1e-7)
+    assert parameters.grid_size_x == 9
+
+
+def test_polar_scanline_rows_sit_at_one_radius_from_the_apex():
+    """Spread origins: every column still lies on its transmit axis, and each row sits at
+    one radius from the apex, so scan conversion places it correctly."""
+    parameters = _phased(n_tx=17, origins="spread", enable_scanline=True, grid_size_z=32)
+    grid = parameters.grid
+    apex = parameters.grid_apex
+    radii = np.hypot(grid[..., 0] - apex[0], grid[..., 2] - apex[2])
+    np.testing.assert_allclose(radii[0], parameters.rlims[0], rtol=1e-5)
+    np.testing.assert_allclose(radii[-1], parameters.rlims[1], rtol=1e-5)
+    # Columns follow the transmit axes through their origins
+    angles = np.arctan2(grid[..., 0] - apex[0], grid[..., 2] - apex[2])
+    np.testing.assert_allclose(angles[-1], parameters.polar_angles, atol=1e-6)
+
+
+def test_polar_scanline_limits_follow_the_transmit_order():
+    """Descending transmit angles: column 0 is the first transmit, so scan conversion must
+    place it at the first angle, not at the smallest."""
+    parameters = _phased(n_tx=9, enable_scanline=True, grid_size_z=32)
+    parameters.polar_angles = parameters.polar_angles[::-1].copy()
+    angles = parameters.polar_angles
+    assert parameters.polar_limits == pytest.approx((angles[0], angles[-1]))
+    assert parameters.grid[-1, 0, 0] > 0  # the first column is on the +x side
+
+
+def test_polar_scanline_follows_the_transmit_angles_in_the_xz_plane():
+    """The same directions in the unsigned spherical form (theta >= 0, phi = pi toward -x)
+    give the same scanline grid as the signed form zea writes."""
+    signed = _phased(n_tx=9, enable_scanline=True, grid_size_z=32)
+    angles = signed.polar_angles
+    unsigned = _phased(
+        n_tx=9,
+        enable_scanline=True,
+        grid_size_z=32,
+        polar_angles=np.abs(angles),
+        azimuth_angles=np.where(angles < 0, np.pi, 0.0),
+    )
+    np.testing.assert_allclose(unsigned.polar_limits, signed.polar_limits, atol=1e-6)
+    np.testing.assert_allclose(unsigned.grid, signed.grid, atol=1e-6)
+
+
+def test_polar_scanline_needs_evenly_spaced_angles():
+    parameters = _phased(n_tx=9, enable_scanline=True)
+    parameters.selected_transmits = [0, 1, 2, 5, 8]
+    with pytest.raises(ValueError, match="evenly spaced"):
+        _ = parameters.grid
+
+
+@pytest.mark.parametrize("focus", [np.inf, -0.02, 0.0])
+def test_scanline_needs_focused_transmits(focus):
+    parameters = _phased(n_tx=9, focus=focus, enable_scanline=True)
+    with pytest.raises(ValueError, match="focused transmits"):
+        _ = parameters.grid
+
+
+def test_cartesian_scanline_needs_unsteered_transmits():
+    parameters = _phased(n_tx=9, enable_scanline=True, grid_type="cartesian")
+    with pytest.raises(ValueError, match="unsteered"):
+        _ = parameters.grid
+
+
+def test_polar_scanline_needs_steered_transmits():
+    parameters = _phased(n_tx=9, span_deg=0.0, enable_scanline=True)
+    with pytest.raises(ValueError, match="parallel"):
+        _ = parameters.grid
+
+
+def test_polar_scanline_needs_axes_that_meet():
+    parameters = _phased(n_tx=9, enable_scanline=True)
+    origins = np.zeros((9, 3))
+    origins[:, 0] = np.linspace(-0.01, 0.01, 9)  # walking and steered: no common apex
+    parameters.transmit_origins = origins
+    with pytest.raises(ValueError, match="meet in one point"):
+        _ = parameters.grid
+
+
+# --- f_number ---
+
+
+def test_f_number_of_a_phased_array_disables_the_receive_cone():
+    """Elements narrower than about 0.6 wavelength receive over the whole half-space."""
+    assert _phased().f_number == 0.0
+
+
+def test_f_number_follows_the_element_directivity():
+    """A 0.3 mm pitch linear array at 5 MHz: the -6 dB acceptance angle of a 0.27 mm wide
+    element under the sinc directivity model."""
+    parameters = _phased(center_frequency=5e6)
+    wavelength = parameters.sound_speed / 5e6
+    angle = np.arcsin(0.6033545644016143 * wavelength / (0.9 * 0.3e-3))
+    assert parameters.f_number == pytest.approx(1 / (2 * np.tan(angle)), rel=1e-5)
+
+
+def test_f_number_uses_the_element_width_when_given():
+    narrow = _phased(center_frequency=5e6, element_width=0.1e-3)
+    wide = _phased(center_frequency=5e6, element_width=0.29e-3)
+    assert narrow.f_number == 0.0
+    assert wide.f_number > 0.0
+
+
+def test_f_number_explicit_value_wins_and_falls_back_to_one():
+    assert _phased(f_number=1.5).f_number == 1.5
+    assert Parameters().f_number == 1.0

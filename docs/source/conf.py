@@ -271,5 +271,27 @@ linkcheck_anchors_ignore_for_url = [
 ]
 
 
+_PIXEL_GRID_EXPLORER_BUILD = os.path.abspath("../explorer/build.py")
+
+
+def _build_pixel_grid_explorer(app):
+    """Generate ``_static/pixel-grid-explorer.html`` before the static files are copied.
+
+    The page embeds reference values computed by zea, so it is built from
+    ``docs/explorer`` on every HTML build instead of being committed.
+    """
+    if app.builder.format != "html":
+        return
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "pixel_grid_explorer_build", _PIXEL_GRID_EXPLORER_BUILD
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.main()
+
+
 def setup(app):
     app.connect("autodoc-skip-member", _skip_reexported_members)
+    app.connect("builder-inited", _build_pixel_grid_explorer)

@@ -33,6 +33,7 @@ Changed
 ^^^^^^^
 - Streaming ``hf://`` datasets no longer runs into the Hugging Face rate limit, so you can train on many batches with many workers without downloading the data. The API is unchanged; two new environment variables, ``ZEA_MAX_CONCURRENT_REQUESTS`` and ``ZEA_FIND_H5_SHAPES_WORKERS``, tune it (see :doc:`environment`) (:gh:`671` by :user:`tristan-deep`)
 - Conversion scripts for EchoNet-Dynamic, CAMUS and PICMUS accept the ``.zip`` file itself. EchoNet-Dynamic reproduces the published split by default, and its polar conversion is about 15 times faster (:gh:`676` by :user:`wesselvannierop`)
+- (Breaking) Angle parameters are renamed to one set of names throughout zea (see :ref:`angle-conventions`, and :gh:`679` for the full list). The default pixel grid and ``f_number`` now follow the probe and transmit geometry, so beamformed images change (:gh:`679` by :user:`wesselvannierop`)
 - (Breaking) In ``compute_pfield``, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
 - ``Parameters.copy()`` and ``set_transmits`` are much faster (:gh:`656` by :user:`wesselvannierop`)
 - The default ``probe_bandwidth_percent`` is 100 instead of 200, which also narrows the band used by ``compute_pfield`` (:gh:`644` by :user:`tristan-deep`)
@@ -42,6 +43,7 @@ Fixed
 - The pressure field uses the one-way transmit spectrum, averages over frequencies instead of summing, and takes the element positions from ``probe_geometry`` (:gh:`657` by :user:`wesselvannierop`)
 - ``t_peak`` estimated from ``waveforms_two_way`` uses the envelope peak; values change where the carrier peak differs from it (:gh:`656` by :user:`wesselvannierop`)
 - Conversion of Verasonics ``BS100BW`` and ``BS50BW`` data samples I and Q at the same time instants. Data converted with earlier versions, such as some Open-H-RF data, may be affected (:gh:`672` by :user:`vincentvdschaft`)
+- Conversion of elevation-steered Verasonics data: ``polar_angles`` and ``azimuth_angles`` now hold the spherical transmit angles, where ``azimuth_angles`` used to hold the elevation steering angle. Files converted from such acquisitions with earlier versions need to be reconverted; other data is unaffected (:gh:`679` by :user:`wesselvannierop`)
 - :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`wesselvannierop`)
 - ``waveforms_one_way`` and ``waveforms_two_way`` follow ``selected_transmits``, like the other per-transmit parameters (:gh:`683` by :user:`wesselvannierop`)
 - The shared GIF palette keeps exact colors, so pure black stays ``(0, 0, 0)`` (:gh:`680` by :user:`wesselvannierop`)
