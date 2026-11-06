@@ -1,3 +1,4 @@
+import math
 from collections.abc import Iterable
 
 import keras
@@ -582,6 +583,25 @@ class Demodulate(Operation):
         }
 
 
+def _check_scalar_filter_inputs(op_name, **values):
+    """Raise a clear error unless each filter design input is a single value.
+
+    The filter operations design one set of taps, so per-transmit frequencies cannot be used.
+    Only the static shape is checked, so this also works inside ``jit``.
+    """
+    for name, value in values.items():
+        if value is None:
+            raise ValueError(
+                f"{op_name} needs a scalar `{name}`, but got None. When `center_frequency` "
+                "varies across transmits, `bandwidth` is not derived; set it explicitly."
+            )
+        if math.prod(getattr(value, "shape", ())) != 1:
+            raise ValueError(
+                f"{op_name} designs one set of filter taps, so `{name}` must be a scalar, "
+                f"got shape {tuple(value.shape)}. Set a scalar `{name}` explicitly."
+            )
+
+
 @ops_registry("fir_filter")
 class FirFilter(Operation):
     """Apply a FIR filter to the input signal using convolution.
@@ -659,7 +679,9 @@ class LowPassFilterIQ(FirFilter):
     operations. The :class:`LowPassFilterIQ` operation itself is not jittable and is provided
     for convenience only.
 
-    Uses :func:`get_low_pass_iq_filter` to compute the filter taps.
+    Uses :func:`get_low_pass_iq_filter` to compute the filter taps. The call-time
+    ``bandwidth`` (in Hz) defaults to :attr:`~zea.Parameters.bandwidth` when the parameters are
+    prepared with :meth:`~zea.Pipeline.prepare_parameters`.
     """
 
     def __init__(
@@ -696,6 +718,12 @@ class LowPassFilterIQ(FirFilter):
         self.num_taps = num_taps
 
     def call(self, bandwidth, sampling_frequency, center_frequency, **kwargs):
+        _check_scalar_filter_inputs(
+            "LowPassFilterIQ",
+            bandwidth=bandwidth,
+            sampling_frequency=sampling_frequency,
+            center_frequency=center_frequency,
+        )
         lpf = get_low_pass_iq_filter(
             self.num_taps,
             ops.convert_to_numpy(sampling_frequency).item(),
@@ -713,7 +741,9 @@ class BandPassFilter(FirFilter):
     By default, the call-time ``bandwidth`` defines the passband centered around
     ``demodulation_frequency``, with edges at
     ``demodulation_frequency - bandwidth/2`` and
-    ``demodulation_frequency + bandwidth/2``.
+    ``demodulation_frequency + bandwidth/2``. When the parameters are prepared with
+    :meth:`~zea.Pipeline.prepare_parameters`, ``bandwidth`` defaults to
+    :attr:`~zea.Parameters.bandwidth`.
 
     Optionally, a fixed ``passband=(f1, f2)`` can be provided at initialization, or a
     call-time ``passband`` can be provided to override both the fixed passband and the
@@ -759,6 +789,14 @@ class BandPassFilter(FirFilter):
         self.num_taps = num_taps
         self.passband = passband
 
+    @property
+    def needs_keys(self):
+        keys = super().needs_keys
+        if self.passband is not None:
+            # A manually set passband bypasses automatic frequency and bandwidth computation.
+            return keys - {"bandwidth", "demodulation_frequency"}
+        return keys
+
     def call(
         self,
         sampling_frequency,
@@ -792,11 +830,18 @@ class BandPassFilter(FirFilter):
             if demodulation_frequency is None or bandwidth is None:
                 raise ValueError(
                     "BandPassFilter requires either passband=(f1, f2) or both "
-                    "demodulation_frequency and bandwidth."
+                    "demodulation_frequency and bandwidth. When `center_frequency` varies "
+                    "across transmits, `bandwidth` is not derived; set it explicitly."
                 )
+            _check_scalar_filter_inputs(
+                "BandPassFilter",
+                demodulation_frequency=demodulation_frequency,
+                bandwidth=bandwidth,
+            )
             f1 = demodulation_frequency - bandwidth / 2
             f2 = demodulation_frequency + bandwidth / 2
 
+        _check_scalar_filter_inputs("BandPassFilter", sampling_frequency=sampling_frequency)
         bpf = get_band_pass_filter(self.num_taps, sampling_frequency, f1, f2)
         kwargs[self.filter_key] = bpf
         return super().call(**kwargs)

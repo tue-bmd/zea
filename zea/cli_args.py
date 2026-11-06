@@ -675,8 +675,11 @@ class _Echonet:
     """Source folder path."""
     dst: tyro.conf.Positional[Path]
     """Destination folder path."""
-    split_path: Path | None = None
-    """Path to the split.yaml file containing the dataset split if a split should be copied."""
+    split_path: str = "hf://zeahub/echonet-dynamic"
+    """Split to reproduce: a split.yaml file, a folder with one, or an hf:// path to either.
+    Defaults to the published split."""
+    new_split: bool = False
+    """Create a new random train/val/test split instead of reproducing one."""
     no_hyperthreading: bool = False
     """Disable hyperthreading for multiprocessing."""
 
