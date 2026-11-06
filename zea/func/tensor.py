@@ -562,7 +562,7 @@ def vmap(
     to avoid memory issues with large inputs. Choose the `batch_size` or `chunks` wisely, because
     it pads the input to make it divisible, and then crop the output back to the original size.
 
-    Follows `jax.vmap` on all backends. `fun` can return any number of outputs, also more than it
+    Follows `jax.vmap` for outputs. `fun` can return any number of outputs, also more than it
     has inputs, and nested tuples, lists and dicts. `None` outputs stay in place. Unlike `jax.vmap`,
     the inputs should be tensors or `None`, so nested inputs are not supported.
 
