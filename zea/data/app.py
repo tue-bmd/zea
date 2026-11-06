@@ -1279,17 +1279,10 @@ def _load_config_text(path: str, revision: str | None = None) -> str:
         return "# No config path specified."
     try:
         if _is_hf(path):
-            from huggingface_hub import hf_hub_download
-
             repo_id, filepath = _hf_parse_path(path)
             if not filepath:
                 return "# Config path must point to a file: hf://owner/repo/path/config.yaml"
-            local = hf_hub_download(
-                repo_id=repo_id,
-                filename=filepath,
-                repo_type="dataset",
-                revision=revision,
-            )
+            local = _hf_download(repo_id, filepath, revision=revision)
             with open(local) as fh:
                 return fh.read()
         else:
