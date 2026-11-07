@@ -919,6 +919,46 @@ class TestRetry:
         finally:
             server.close()
 
+    @pytest.mark.parametrize(
+        "failure",
+        [{"reject_first": 1000, "reject_status": 503}, {"drop_first": 1000}],
+        ids=["503", "dropped"],
+    )
+    def test_exhausted_retries_raise_os_error(
+        self, structured_file, fast_backoff, monkeypatch, failure
+    ):
+        """aiohttp errors are not ``OSError``, so callers that reopen on ``OSError`` missed them."""
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
+        server = _CountingServer(structured_file.parent, latency=0, **failure)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)  # no signature to redact
+            with pytest.raises(chunk_reader.RemoteReadError):
+                fetcher.fetch([(0, 16)])
+        finally:
+            server.close()
+
+    def test_dataloader_recovers_from_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
+        """One read that outlasts the retries is reopened and read again, not fatal to the epoch."""
+        from zea.data.dataloader import H5DataSource
+
+        path = tmp_path / "frames.hdf5"
+        data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
+        with h5py.File(path, "w") as f:
+            f.create_dataset("data", data=data, chunks=(1, 8, 8), compression="gzip")
+
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
+        # Fails the first read (both attempts); the read after the reopen goes through.
+        server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=503)
+        monkeypatch.setattr(
+            chunk_reader, "fetcher_for", lambda file: HTTPFetcher(server.url + path.name)
+        )
+        try:
+            source = H5DataSource(str(path), key="data", validate=False, frame_axis=0)
+            np.testing.assert_array_equal(np.squeeze(source[0]), data[0])
+            assert server.count == 3
+        finally:
+            server.close()
+
     def test_a_missing_file_is_not_retried(self, structured_file, fast_backoff):
         """Only transient statuses are worth another attempt; 404 is an answer, not a stall."""
         server = _CountingServer(
@@ -1041,8 +1081,9 @@ class TestRefusedLocation:
         )
         try:
             fetcher = HTTPFetcher(server.url + structured_file.name)
-            with pytest.raises(aiohttp.ClientResponseError):
+            with pytest.raises(chunk_reader.RemoteReadError) as info:
                 fetcher.fetch([(0, 16)])
+            assert info.value.status == 403
             assert server.count == 1
         finally:
             server.close()
