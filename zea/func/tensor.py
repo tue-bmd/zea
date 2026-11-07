@@ -387,14 +387,40 @@ else:
 
 
 def _find_map_length(args, in_axes) -> int:
-    """Find the length of the axis to map over."""
-    for arg, axis in zip(args, in_axes):
-        if axis is None or arg is None:
-            continue
+    """Find the length of the axis to map over, which all mapped arguments should share."""
+    lengths = [
+        ops.shape(arg)[axis]
+        for arg, axis in zip(args, in_axes)
+        if axis is not None and arg is not None
+    ]
+    if not lengths:
+        raise ValueError("At least one in_axes must be non-None to determine map length.")
 
-        return ops.shape(arg)[axis]
+    # Lengths can be unknown (not an int) while tracing
+    if len({length for length in lengths if isinstance(length, int)}) > 1:
+        raise ValueError(f"Mapped arguments should have the same length, got {lengths}.")
 
-    raise ValueError("At least one in_axes must be non-None to determine map length.")
+    return lengths[0]
+
+
+def _flatten_out_axes(out_axes, outputs) -> list:
+    """Get the output axis of each leaf in `outputs`, in the order of `keras.tree.flatten`.
+
+    Like in `jax.vmap`, an int or None applies to all leaves below it.
+    """
+    if isinstance(out_axes, int) or out_axes is None:
+        return [out_axes] * len(keras.tree.flatten(outputs))
+    if (
+        isinstance(out_axes, (tuple, list))
+        and isinstance(outputs, (tuple, list))
+        and len(out_axes) == len(outputs)
+    ):
+        return [
+            leaf_axis
+            for out_axis, output in zip(out_axes, outputs)
+            for leaf_axis in _flatten_out_axes(out_axis, output)
+        ]
+    raise ValueError(f"out_axes={out_axes} does not match the structure of the function outputs.")
 
 
 def _repeat_int_to_tuple(value, length: int) -> Tuple[Union[int, None], ...]:
@@ -455,7 +481,7 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
         args = list(args)
         new_args = []
         map_length = _find_map_length(args, in_axes)
-        for arg, in_axis, out_axis in zip(args, in_axes, out_axes):
+        for arg, in_axis, out_axis in zip(args, in_axes, out_axes, strict=True):
             if arg is None:
                 # filter out None arguments
                 continue
@@ -487,30 +513,35 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
         none_indexes = [i for i, arg in enumerate(args) if arg is None]
         args = _moveaxes(args, _in_axes, zeros)
 
-        # Build function with None arguments prefilled
+        # Build function with None arguments prefilled. The last wrapper created runs first,
+        # so wrap in reverse order to insert the None arguments from the lowest index up.
         _prefilled_none_fn = fun
-        for none_idx in none_indexes:
+        for none_idx in reversed(none_indexes):
             _prefilled_none_fn = _partial_at(_prefilled_none_fn, none_idx, None)
 
+        # Not all map functions support nested or None outputs, so map over the tensors only
+        is_none = None
+
         def _fun(args):
-            return _prefilled_none_fn(*args)
+            nonlocal is_none
+            outputs = _prefilled_none_fn(*args)
+            is_none = keras.tree.map_structure(lambda output: output is None, outputs)
+            tensors = [output for output in keras.tree.flatten(outputs) if output is not None]
+            # Map functions need at least one output, also when the function only returns None
+            return tuple(tensors) or (ops.zeros(()),)
 
-        outputs = map_fn(_fun, tuple(args))
-
-        # Wrap outputs to tuple for easier processing
-        tuple_output = isinstance(outputs, (tuple, list))
-        if not tuple_output:
-            outputs = (outputs,)
-
-        _out_axes = _repeat_int_to_tuple(out_axes, len(outputs))
+        mapped = keras.tree.flatten(map_fn(_fun, tuple(args)))
 
         # Move mapped axes back to original position
-        outputs = _moveaxes(outputs, zeros, _out_axes)
+        leaf_is_none = keras.tree.flatten(is_none)
+        leaf_out_axes = _flatten_out_axes(out_axes, is_none)
+        _out_axes = [axis for axis, none in zip(leaf_out_axes, leaf_is_none) if not none]
+        if _out_axes:
+            mapped = iter(_moveaxes(mapped, (0,) * len(mapped), _out_axes))
 
-        if not tuple_output:
-            outputs = outputs[0]
-
-        return outputs
+        # Restore the structure of the outputs, with the None outputs in place
+        leaves = [None if none else next(mapped) for none in leaf_is_none]
+        return keras.tree.pack_sequence_as(is_none, leaves)
 
     return mapped_wrapper
 
@@ -531,10 +562,15 @@ def vmap(
     to avoid memory issues with large inputs. Choose the `batch_size` or `chunks` wisely, because
     it pads the input to make it divisible, and then crop the output back to the original size.
 
+    Follows `jax.vmap` for outputs. `fun` can return any number of outputs, also more than it
+    has inputs, and nested tuples, lists and dicts. `None` outputs stay in place. Unlike `jax.vmap`,
+    the inputs should be tensors or `None`, so nested inputs are not supported.
+
     Args:
         fun: Function to be mapped.
         in_axes: Axis or axes to be mapped over in the input.
-        out_axes: Axis or axes to be mapped over in the output.
+        out_axes: Axis or axes to be mapped over in the output. An integer or `None` applies to
+            all outputs below it, and a tuple or list should match the structure of the outputs.
         batch_size: Size of the batch for each step. If `None`, the function will be equivalent
             to `vmap`. If `1`, will be equivalent to `map`. Mutually exclusive with `chunks`.
         chunks: Number of chunks to split the input into. If `None` or `1`, the function will be
@@ -591,35 +627,39 @@ def vmap(
             _batch_size = batch_size
 
         new_args = []
+        batch_in_axes = []
         for arg, in_axis in zip(args, _in_axes):
             if in_axis is None or arg is None:
                 new_args.append(arg)
+                batch_in_axes.append(in_axis)
                 continue
+            # Non-negative, because reshaping adds an axis
+            in_axis = canonicalize_axis(in_axis, ops.ndim(arg))
             padded_arg = pad_array_to_divisible(arg, _batch_size, axis=in_axis)
             reshaped_arg = reshape_axis(padded_arg, (-1, _batch_size), axis=in_axis)
             new_args.append(reshaped_arg)
+            batch_in_axes.append(in_axis)
 
-        outputs = _map(fun, in_axes=_in_axes, out_axes=out_axes, map_fn=map_fn)(*new_args)
-
-        # Wrap outputs to tuple for easier processing
-        tuple_output = isinstance(outputs, (tuple, list))
-        if not tuple_output:
-            outputs = (outputs,)
+        # The leading axis of each output are the batches
+        outputs = _map(fun, in_axes=tuple(batch_in_axes), out_axes=0, map_fn=map_fn)(*new_args)
 
         new_outputs = []
-        _out_axes = _repeat_int_to_tuple(out_axes, len(outputs))
-        for output, out_axis in zip(outputs, _out_axes):
-            if out_axis is None:
-                new_outputs.append(output)
+        leaves = keras.tree.flatten(outputs)
+        for output, out_axis in zip(leaves, _flatten_out_axes(out_axes, outputs)):
+            if output is None:
+                new_outputs.append(None)
                 continue
-            reshaped_output = flatten(output, start_dim=out_axis, end_dim=out_axis + 1)
+            if out_axis is None:
+                new_outputs.append(ops.take(output, 0, axis=0))
+                continue
+            # Put the batches right before the samples in each batch, then merge the two
+            out_axis = canonicalize_axis(out_axis, ops.ndim(output) - 1)
+            reshaped_output = ops.moveaxis(output, 0, out_axis)
+            reshaped_output = flatten(reshaped_output, start_dim=out_axis, end_dim=out_axis + 1)
             cropped_output = ops.take(reshaped_output, ops.arange(total_length), axis=out_axis)
             new_outputs.append(cropped_output)
 
-        if tuple_output:
-            return tuple(new_outputs)
-        else:
-            return new_outputs[0]
+        return keras.tree.pack_sequence_as(outputs, new_outputs)
 
     return batched_fun
 
