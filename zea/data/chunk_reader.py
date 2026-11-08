@@ -227,8 +227,6 @@ def _as_os_error(exc: Exception) -> OSError:
         return exc
     if isinstance(exc, FileNotFoundError):
         error = FileNotFoundError(redacted)
-    elif isinstance(exc, PermissionError):
-        error = PermissionError(redacted)
     else:
         error = RemoteReadError(f"{type(exc).__name__}: {redacted}", getattr(exc, "status", None))
     # Hide the original from the traceback only if it shows the signed URL.

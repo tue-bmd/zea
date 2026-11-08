@@ -937,26 +937,49 @@ class TestRetry:
         finally:
             server.close()
 
-    def test_dataloader_recovers_from_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
-        """One read that outlasts the retries is reopened and read again, not fatal to the epoch."""
-        from zea.data.dataloader import H5DataSource
-
+    @staticmethod
+    def _flaky_frames(tmp_path, monkeypatch):
+        """A chunked file streamed from a server whose first read fails both of its attempts."""
         path = tmp_path / "frames.hdf5"
         data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
         with h5py.File(path, "w") as f:
             f.create_dataset("data", data=data, chunks=(1, 8, 8), compression="gzip")
 
         monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
-        # Fails the first read (both attempts); the read after the reopen goes through.
         server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=503)
         monkeypatch.setattr(
             chunk_reader, "fetcher_for", lambda file: HTTPFetcher(server.url + path.name)
         )
+        return path, data, server
+
+    def test_dataloader_recovers_from_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
+        """One read that outlasts the retries is reopened and read again, not fatal to the epoch."""
+        from zea.data.dataloader import H5DataSource
+
+        path, data, server = self._flaky_frames(tmp_path, monkeypatch)
         try:
             source = H5DataSource(str(path), key="data", validate=False, frame_axis=0)
             np.testing.assert_array_equal(np.squeeze(source[0]), data[0])
             assert server.count == 3
         finally:
+            server.close()
+
+    def test_cached_handle_survives_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
+        """A failed read leaves no state behind: every chunk read sends fresh range requests, so
+        the next read through the same cached handle works without reopening the file."""
+        from zea.data.datasets import H5FileHandleCache
+
+        path, data, server = self._flaky_frames(tmp_path, monkeypatch)
+        cache = H5FileHandleCache()
+        try:
+            file = cache.get_file(str(path))
+            with pytest.raises(OSError):
+                file.dataset("data")[0]
+            assert cache.get_file(str(path)) is file
+            np.testing.assert_array_equal(file.dataset("data")[0], data[0])
+            assert server.count == 3
+        finally:
+            cache.close()
             server.close()
 
     def test_a_missing_file_is_not_retried(self, structured_file, fast_backoff):
