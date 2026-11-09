@@ -606,10 +606,28 @@ class Pipeline:
 
     def set_jit(self, value: bool):
         """Set the JIT compilation for the pipeline."""
+        self._jit_self = value
         if value:
             self._jit()
         else:
             self._unjit()
+
+    # Copies and pickles rebuild the compiled and timed callables: they wrap this
+    # pipeline's own methods and operations, so sharing them would run the original.
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for name in ("_call_pipeline", "_jittable_call", "_callable_layers"):
+            state.pop(name, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._call_pipeline = self.call  # as in __init__, before set_jit may compile it
+        self.set_jit(self._jit_self)
+        if self._timed:
+            self._callable_layers = self._get_timed_operations()
+        else:
+            self._callable_layers = self._pipeline_layers
 
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):

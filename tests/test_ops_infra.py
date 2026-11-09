@@ -1,7 +1,9 @@
 """Tests for the Operation and Pipeline classes in ops.py"""
 
+import copy
 import inspect
 import json
+import pickle
 import subprocess
 import sys
 import textwrap
@@ -504,6 +506,24 @@ def test_inside_outer_jit_propagates_transitively():
     assert deep_map._inside_outer_jit is True
     assert leaf_op._inside_outer_jit is True
     assert leaf_op._is_jitted is True
+
+
+@pytest.mark.parametrize("jit_options", [None, "ops", "pipeline"])
+@pytest.mark.parametrize(
+    "copy_fn",
+    [copy.deepcopy, lambda pipeline: pickle.loads(pickle.dumps(pipeline))],
+    ids=["deepcopy", "pickle"],
+)
+def test_pipeline_copy(jit_options, copy_fn):
+    """Copied pipelines keep their JIT settings and have their own operations."""
+    pipeline = ops.Pipeline([MultiplyOperation(), AddOperation()], jit_options=jit_options)
+    copied = copy_fn(pipeline)
+
+    assert copied(x=2, y=3)["z"] == 9
+    assert copied.jit_options == jit_options
+    for operation, copied_operation in zip(pipeline.operations, copied.operations):
+        assert copied_operation is not operation
+        assert copied_operation.jit_compile == operation.jit_compile
 
 
 def test_invalid_jit_options_raises():
