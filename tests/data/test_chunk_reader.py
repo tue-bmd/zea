@@ -938,12 +938,12 @@ class TestRetry:
             server.close()
 
     @staticmethod
-    def _flaky_frames(tmp_path, monkeypatch):
+    def _flaky_frames(tmp_path, monkeypatch, key="data"):
         """A chunked file streamed from a server whose first read fails both of its attempts."""
         path = tmp_path / "frames.hdf5"
         data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
         with h5py.File(path, "w") as f:
-            f.create_dataset("data", data=data, chunks=(1, 8, 8), compression="gzip")
+            f.create_dataset(key, data=data, chunks=(1, 8, 8), compression="gzip")
 
         monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
         server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=503)
@@ -978,6 +978,22 @@ class TestRetry:
             assert cache.get_file(str(path)) is file
             np.testing.assert_array_equal(file.dataset("data")[0], data[0])
             assert server.count == 3
+        finally:
+            cache.close()
+            server.close()
+
+    def test_load_data_keeps_exhausted_retries_an_os_error(
+        self, tmp_path, fast_backoff, monkeypatch
+    ):
+        """``load_data`` turns bad indices into ``ValueError``; a failed read is not one."""
+        from zea.data.datasets import H5FileHandleCache
+
+        path, data, server = self._flaky_frames(tmp_path, monkeypatch, key="data/raw_data")
+        cache = H5FileHandleCache()
+        try:
+            file = cache.get_file(str(path))
+            with pytest.raises(chunk_reader.RemoteReadError):
+                file.load_data("raw_data", 0)
         finally:
             cache.close()
             server.close()

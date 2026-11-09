@@ -2034,9 +2034,13 @@ class File(h5py.File):
         if indices is None or (isinstance(indices, str) and indices == "all"):
             indices = slice(None)
 
+        from zea.data.chunk_reader import RemoteReadError
+
         data = self.dataset(key)
         try:
             data = data[indices]
+        except RemoteReadError:
+            raise  # a failed streamed read, not a bad index: keep it an OSError for callers
         except (OSError, IndexError) as exc:
             raise ValueError(
                 f"Invalid indices {indices} for key {key}. {key} has shape {data.shape}."
