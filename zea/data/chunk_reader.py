@@ -204,11 +204,11 @@ class _RedactQueryStrings(logging.Filter):
 
 
 class RemoteReadError(OSError):
-    """A range request that failed for good, with any signed URL in its message redacted.
+    """A range request that still failed after all retries.
 
-    An ``OSError``, so callers that catch ``OSError`` to reopen a file (like
-    :class:`~zea.data.dataloader.H5DataSource`) also catch a dropped connection or a 503 that
-    outlasted the retries. aiohttp's own errors are not ``OSError``.
+    It subclasses ``OSError`` so that code which reopens a file on ``OSError`` (such as
+    :class:`~zea.data.dataloader.H5DataSource`) also recovers from network failures.
+    Any signed URL in the message is redacted.
     """
 
     def __init__(self, message: str, status: int | None = None):
@@ -217,13 +217,15 @@ class RemoteReadError(OSError):
 
 
 def _as_os_error(exc: Exception) -> OSError:
-    """``exc`` as an ``OSError``, with the query strings of its URLs redacted.
+    """Convert a failed range request into an ``OSError`` that is safe to show.
 
-    fsspec and aiohttp put the requested URL in their errors, and a signed URL is a credential.
+    Signed URLs are credentials, so query strings are removed from the message. A 404
+    stays a ``FileNotFoundError``, and errors that are not ``OSError``s (like aiohttp's) or
+    are timeouts become a :class:`RemoteReadError`. Other ``OSError``s pass through as is.
     """
     message = str(exc)
     redacted = _RedactQueryStrings._url.sub(r"\1?<redacted>", message)
-    if redacted == message and isinstance(exc, OSError):
+    if redacted == message and isinstance(exc, OSError) and not isinstance(exc, TimeoutError):
         return exc
     if isinstance(exc, FileNotFoundError):
         error = FileNotFoundError(redacted)

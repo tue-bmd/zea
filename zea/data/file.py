@@ -2039,7 +2039,7 @@ class File(h5py.File):
         data = self.dataset(key)
         try:
             data = data[indices]
-        except RemoteReadError:
+        except (RemoteReadError, FileNotFoundError):
             raise  # a failed streamed read, not a bad index: keep it an OSError for callers
         except (OSError, IndexError) as exc:
             raise ValueError(

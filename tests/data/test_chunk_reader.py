@@ -938,7 +938,7 @@ class TestRetry:
             server.close()
 
     @staticmethod
-    def _flaky_frames(tmp_path, monkeypatch, key="data"):
+    def _flaky_frames(tmp_path, monkeypatch, key="data", status=503):
         """A chunked file streamed from a server whose first read fails both of its attempts."""
         path = tmp_path / "frames.hdf5"
         data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
@@ -946,7 +946,7 @@ class TestRetry:
             f.create_dataset(key, data=data, chunks=(1, 8, 8), compression="gzip")
 
         monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
-        server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=503)
+        server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=status)
         monkeypatch.setattr(
             chunk_reader, "fetcher_for", lambda file: HTTPFetcher(server.url + path.name)
         )
@@ -982,21 +982,34 @@ class TestRetry:
             cache.close()
             server.close()
 
-    def test_load_data_keeps_exhausted_retries_an_os_error(
-        self, tmp_path, fast_backoff, monkeypatch
+    @pytest.mark.parametrize(
+        "status, error", [(503, chunk_reader.RemoteReadError), (404, FileNotFoundError)]
+    )
+    def test_load_data_keeps_failed_reads_an_os_error(
+        self, tmp_path, fast_backoff, monkeypatch, status, error
     ):
         """``load_data`` turns bad indices into ``ValueError``; a failed read is not one."""
         from zea.data.datasets import H5FileHandleCache
 
-        path, data, server = self._flaky_frames(tmp_path, monkeypatch, key="data/raw_data")
+        path, data, server = self._flaky_frames(
+            tmp_path, monkeypatch, key="data/raw_data", status=status
+        )
         cache = H5FileHandleCache()
         try:
             file = cache.get_file(str(path))
-            with pytest.raises(chunk_reader.RemoteReadError):
+            with pytest.raises(error):
                 file.load_data("raw_data", 0)
         finally:
             cache.close()
             server.close()
+
+    @pytest.mark.parametrize("fsspec_error", [False, True])
+    def test_an_exhausted_timeout_is_a_remote_read_error(self, fsspec_error):
+        """A bare timeout is an ``OSError`` that ``load_data`` would take for a bad index."""
+        from fsspec.exceptions import FSTimeoutError
+
+        exc = FSTimeoutError() if fsspec_error else TimeoutError()
+        assert isinstance(chunk_reader._as_os_error(exc), chunk_reader.RemoteReadError)
 
     def test_a_missing_file_is_not_retried(self, structured_file, fast_backoff):
         """Only transient statuses are worth another attempt; 404 is an answer, not a stall."""
