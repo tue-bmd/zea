@@ -52,6 +52,6 @@ jobs:
           git show HEAD^1:docs/source/changelog.rst > "${RUNNER_TEMP}/base.rst" 2>/dev/null || true
 
           if ! python3 .github/scripts/changelog.py check "${RUNNER_TEMP}/base.rst"; then
-            echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
+            echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, ending with (:gh:\`<PR number>\` by :user:\`<GitHub handle>\`), or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
             exit 1
           fi

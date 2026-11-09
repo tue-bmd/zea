@@ -27,6 +27,7 @@ New Features
 - Transparent GIFs from RGBA frames with ``transparent=True`` in :func:`zea.io_lib.save_video` and :func:`zea.io_lib.save_to_gif` (:gh:`663` by :user:`tristan-deep`)
 - GIFs that play once, with ``loop=None`` in :func:`zea.io_lib.save_to_gif` (:gh:`680` by :user:`wesselvannierop`)
 - ``zea app`` can serve over HTTPS with ``--ssl-certfile`` and ``--ssl-keyfile`` (:gh:`648` by :user:`Louisvh`)
+- Frequency-dependent attenuation in the pressure field, with ``attenuation_coef`` in dB/(cm·MHz) in :func:`zea.beamform.pfield.compute_pfield`. It defaults to 0 (lossless) (:gh:`682` by :user:`wesselvannierop`)
 - :class:`zea.ops.BandPassFilter` and :class:`zea.ops.LowPassFilterIQ` take their ``bandwidth`` from the new :attr:`zea.Parameters.bandwidth`, derived as ``center_frequency * probe_bandwidth_percent / 100`` unless set or ``center_frequency`` varies across transmits (:gh:`644` by :user:`tristan-deep`)
 
 Changed
@@ -48,6 +49,7 @@ Fixed
 - The shared GIF palette keeps exact colors, so pure black stays ``(0, 0, 0)`` (:gh:`680` by :user:`wesselvannierop`)
 - Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
 - Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)
+- ``zea app`` and ``load_model_from_hf`` download to the zea cache instead of the Hugging Face cache (:gh:`689` by :user:`Louisvh`)
 
 
 v0.1.8 (2026-10-01)

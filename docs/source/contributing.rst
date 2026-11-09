@@ -340,7 +340,7 @@ how it affects them, in one or two sentences.
    ^^^^^
    - :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`tristan-deep`)
 
-A check on each pull request looks for a changelog entry. Changes that users will not notice,
+A check on each pull request looks for a changelog entry that ends with the pull request number and your handle. Changes that users will not notice,
 such as CI, tooling or refactors, need none: a maintainer labels the pull request
 ``skip changelog`` (``dev`` and ``documentation`` work as well).
 
