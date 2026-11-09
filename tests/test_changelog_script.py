@@ -176,6 +176,66 @@ def test_check_requires_a_new_entry_under_current(changelog_file, tmp_path):
     changelog.check(base)
 
 
+@pytest.mark.parametrize(
+    "attribution",
+    [
+        "(by :user:`someone`)",
+        "(#689 by @someone)",
+        "(:gh:`689`)",
+        "(:gh:`689` by someone)",
+        "",
+    ],
+)
+def test_check_requires_pr_and_author(changelog_file, tmp_path, attribution):
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+    changelog_file.write_text(make_changelog(f"- A fix {attribution}".rstrip()))
+    with pytest.raises(SystemExit, match="end each new entry with"):
+        changelog.check(base)
+
+
+@pytest.mark.parametrize(
+    "attribution",
+    [
+        "(:gh:`689` by :user:`someone`)",
+        "(:gh:`689` by :user:`a` and :user:`b`)",
+        "(:gh:`1` and :gh:`2` by :user:`a`, :gh:`3` by :user:`b`)",
+    ],
+)
+def test_check_accepts_pr_and_author(changelog_file, tmp_path, attribution):
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+    changelog_file.write_text(make_changelog(f"- A fix {attribution}"))
+    changelog.check(base)
+
+
+def test_check_accepts_a_wrapped_entry(changelog_file, tmp_path):
+    """RST lets a bullet wrap onto indented lines; the attribution may be on the last one."""
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+    changelog_file.write_text(
+        make_changelog("- A long fix that wraps\n  onto the next line (:gh:`1` by :user:`a`)")
+    )
+    changelog.check(base)
+
+
+def test_entries_join_wrapped_lines():
+    body = "- One that wraps\n  onto a second line\n- Another\n\nNot part of it"
+    assert changelog.entries(body) == ["- One that wraps onto a second line", "- Another"]
+
+
+def test_every_entry_in_the_changelog_is_attributed():
+    """The real changelog follows the format the check enforces on new entries."""
+    _, sections = changelog.split_sections(changelog.CHANGELOG.read_text())
+    unattributed = [
+        entry
+        for _, body in sections
+        for entry in changelog.entries(body)
+        if not changelog.ATTRIBUTION.search(entry)
+    ]
+    assert not unattributed
+
+
 def test_load_inventory(tmp_path):
     """Reads a Sphinx objects.inv; urllib also opens file:// URLs, so no network is needed."""
     lines = [
