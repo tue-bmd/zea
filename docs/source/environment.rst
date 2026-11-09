@@ -107,7 +107,7 @@ Backend
 
    export KERAS_BACKEND=jax
 
-If you leave it unset, ``zea`` uses the backend from your ``keras.json``, or otherwise picks one that is installed. See :ref:`backend-installation` for how to install each backend.
+If you leave it unset, ``zea`` uses the backend from your ``keras.json`` if that one is installed, and otherwise picks one that is. See :ref:`backend-installation` for how to install each backend.
 
 
 .. _cache-directory:
@@ -149,9 +149,9 @@ Streaming
 
 Ultrasound datasets can be very large, and therefore it might not always be practical to download the entire dataset before starting to work with it. To address this, ``zea`` supports streaming datasets from Hugging Face Hub. This means that you can read data from a dataset without having to download the entire dataset first.
 
-Streaming is the default whenever you open something on the Hub with an ``hf://`` path, whether that is a single file with :class:`zea.File` or a whole folder with :class:`zea.Dataloader` (see :ref:`working-with-zea-data-files` for an example). ``zea`` then only fetches the frames you actually read, so you can start right away and work with datasets that are much larger than your disk. If you do want the full file on disk, for instance to write to it, pass ``stream=False`` to :class:`zea.File` or ``lazy=False`` to :class:`zea.Dataloader`. For a dataset that easily fits on your disk, downloading it once is often the faster option anyway.
+Streaming is the default whenever you open something on the Hub with an ``hf://`` path, whether that is a single file with :class:`zea.File` or a whole dataset with :class:`zea.Dataloader` (see :ref:`working-with-zea-data-files` for an example). ``zea`` then only fetches the chunks that hold the frames you read, so you can start right away and work with datasets that are much larger than your disk. If you do want the full file on disk, for instance to write to it, pass ``stream=False`` to :class:`zea.File` or ``lazy=False`` to :class:`zea.Dataloader`. For a dataset that easily fits on your disk, downloading it once is often the faster option.
 
-Everything you read along the way is kept in the chunk cache, so a second epoch is read from disk instead of from the network. This cache is capped at ``ZEA_CHUNK_CACHE_SIZE`` (10 GiB by default) and makes room by dropping the data you used least recently. If your dataset is larger than that, every epoch downloads again whatever it reads. That still works, just slower, so raise the limit if you have the disk space, or set ``ZEA_CHUNK_CACHE=0`` if you would rather not keep anything at all.
+All files that are downloaded through the streaming infrastructure are saved in the chunk cache. That way, when you need to grab part of a file a second time, it is read from disk instead of from the network. This cache is capped at ``ZEA_CHUNK_CACHE_SIZE`` (10 GiB by default) and makes room by dropping the data you used least recently. If you stream more than that, the next time you read it, it will be downloaded again. That still works, just slower, so raise the limit if you have the disk space, or set ``ZEA_CHUNK_CACHE=0`` if you would rather not keep anything at all.
 
 There are two more settings you might want to change. When many dataloader threads stream at the same time, ``ZEA_MAX_CONCURRENT_REQUESTS`` (64 by default) limits how many requests run in parallel: raise it on a fast connection, or lower it on a slow or shared one. And because ``zea`` remembers the file list of a repository for ``ZEA_HF_CACHE_TTL`` seconds (5 minutes by default), a new upload can take a moment to show up. Set it to ``0`` when you read from a repository that is being written to at the same time.
 
