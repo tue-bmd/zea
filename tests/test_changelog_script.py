@@ -209,6 +209,21 @@ def test_check_accepts_pr_and_author(changelog_file, tmp_path, attribution):
     changelog.check(base)
 
 
+def test_check_accepts_a_wrapped_entry(changelog_file, tmp_path):
+    """RST lets a bullet wrap onto indented lines; the attribution may be on the last one."""
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+    changelog_file.write_text(
+        make_changelog("- A long fix that wraps\n  onto the next line (:gh:`1` by :user:`a`)")
+    )
+    changelog.check(base)
+
+
+def test_entries_join_wrapped_lines():
+    body = "- One that wraps\n  onto a second line\n- Another\n\nNot part of it"
+    assert changelog.entries(body) == ["- One that wraps onto a second line", "- Another"]
+
+
 def test_every_entry_in_the_changelog_is_attributed():
     """The real changelog follows the format the check enforces on new entries."""
     _, sections = changelog.split_sections(changelog.CHANGELOG.read_text())

@@ -135,9 +135,19 @@ def strip_comments(body):
 
 
 def entries(body):
-    """The bullet lines of a section, ignoring comments and code examples."""
+    """The bullets of a section, each on one line, ignoring comments and code examples."""
     body = strip_blocks(strip_comments(body), CODE_BLOCK)
-    return [line.strip() for line in body.splitlines() if re.match(r"\s*- \S", line)]
+    found, in_bullet = [], False
+    for line in body.splitlines():
+        if re.match(r"\s*- \S", line):
+            found.append(line.strip())
+            in_bullet = True
+        elif in_bullet and line[:1].isspace() and line.strip():
+            # An indented line right below a bullet continues it.
+            found[-1] += " " + line.strip()
+        else:
+            in_bullet = False
+    return found
 
 
 def release(version, date):
