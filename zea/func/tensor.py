@@ -487,11 +487,11 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None):
             ops.convert_to_tensor(leaf) if isinstance(leaf, (np.ndarray, np.generic)) else leaf
             for leaf in leaves
         ]
-        map_length = _find_map_length(leaves, leaf_axes)
+        _find_map_length(leaves, leaf_axes)  # Checks that the mapped leaves share their length
 
-        # `tf.vectorized_map` can not return a captured eager tensor, so also map over unmapped
-        # tensors there, by repeating them
-        repeat_unmapped = keras.backend.backend() == "tensorflow" and map_fn is vectorized_map
+        # `tf.vectorized_map` can not return a captured eager tensor as it is, so wrap the outputs
+        # in `tf.identity` there
+        identity_outputs = keras.backend.backend() == "tensorflow" and map_fn is vectorized_map
 
         # Map over the tensors with a mapped axis only, the other leaves are kept as they are
         mapped_ids, elements = [], []
@@ -499,9 +499,6 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None):
             if _is_mapped(leaf, axis):
                 mapped_ids.append(i)
                 elements.append(_moveaxis(leaf, axis, 0))
-            elif repeat_unmapped and ops.is_tensor(leaf):
-                mapped_ids.append(i)
-                elements.append(ops.repeat(ops.expand_dims(leaf, 0), map_length, axis=0))
         elements = tuple(elements)
 
         # Not all map functions support nested or None outputs, so map over the tensors only
@@ -516,6 +513,10 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None):
             outputs = fun(*fn_args, **fn_kwargs)
             is_none = keras.tree.map_structure(lambda output: output is None, outputs)
             tensors = [output for output in keras.tree.flatten(outputs) if output is not None]
+            if identity_outputs:
+                import tensorflow as tf
+
+                tensors = [tf.identity(tensor) for tensor in tensors]
             # Map functions need at least one output, also when the function only returns None
             return tuple(tensors) or (ops.zeros(()),)
 
