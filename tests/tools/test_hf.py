@@ -289,7 +289,10 @@ def test_load_model_from_hf(monkeypatch, tmp_path):
 
     logins = []
     monkeypatch.setattr(hf, "_hf_login", lambda: logins.append(1))
-    monkeypatch.setattr(hf, "snapshot_download", lambda **kwargs: str(tmp_path))
+    downloads = []
+    monkeypatch.setattr(
+        hf, "snapshot_download", lambda **kwargs: downloads.append(kwargs) or str(tmp_path)
+    )
 
     class FakeCommit:
         title = "Add weights"
@@ -304,6 +307,7 @@ def test_load_model_from_hf(monkeypatch, tmp_path):
     model_dir = hf.load_model_from_hf("zeahub/taesdxl")
 
     assert model_dir == Path(tmp_path)
+    assert downloads[0]["cache_dir"] == hf.HF_MODELS_DIR
     assert logins == [1]
 
 

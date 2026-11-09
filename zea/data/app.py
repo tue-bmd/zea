@@ -186,6 +186,16 @@ def _parse_presets(text: str) -> dict[str, dict]:
     return presets
 
 
+def _read_text(path: str, revision: str | None = None, **kwargs) -> str:
+    """Read a local or ``hf://`` text file. An ``hf://`` file is downloaded to the zea cache."""
+    if _is_hf(path):
+        repo_id, filename = _hf_parse_path(path)
+        if not filename:
+            raise ValueError("path must point to a file: hf://owner/repo/path/file.yaml")
+        path = _hf_download(repo_id, filename, revision=revision, **kwargs)
+    return Path(path).read_text(encoding="utf-8")
+
+
 def load_presets(path: str = PRESETS_PATH, revision: str = "latest") -> dict[str, dict]:
     """Load the example presets, falling back to the copy bundled with zea.
 
@@ -196,10 +206,7 @@ def load_presets(path: str = PRESETS_PATH, revision: str = "latest") -> dict[str
     revision = "main" if revision == "latest" else revision
     source = f"{path}@{revision}" if _is_hf(path) else path
     try:
-        if _is_hf(path):
-            repo_id, filename = _hf_parse_path(path)
-            path = _hf_download(repo_id, filename, revision=revision, etag_timeout=5)
-        return _parse_presets(Path(path).read_text(encoding="utf-8"))
+        return _parse_presets(_read_text(path, revision, etag_timeout=5))
     except Exception as exc:  # offline, missing revision, unreadable file, ...
         log.warning(f"Could not load presets from {source} ({exc}); using the bundled ones.")
         return _parse_presets(_BUNDLED_PRESETS.read_text(encoding="utf-8"))
@@ -1278,16 +1285,7 @@ def _load_config_text(path: str, revision: str | None = None) -> str:
     if not path:
         return "# No config path specified."
     try:
-        if _is_hf(path):
-            repo_id, filepath = _hf_parse_path(path)
-            if not filepath:
-                return "# Config path must point to a file: hf://owner/repo/path/config.yaml"
-            local = _hf_download(repo_id, filepath, revision=revision)
-            with open(local) as fh:
-                return fh.read()
-        else:
-            with open(path) as fh:
-                return fh.read()
+        return _read_text(path, revision)
     except Exception as exc:
         return f"# Failed to load config:\n# {exc}"
 
