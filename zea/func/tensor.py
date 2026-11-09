@@ -605,11 +605,6 @@ def vmap(
     _check_axes(in_axes, "in_axes")
     _check_axes(out_axes, "out_axes")
 
-    no_chunks_or_batch = batch_size is None and (chunks is None or chunks == 1)
-
-    if fn_supports_batch and no_chunks_or_batch:
-        return fun
-
     # Other map functions stack all results, so they can not check that an output is really
     # unmapped. Without this check, a mapped output would silently be reduced to its first element.
     native_jax_vmap = keras.backend.backend() == "jax" and not disable_jit and not fn_supports_batch
@@ -618,6 +613,11 @@ def vmap(
             "out_axes=None is only supported by the native `jax.vmap`, so on the jax backend "
             "without `disable_jit` and `fn_supports_batch`."
         )
+
+    no_chunks_or_batch = batch_size is None and (chunks is None or chunks == 1)
+
+    if fn_supports_batch and no_chunks_or_batch:
+        return fun
 
     def _vmap_fun(axis_size=None):
         # vmap to support batches

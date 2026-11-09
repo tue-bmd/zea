@@ -1086,6 +1086,15 @@ def test_vmap_invalid_axes_raise_like_jax(case, vmap_kwargs):
         zea.func.vmap(fun, **axes, **vmap_kwargs)(*tensor_args)
 
 
+@pytest.mark.parametrize("chunks", [None, 1])
+def test_vmap_out_axes_none_fn_supports_batch_fast_path(chunks):
+    """`out_axes=None` should also raise when `fn_supports_batch` would return `fun` as is."""
+    import zea
+
+    with pytest.raises(ValueError, match="out_axes=None"):
+        zea.func.vmap(lambda x: x, out_axes=None, fn_supports_batch=True, chunks=chunks)
+
+
 @pytest.mark.parametrize(
     "axes",
     [
