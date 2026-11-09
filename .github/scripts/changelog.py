@@ -14,7 +14,8 @@ the layout it relies on.
     python .github/scripts/changelog.py notes 0.1.9 [--docs-version latest]
 
     # Check that "Current" has an entry that the changelog of the base branch
-    # (here saved to base.rst) does not have. Used by the Changelog workflow.
+    # (here saved to base.rst) does not have, ending with its PR and author.
+    # Used by the Changelog workflow.
     python .github/scripts/changelog.py check base.rst
 """
 
@@ -54,6 +55,10 @@ VERSION = re.compile(r"\d+\.\d+\.\d+((a|b|rc)\d+)?")
 PRE_RELEASE = re.compile(r"\d+\.\d+\.\d+(a|b|rc)\d+")
 # An RST comment: ".." alone or followed by text, but not a directive (".. note::"),
 # link target (".. _label:") or footnote (".. [1]").
+# The end of an entry: "(:gh:`681` by :user:`handle`)", with more PRs or authors joined
+# by "and" or ", ", e.g. "(:gh:`1` and :gh:`2` by :user:`a`, :gh:`3` by :user:`b`)".
+_GROUP = r":gh:`\d+`(?:(?:, | and ):gh:`\d+`)* by :user:`[^`]+`(?:(?:, | and ):user:`[^`]+`)*"
+ATTRIBUTION = re.compile(rf"\({_GROUP}(?:, {_GROUP})*\)$")
 COMMENT = re.compile(r"\.\.(?:\s+(?!_|\[)(?!\S+::).*)?")
 CODE_BLOCK = re.compile(r"\.\.\s+(?:code-block|code|sourcecode)::.*")
 
@@ -270,6 +275,12 @@ def check(base_path):
     # Rewording an existing entry is not a new one, so the count has to go up too.
     if not added or len(current_entries) <= len(base_entries):
         sys.exit(f"no new entry under {CURRENT!r} in {CHANGELOG.name}")
+    unattributed = sorted(entry for entry in added if not ATTRIBUTION.search(entry))
+    if unattributed:
+        sys.exit(
+            "end each new entry with (:gh:`<PR number>` by :user:`<GitHub handle>`):\n"
+            + "\n".join(f"  {entry}" for entry in unattributed)
+        )
     print(f"new entries under {CURRENT!r}:")
     for entry in sorted(added):
         print(f"  {entry}")
