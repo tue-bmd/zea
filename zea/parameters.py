@@ -1198,11 +1198,14 @@ class Parameters(BaseParameters):
         "grid",
         "t0_delays",
         "pfield_kwargs",
+        "attenuation_coef",
         optional=("element_width",),
     )
     def pfield(self) -> np.ndarray:
         """Compute or return the pressure field (pfield) for weighting
-        of shape (n_tx, grid_size_z, grid_size_x)."""
+        of shape (n_tx, grid_size_z, grid_size_x).
+
+        Uses :attr:`attenuation_coef`, unless overridden in :attr:`pfield_kwargs`."""
         if self.is_3d:
             raise NotImplementedError("Pfield computation is not yet implemented for 3D scans.")
 
@@ -1215,7 +1218,7 @@ class Parameters(BaseParameters):
             t0_delays=self.t0_delays,
             probe_bandwidth_percent=self.probe_bandwidth_percent,
             element_width=self._params.get("element_width"),
-            **self.pfield_kwargs,
+            **{"attenuation_coef": self.attenuation_coef, **self.pfield_kwargs},
         )
         return ops.convert_to_numpy(pfield)
 

@@ -1,16 +1,15 @@
-# Builds the wheel and sdist and checks them before anything reaches PyPI:
-# metadata (`twine check`), then a fresh install of the wheel on the oldest
-# supported Python, importing zea and running its CLI from outside the repo, so
-# only the packaged files are used.
+# Builds the wheel and sdist, checks their metadata, and installs the wheel in a
+# fresh environment to import zea and run its CLI.
 #
-# Runs on release PRs (`release/v*`, opened by `release-pr.yaml`), so a broken
-# package fails before the release is merged, and is called by `publish.yaml`,
-# which uploads exactly the files built and checked here. On a release it also
-# checks that the package version matches the release tag.
+# Runs on PRs that change `pyproject.toml`, which includes every release PR, and
+# is called by `publish.yaml` to build the files it uploads to PyPI.
 name: Package
 
 on:
   pull_request:
+    paths:
+      - pyproject.toml
+      - .github/workflows/package.yaml
   workflow_call:
 
 permissions:
@@ -19,8 +18,6 @@ permissions:
 jobs:
   package:
     name: Build and check package
-    # Other PRs skip this; `workflow_call` runs with the caller's `release` event.
-    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
