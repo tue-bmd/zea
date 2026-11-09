@@ -8,6 +8,7 @@ Data
 
 .. toctree::
     :maxdepth: 2
+    :class: notebook-group
 
     notebooks/data
 
@@ -16,6 +17,7 @@ Pipeline
 
 .. toctree::
     :maxdepth: 2
+    :class: notebook-group
 
     notebooks/pipeline
 
@@ -24,6 +26,7 @@ Models
 
 .. toctree::
     :maxdepth: 2
+    :class: notebook-group
 
     notebooks/models
 
@@ -32,6 +35,7 @@ Metrics
 
 .. toctree::
     :maxdepth: 2
+    :class: notebook-group
 
     notebooks/metrics
 
@@ -40,6 +44,7 @@ Agent
 
 .. toctree::
     :maxdepth: 2
+    :class: notebook-group
 
     notebooks/agent
 
