@@ -1084,6 +1084,33 @@ def test_vmap_out_axes_none_fn_supports_batch_fast_path(chunks):
         zea.func.vmap(lambda x: x, out_axes=None, fn_supports_batch=True, chunks=chunks)
 
 
+@pytest.mark.parametrize("inner_kwargs", _VMAP_PATHS)
+@pytest.mark.parametrize("outer_kwargs", _VMAP_PATHS)
+@backend_equality_check()
+def test_vmap_nested(outer_kwargs, inner_kwargs):
+    """`vmap` can be nested, also with moved axes, unmapped and `None` arguments and outputs."""
+    import jax
+    from keras import ops
+
+    import zea
+
+    a = np.arange(24, dtype="float32").reshape(2, 3, 4)
+    b = np.arange(4, dtype="float32")
+    fun = lambda x, y, z: (x * y, None)  # noqa: E731
+    inner = {"in_axes": (1, 0, None), "out_axes": (-1, 0)}
+    outer = {"in_axes": (0, None, None)}
+
+    expected = jax.vmap(jax.vmap(fun, **inner), **outer)(a, b, None)
+    inner_fn = zea.func.vmap(fun, **inner, **inner_kwargs)
+    result = zea.func.vmap(inner_fn, **outer, **outer_kwargs)(
+        ops.convert_to_tensor(a), ops.convert_to_tensor(b), None
+    )
+    assert result[1] is None
+    result = ops.convert_to_numpy(result[0])
+    np.testing.assert_allclose(result, expected[0])
+    return result
+
+
 @pytest.mark.parametrize(
     "axes",
     [

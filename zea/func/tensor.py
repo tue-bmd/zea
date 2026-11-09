@@ -436,7 +436,19 @@ def _check_axes(axes, name: str) -> None:
             raise TypeError(f"{name} should only contain integers and None, got {axes}.")
 
 
-def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
+def _moveaxis(x, source: int, destination: int):
+    """`ops.moveaxis` that also works when nested in `torch.vmap`, which has no batching rule for
+    `aten::moveaxis.int`."""
+    ndim = ops.ndim(x)
+    source, destination = canonicalize_axis(source, ndim), canonicalize_axis(destination, ndim)
+    if source == destination:
+        return x
+    perm = [i for i in range(ndim) if i != source]
+    perm.insert(destination, source)
+    return ops.transpose(x, perm)
+
+
+def _map(fun, in_axes=0, out_axes=0, map_fn=None):
     """Mapping function, vectorized by default.
 
     For jax, this uses the native vmap implementation.
@@ -452,7 +464,6 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
         out_axes: The axis or axes to be mapped over in the output, see `zea.func.vmap`.
             Only the native jax vmap supports `None`. Defaults to 0.
         map_fn: The mapping function to use. If None, defaults to `ops.vectorized_map`.
-        _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
 
     Returns:
         A function that applies `fun` (in a vectorized manner) over the specified axes.
@@ -463,12 +474,6 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
         import jax
 
         return jax.vmap(fun, in_axes=in_axes, out_axes=out_axes)
-
-    # Use native vmap for PyTorch backend when map_fn is not provided and _use_torch_vmap is True
-    if keras.backend.backend() == "torch" and map_fn is None and _use_torch_vmap:
-        import torch
-
-        return torch.vmap(fun, in_dims=in_axes, out_dims=out_axes)
 
     # Default to keras vectorized_map if map_fn not provided
     if map_fn is None:
@@ -493,7 +498,7 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
         for i, (leaf, axis) in enumerate(zip(leaves, leaf_axes)):
             if _is_mapped(leaf, axis):
                 mapped_ids.append(i)
-                elements.append(ops.moveaxis(leaf, axis, 0))
+                elements.append(_moveaxis(leaf, axis, 0))
             elif repeat_unmapped and ops.is_tensor(leaf):
                 mapped_ids.append(i)
                 elements.append(ops.repeat(ops.expand_dims(leaf, 0), map_length, axis=0))
@@ -519,7 +524,7 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
         # Restore the structure of the outputs, with the None outputs in place and the mapped
         # axes back at their position
         new_leaves = [
-            None if none else ops.moveaxis(next(mapped), 0, axis)
+            None if none else _moveaxis(next(mapped), 0, axis)
             for none, axis in zip(
                 keras.tree.flatten(is_none), _flatten_axes(out_axes, is_none, "out_axes")
             )
@@ -537,7 +542,6 @@ def vmap(
     batch_size: int | None = None,
     fn_supports_batch: bool = False,
     disable_jit: bool = False,
-    _use_torch_vmap: bool = False,
 ):
     """`vmap` with batching or chunking support to avoid memory issues.
 
@@ -568,9 +572,6 @@ def vmap(
             In this case, this function will only handle padding and reshaping for batching.
         disable_jit: If True, disables JIT compilation for backends that support it.
             This can be useful for debugging. Will fall back to simple mapping.
-        _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
-            Advantage: you can apply `vmap` multiple times without issues.
-            Disadvantage: does not support None arguments or outputs.
     Returns:
         A function that applies `fun` in a batched manner over the specified axes.
     """
@@ -612,11 +613,7 @@ def vmap(
 
     # vmap to support batches
     vmap_fun = _map(
-        fun,
-        in_axes=in_axes,
-        out_axes=out_axes,
-        map_fn=None if not disable_jit else simple_map,
-        _use_torch_vmap=_use_torch_vmap,
+        fun, in_axes=in_axes, out_axes=out_axes, map_fn=None if not disable_jit else simple_map
     )
 
     if no_chunks_or_batch:
@@ -669,7 +666,7 @@ def vmap(
                 continue
             # Put the batches right before the samples in each batch, then merge the two
             out_axis = canonicalize_axis(out_axis, ops.ndim(output) - 1)
-            reshaped_output = ops.moveaxis(output, 0, out_axis)
+            reshaped_output = _moveaxis(output, 0, out_axis)
             reshaped_output = flatten(reshaped_output, start_dim=out_axis, end_dim=out_axis + 1)
             cropped_output = ops.take(reshaped_output, ops.arange(total_length), axis=out_axis)
             new_outputs.append(cropped_output)
@@ -1768,9 +1765,9 @@ def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     axis = canonicalize_axis(axis, num_dims)
     func = lambda arr: func1d(arr, *args, **kwargs)
     for i in range(1, num_dims - axis):
-        func = vmap(func, in_axes=i, out_axes=-1, _use_torch_vmap=True)
+        func = vmap(func, in_axes=i, out_axes=-1)
     for i in range(axis):
-        func = vmap(func, in_axes=0, out_axes=0, _use_torch_vmap=True)
+        func = vmap(func, in_axes=0, out_axes=0)
     return func(arr)
 
 
