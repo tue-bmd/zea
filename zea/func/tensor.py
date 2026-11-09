@@ -385,10 +385,9 @@ def _is_mapped(leaf, axis) -> bool:
     return leaf is not None and axis is not None
 
 
-def _find_map_length(leaves, axes, axis_size=None) -> int:
+def _find_map_length(leaves, axes) -> int:
     """Find the length of the axis to map over, which all mapped leaves should share."""
-    lengths = [] if axis_size is None else [axis_size]
-    lengths += [
+    lengths = [
         ops.shape(leaf)[canonicalize_axis(axis, ops.ndim(leaf))]
         for leaf, axis in zip(leaves, axes)
         if _is_mapped(leaf, axis)
@@ -437,7 +436,7 @@ def _check_axes(axes, name: str) -> None:
             raise TypeError(f"{name} should only contain integers and None, got {axes}.")
 
 
-def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False, axis_size=None):
+def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
     """Mapping function, vectorized by default.
 
     For jax, this uses the native vmap implementation.
@@ -454,7 +453,6 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False, axis_si
             Only the native jax vmap supports `None`. Defaults to 0.
         map_fn: The mapping function to use. If None, defaults to `ops.vectorized_map`.
         _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
-        axis_size: The length of the axis to map over. If None, inferred from the inputs.
 
     Returns:
         A function that applies `fun` (in a vectorized manner) over the specified axes.
@@ -464,14 +462,12 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False, axis_si
     if keras.backend.backend() == "jax" and map_fn is None:
         import jax
 
-        return jax.vmap(fun, in_axes=in_axes, out_axes=out_axes, axis_size=axis_size)
+        return jax.vmap(fun, in_axes=in_axes, out_axes=out_axes)
 
     # Use native vmap for PyTorch backend when map_fn is not provided and _use_torch_vmap is True
     if keras.backend.backend() == "torch" and map_fn is None and _use_torch_vmap:
         import torch
 
-        if axis_size is not None:
-            raise ValueError("axis_size is not supported with _use_torch_vmap=True.")
         return torch.vmap(fun, in_dims=in_axes, out_dims=out_axes)
 
     # Default to keras vectorized_map if map_fn not provided
@@ -486,7 +482,7 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False, axis_si
             ops.convert_to_tensor(leaf) if isinstance(leaf, (np.ndarray, np.generic)) else leaf
             for leaf in leaves
         ]
-        map_length = _find_map_length(leaves, leaf_axes, axis_size)
+        map_length = _find_map_length(leaves, leaf_axes)
 
         # `tf.vectorized_map` can not return a captured eager tensor, so also map over unmapped
         # tensors there, by repeating them
@@ -502,8 +498,6 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False, axis_si
                 mapped_ids.append(i)
                 elements.append(ops.repeat(ops.expand_dims(leaf, 0), map_length, axis=0))
         elements = tuple(elements)
-        # Map functions need at least one input, also when only `axis_size` is given
-        elements = elements or (ops.arange(map_length),)
 
         # Not all map functions support nested or None outputs, so map over the tensors only
         is_none = None
@@ -543,7 +537,6 @@ def vmap(
     batch_size: int | None = None,
     fn_supports_batch: bool = False,
     disable_jit: bool = False,
-    axis_size: int | None = None,
     _use_torch_vmap: bool = False,
 ):
     """`vmap` with batching or chunking support to avoid memory issues.
@@ -575,8 +568,6 @@ def vmap(
             In this case, this function will only handle padding and reshaping for batching.
         disable_jit: If True, disables JIT compilation for backends that support it.
             This can be useful for debugging. Will fall back to simple mapping.
-        axis_size: Length of the axis to map over. Only needed when no input is mapped over,
-            otherwise it should match the length of the mapped inputs.
         _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
             Advantage: you can apply `vmap` multiple times without issues.
             Disadvantage: does not support None arguments or outputs.
@@ -619,21 +610,19 @@ def vmap(
     if fn_supports_batch and no_chunks_or_batch:
         return fun
 
-    def _vmap_fun(axis_size=None):
-        # vmap to support batches
-        return _map(
-            fun,
-            in_axes=in_axes,
-            out_axes=out_axes,
-            map_fn=None if not disable_jit else simple_map,
-            _use_torch_vmap=_use_torch_vmap,
-            axis_size=axis_size,
-        )
+    # vmap to support batches
+    vmap_fun = _map(
+        fun,
+        in_axes=in_axes,
+        out_axes=out_axes,
+        map_fn=None if not disable_jit else simple_map,
+        _use_torch_vmap=_use_torch_vmap,
+    )
 
     if no_chunks_or_batch:
-        return _vmap_fun(axis_size)
+        return vmap_fun
 
-    batch_fun = fun if fn_supports_batch else _vmap_fun()
+    batch_fun = fun if fn_supports_batch else vmap_fun
 
     # map (sequentially) to support batches/chunks that fit in memory
     map_fn = ops.map if not disable_jit else simple_map
@@ -641,13 +630,7 @@ def vmap(
     def batched_fun(*args, **kwargs):
         tree = (args, kwargs)
         leaves, leaf_axes = _flatten_inputs(args, kwargs, in_axes)
-        total_length = _find_map_length(leaves, leaf_axes, axis_size)
-
-        # Only `axis_size` is given, so there are no inputs to split into batches
-        if not any(_is_mapped(leaf, axis) for leaf, axis in zip(leaves, leaf_axes)):
-            if fn_supports_batch:
-                raise ValueError("fn_supports_batch needs at least one mapped input.")
-            return _vmap_fun(axis_size)(*args, **kwargs)
+        total_length = _find_map_length(leaves, leaf_axes)
 
         if chunks is not None:
             _batch_size = np.ceil(total_length / chunks).astype(int)

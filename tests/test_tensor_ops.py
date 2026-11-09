@@ -869,8 +869,6 @@ _VMAP_AXES_INPUT_CASES = [
     "in_axes_list",
     "keyword_with_in_axes",
     "dict_out_axes",
-    "axis_size",
-    "axis_size_without_mapped_inputs",
 ]
 
 
@@ -955,13 +953,6 @@ def test_vmap_inputs_match_jax(case, vmap_kwargs):
             (a,),
             {},
             {"out_axes": {"y": 1, "x": (0, -1)}},
-        ),
-        "axis_size": (lambda x: x + 1, (a,), {}, {"axis_size": 5}),
-        "axis_size_without_mapped_inputs": (
-            lambda x: x + 1,
-            (a[0],),
-            {},
-            {"in_axes": None, "axis_size": 5},
         ),
     }[case]
 
@@ -1049,7 +1040,6 @@ def test_vmap_out_axes_none(vmap_kwargs):
         "out_axes_list_for_tuple",
         "out_axes_tuple_for_list",
         "out_axes_wrong_keys",
-        "axis_size_mismatch",
         "nested_different_lengths",
     ],
 )
@@ -1075,7 +1065,6 @@ def test_vmap_invalid_axes_raise_like_jax(case, vmap_kwargs):
         "out_axes_list_for_tuple": (lambda x: (x, x), (a,), {"out_axes": [0, 0]}),
         "out_axes_tuple_for_list": (lambda x: [x, x], (a,), {"out_axes": (0, 0)}),
         "out_axes_wrong_keys": (lambda x: {"x": x}, (a,), {"out_axes": {"y": 0}}),
-        "axis_size_mismatch": (lambda x: x, (a,), {"axis_size": 4}),
         "nested_different_lengths": (lambda d: d["x"], ({"x": a, "y": a[:3]},), {}),
     }[case]
 
