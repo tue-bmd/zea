@@ -1,4 +1,3 @@
-import copyreg
 import hashlib
 import inspect
 import json
@@ -284,13 +283,10 @@ class Operation(keras.Operation):
         else:
             self._call = self.call
 
-    # Keras pickles (and thus deep-copies) operations by saving and reloading them
-    # from their config. That needs every class registered with Keras, and it loses
-    # state that is not in the config, such as the JIT flag. Operations are copied
-    # as plain Python objects instead; only ``_call``, which may hold a compiled
-    # function, is rebuilt.
-    def __reduce_ex__(self, protocol):
-        return copyreg.__newobj__, (type(self),), self.__getstate__()
+    # Copy and pickle as a plain Python object, skipping Keras' config round trip,
+    # which fails for unregistered ops and drops the JIT flag. The (compiled) `_call`
+    # is rebuilt afterwards.
+    __reduce__ = object.__reduce__
 
     def __getstate__(self):
         state = self.__dict__.copy()

@@ -526,6 +526,70 @@ def test_pipeline_copy(jit_options, copy_fn):
         assert copied_operation.jit_compile == operation.jit_compile
 
 
+@pytest.mark.parametrize(
+    "jit_options, num_patches, timed",
+    [("ops", 4, False), ("pipeline", 4, False), ("ops", 1, True), (None, 4, True)],
+    ids=["ops", "pipeline", "timed-ops-1-patch", "timed-nojit"],
+)
+@pytest.mark.parametrize(
+    "copy_fn",
+    [copy.deepcopy, lambda pipeline: pickle.loads(pickle.dumps(pipeline))],
+    ids=["deepcopy", "pickle"],
+)
+def test_patched_grid_pipeline_copy(jit_options, num_patches, timed, copy_fn):
+    """Copies of a used pipeline holding a PatchedGrid (a Map) give the same output
+    and run their own callables, not the original's."""
+    patched_grid = PatchedGrid(
+        operations=[SumFlatgridOperation()], num_patches=num_patches, with_batch_dim=False
+    )
+    pipeline = ops.Pipeline(
+        [patched_grid], jit_options=jit_options, timed=timed, with_batch_dim=False
+    )
+    flatgrid = np.arange(64 * 3, dtype="float32").reshape(64, 3)
+
+    def n_timings(p):
+        return sum(len(times) for times in p.timer.timings.values())
+
+    expected = pipeline(flatgrid=flatgrid)["data"]  # compiled callables exist now
+    copied = copy_fn(pipeline)
+    original_timings = n_timings(pipeline) if timed else None
+
+    np.testing.assert_allclose(copied(flatgrid=flatgrid)["data"], expected)
+    assert copied.jit_options == jit_options
+    copied_grid = copied.operations[0]
+    assert copied_grid.jit_options == patched_grid.jit_options
+
+    # The output alone cannot tell, so check that the (compiled) callables are bound to
+    # the copy: calling the original's would give the same result.
+    def owner(fn):
+        return getattr(getattr(fn, "__wrapped__", fn), "__self__", None)
+
+    assert owner(copied._call_pipeline) is copied
+    assert owner(copied_grid._jittable_call) is copied_grid
+    if timed:
+        # The copy keeps the original's timings and adds its own run, in its own timer
+        assert n_timings(pipeline) == original_timings
+        assert n_timings(copied) == 2 * original_timings
+    else:
+        assert copied._callable_layers[0] is copied_grid
+    if timed:
+        assert copied.timer is not pipeline.timer
+        assert copied.timer.timings
+
+
+def test_admire_pickle_drops_fit_cache():
+    """ADMIRE pickles after a call, although its fit cache holds a compiled closure."""
+    operation = ops.ADMIRE(n_elements=8)
+
+    def fit(data):
+        return data
+
+    operation._fit_cache = {"key": lambda data: fit(data)}
+    copied = pickle.loads(pickle.dumps(operation))
+    assert copied._fit_cache == {}
+    assert copied.n_elements == 8
+
+
 def test_invalid_jit_options_raises():
     """Invalid jit_options must raise ValueError in Pipeline and Map, at init and on set."""
     with pytest.raises(ValueError, match="jit_options must be"):
