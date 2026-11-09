@@ -373,16 +373,57 @@ where we especially welcome contributions. Browse the
 `open issues <https://github.com/tue-bmd/zea/issues>`_ to see what is being
 worked on, or open a new one to propose something new.
 
-Adding notebooks
-~~~~~~~~~~~~~~~~
+Adding an example notebook
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-New tutorial or example notebooks are always welcome! Please add them to the
-`docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
-directory. Make sure to follow the naming conventions and structure of existing
-notebooks. If you are adding a new tutorial, please also update :doc:`examples`
-to check if your notebook is included. See the `docs README
-<https://github.com/tue-bmd/zea/tree/main/docs#readme>`_ for notebook link
-conventions and how to check the docs for broken links.
+New example notebooks are always welcome! Each one shows up on the
+:doc:`examples` page as a card with a thumbnail and tags.
+
+1. **Add the notebook** to one of the groups in
+   `docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_.
+   Copy the structure of an existing notebook: a title, the Colab and GitHub
+   badges, ``%pip install zea`` as the first cell, and all cells run in order.
+
+2. **Add tags** to the notebook metadata (*Edit → Edit Notebook Metadata* in
+   Jupyter):
+
+   .. code-block:: json
+
+      "zea": {"tags": ["beamforming", "cardiac"]}
+
+   Use lowercase, and reuse the tags already on the examples page where possible.
+
+3. **Add a thumbnail** at ``docs/_static/thumbnails/<notebook name>.webp``: the
+   image only, without axes, titles or colorbars. Make it from the image array
+   in a scratch cell (don't commit it):
+
+   .. code-block:: python
+
+      import sys
+
+      sys.path.insert(0, "../..")  # docs/source
+      from make_thumbnail import make_thumbnail
+
+      make_thumbnail(image, "my_example", mode="fill")  # rectangular image, cut to 4:3
+      make_thumbnail(image, "my_example", mode="cone")  # sector scan, transparent background
+
+   For ``mode="cone"``, scan convert with ``fill_value=np.nan`` so everything
+   outside the cone becomes transparent.
+
+4. **Check it**: ``pre-commit run --files <notebook>``, then ``make docs-serve``
+   in ``docs/`` to see the card.
+
+To link to an example outside ``zea`` (a blog post or another library's docs),
+add an ``external-example`` to ``docs/source/examples.rst`` with a thumbnail in
+the same folder:
+
+.. code-block:: rst
+
+   .. external-example:: Title of the example
+      :link: https://example.org/the-example
+      :thumbnail: my_external_example.webp
+      :source: Name of the library or blog
+      :tags: beamforming, inverse problems
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~

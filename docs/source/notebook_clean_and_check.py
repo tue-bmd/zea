@@ -28,6 +28,14 @@ This script enforces consistency and quality standards for example notebooks. It
    The very first code cell must contain a `pip install zea` command
    (e.g. `%%capture\n%pip install zea`).
 
+6. **Examples page: tags and thumbnail**
+   Every notebook is a card on the examples page, so it needs:
+   - tags in the notebook metadata, as ``"zea": {"tags": ["beamforming", ...]}``:
+     a non-empty list of lowercase strings without duplicates;
+   - a thumbnail at ``docs/_static/thumbnails/<notebook name>.webp`` (or .png/.jpg),
+     made with ``docs/source/make_thumbnail.py``.
+   See "Adding an example notebook" in the contributing guide.
+
 If any check fails:
 - A clear error is printed.
 - The script exits nonzero.
@@ -59,6 +67,9 @@ If you are running in Colab, please enable a hardware accelerator via:
 **Runtime → Change runtime type → Hardware accelerator → GPU/TPU** 🚀."""  # noqa E501
 
 DOCS_URL = "https://github.com/tue-bmd/zea/blob/main/docs/source/notebook_clean_and_check.py"
+
+THUMBNAIL_DIR = Path(__file__).resolve().parents[1] / "_static" / "thumbnails"
+THUMBNAIL_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
 
 
 def error(msg, nb_path=None):
@@ -254,6 +265,33 @@ def check_first_cell(nb, nb_path):
         )
 
 
+def check_tags(nb, nb_path):
+    """Require examples-page tags in the notebook metadata."""
+    tags = nb.get("metadata", {}).get("zea", {}).get("tags")
+    example = '"metadata": {"zea": {"tags": ["beamforming", "cardiac"]}}'
+    if not tags:
+        error(f"Add tags for the examples page to the notebook metadata: {example}", nb_path)
+    if not isinstance(tags, list) or not all(isinstance(t, str) and t.strip() for t in tags):
+        error(f"Notebook tags must be a list of non-empty strings, e.g. {example}", nb_path)
+    bad = [t for t in tags if t != t.strip().lower()]
+    if bad:
+        error(f"Notebook tags must be lowercase without surrounding spaces: {bad}", nb_path)
+    if len(set(tags)) != len(tags):
+        error(f"Notebook tags contain duplicates: {tags}", nb_path)
+
+
+def check_thumbnail(nb_path, thumbnail_dir=THUMBNAIL_DIR):
+    """Require an examples-page thumbnail named after the notebook."""
+    stem = Path(nb_path).stem
+    if not any((thumbnail_dir / f"{stem}{ext}").is_file() for ext in THUMBNAIL_EXTENSIONS):
+        error(
+            f"Add a thumbnail for the examples page at docs/_static/thumbnails/{stem}.webp, "
+            "made with docs/source/make_thumbnail.py (the image only: no axes, text or "
+            "colorbars).",
+            nb_path,
+        )
+
+
 def process_notebook(nb_path):
     nb_path = Path(nb_path)
     if not nb_path.is_file():
@@ -268,6 +306,8 @@ def process_notebook(nb_path):
     check_doc_links(nb, nb_path)
     badge_cell_idx = check_badges(nb, nb_path)
     check_gpu_warning(nb, nb_path, badge_cell_idx)
+    check_tags(nb, nb_path)
+    check_thumbnail(nb_path)
 
     if clean_outputs(nb, nb_path):
         with nb_path.open("w", encoding="utf-8") as f:
