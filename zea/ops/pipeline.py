@@ -1096,7 +1096,7 @@ class Map(Pipeline):
         operations: List[Operation],
         argnames: List[str] | str,
         in_axes: List[Union[int, None]] | int = 0,
-        out_axes: List[Union[int, None]] | int = 0,
+        out_axes: int = 0,
         chunks: int | None = None,
         batch_size: int | None = None,
         **kwargs,
@@ -1108,8 +1108,7 @@ class Map(Pipeline):
                 Can also be a single string if only one argument is mapped over.
             in_axes (int or list): Axes to map over for each argument.
                 If a single int is provided, it is used for all arguments.
-            out_axes (int or list): Axes to map over for each output.
-                If a single int is provided, it is used for all outputs.
+            out_axes (int): Axis of the output to map over.
             chunks (int, optional): Number of chunks to split the input data into.
                 If None, no chunking is performed. Mutually exclusive with ``batch_size``.
             batch_size (int, optional): Size of batches to process at once.

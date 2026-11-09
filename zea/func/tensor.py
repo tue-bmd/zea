@@ -370,18 +370,12 @@ def simple_map(function, elements):
 if keras.backend.backend() == "numpy":
 
     def vectorized_map(function, elements):
-        """Fixes keras.ops.vectorized_map in numpy backend with multiple outputs."""
-        if not isinstance(elements, (list, tuple)):
-            return np.stack([function(x) for x in elements])
-        else:
-            batch_size = elements[0].shape[0]
-            output_store = []
-            for index in range(batch_size):
-                output_store.append(function([x[index] for x in elements]))
-            if isinstance(output_store[0], (list, tuple)):
-                return [np.stack(tensors) for tensors in zip(*output_store)]
-            else:
-                return np.stack(output_store)
+        """Fixes keras.ops.vectorized_map in numpy backend with multiple outputs.
+
+        Only used by `_map`, which passes and returns a tuple of tensors.
+        """
+        outputs = [function([x[i] for x in elements]) for i in range(elements[0].shape[0])]
+        return [np.stack(tensors) for tensors in zip(*outputs)]
 else:
     vectorized_map = ops.vectorized_map
 
