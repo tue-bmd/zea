@@ -48,6 +48,7 @@ Fixed
 - The shared GIF palette keeps exact colors, so pure black stays ``(0, 0, 0)`` (:gh:`680` by :user:`wesselvannierop`)
 - Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
 - Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)
+- ``zea app`` and ``load_model_from_hf`` download to the zea cache instead of the Hugging Face cache (:gh:`689` by :user:`Louisvh`)
 
 
 v0.1.8 (2026-10-01)
