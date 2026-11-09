@@ -1,7 +1,7 @@
 Environment variables
 ================================
 
-Here are the environment variables that ``zea`` uses at runtime. Arguably the most important environment variable is the Keras backend selection via ``KERAS_BACKEND``. See the :ref:`backend-installation` section for details on configuring the backend.
+Here are the environment variables that ``zea`` uses at runtime. Arguably the most important environment variable is the Keras backend selection via ``KERAS_BACKEND``. See the :ref:`backend-installation` section for details on configuring the backend. For how the cache and streaming fit together, see :ref:`cache-directory` and :ref:`streaming` below.
 
 .. list-table::
    :header-rows: 1
@@ -16,7 +16,7 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
      - installed backend
      - ``tensorflow``, ``jax``, ``torch``, ``numpy``
    * - ``ZEA_CACHE_DIR``
-     - Directory to use for caching downloaded files, e.g. model weights or datasets from Hugging Face Hub.
+     - Directory to use for caching downloaded files, e.g. model weights or datasets from Hugging Face Hub. See :ref:`cache-directory`.
      - ``~/.cache/zea``
      - ``str``
    * - ``ZEA_LOG_LEVEL``
@@ -94,3 +94,46 @@ Here are the environment variables that ``zea`` uses at runtime. Arguably the mo
        ``numcodecs``, which has its own thread setting.
      - ``min(8, cpu_count)``
      - Any positive integer.
+
+
+.. _cache-directory:
+
+Cache directory
+---------------
+
+Everything ``zea`` downloads or caches lives in one folder, ``ZEA_CACHE_DIR`` (``~/.cache/zea`` by default). Point it elsewhere to move all of it, for example to a scratch disk on a cluster, or set ``ZEA_DISABLE_CACHE=1`` to use a temporary folder that is removed when your program exits.
+
+.. code-block:: text
+
+   $ZEA_CACHE_DIR
+   ├── huggingface/
+   │   ├── datasets/   # downloaded files: configs, presets, .hdf5 files
+   │   ├── models/     # model weights and presets
+   │   └── listings/   # file lists of Hugging Face repos, reused for a few minutes
+   ├── chunks/         # data read while streaming, up to 10 GiB
+   ├── hf_locations/   # download links of streamed files, reused for 30 minutes
+   └── cached_funcs/   # saved results of slow functions
+
+Downloads stay until you delete them. The ``huggingface/`` folders use the same layout as the Hugging Face cache, so the ``hf`` command line tool can list and clean them:
+
+.. code-block:: bash
+
+   hf cache ls --cache-dir "${ZEA_CACHE_DIR:-$HOME/.cache/zea}/huggingface/datasets"
+   hf cache ls --cache-dir "${ZEA_CACHE_DIR:-$HOME/.cache/zea}/huggingface/models"
+
+
+.. _streaming:
+
+Streaming
+---------
+
+Opening an ``hf://`` file, with :class:`zea.File` or a :class:`zea.Dataloader` over an ``hf://`` folder, streams it: ``zea`` only fetches the parts you actually read, instead of downloading the whole file first. That way you can work with datasets much larger than your disk. Pass ``stream=False`` to :class:`zea.File` to download the full file instead.
+
+What you read is kept in ``chunks/``, so reading it again, such as in the next epoch, comes from disk. Once that folder reaches ``ZEA_CHUNK_CACHE_SIZE`` (10 GiB), the data used least recently makes room. If your dataset is bigger than that, each epoch downloads again what it reads: slower, but it works. Raise the limit if you have the disk space, or set ``ZEA_CHUNK_CACHE=0`` to keep nothing.
+
+A few things you may want to tune:
+
+- **Many readers at once.** ``ZEA_MAX_CONCURRENT_REQUESTS`` caps how many requests run in parallel. Raise it when many dataloader threads stream together, lower it on a slow or shared connection.
+- **A repo that changes while you read it.** File lists are reused for ``ZEA_HF_CACHE_TTL`` seconds (5 minutes), so a new upload can take that long to show up. Set it to ``0`` to always ask Hugging Face.
+
+Failed requests, such as a dropped connection or a busy server, are retried a few times before ``zea`` gives up.
