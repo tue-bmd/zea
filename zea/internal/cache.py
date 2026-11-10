@@ -100,8 +100,15 @@ else:
 _CACHE_DIR = _make_cache_dir(ZEA_CACHE_DIR / "cached_funcs")
 
 
-def get_function_source(func):
-    """Recursively get the source code of a function and its nested functions."""
+def get_function_source(func, _visited=None):
+    """Recursively get the source code of a function and its nested functions.
+
+    Each function's source is included once, so recursive and mutually recursive
+    functions are supported.
+    """
+    if _visited is None:
+        _visited = set()
+    _visited.add(func)
     try:
         source = inspect.getsource(func)
     except OSError:
@@ -127,8 +134,12 @@ def get_function_source(func):
     for called_func_name in sorted(called_functions):
         try:
             called_func = func.__globals__.get(called_func_name)
-            if inspect.isfunction(called_func) and called_func.__module__ != "zea.internal.cache":
-                nested_source = get_function_source(called_func)
+            if (
+                inspect.isfunction(called_func)
+                and called_func.__module__ != "zea.internal.cache"
+                and called_func not in _visited
+            ):
+                nested_source = get_function_source(called_func, _visited)
                 if nested_source is None:
                     # If any nested function's source cannot be retrieved, do not cache
                     return None

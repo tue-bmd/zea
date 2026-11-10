@@ -121,6 +121,23 @@ def test_get_function_source():
     assert "# This comment is required for some tests!" in src, "Did not get nested source code"
 
 
+def _recursive_func(n):
+    # Recursive marker
+    return n if n <= 0 else _recursive_func(n - 1) + _mutual_b(n)
+
+
+def _mutual_b(n):
+    # Mutual marker
+    return 0 if n <= 0 else _recursive_func(n - 1)
+
+
+def test_get_function_source_recursive():
+    """Recursive and mutually recursive functions do not loop forever."""
+    src = get_function_source(_recursive_func)
+    assert src.count("# Recursive marker") == 1
+    assert src.count("# Mutual marker") == 1
+
+
 def test_caching_x():
     """Test caching for expensive_operation_x."""
     start_time = time.time()
