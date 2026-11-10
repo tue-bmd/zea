@@ -150,21 +150,19 @@ def pytest_addoption(parser):
         "--shard",
         action="store",
         default=None,
-        help="Run only shard I of N (e.g. --shard 1/3), assigning the selected tests "
-        "round-robin so slow files are spread over all shards. Used by CI.",
+        help="Run only shard I of N (round-robin), e.g. --shard 1/3.",
     )
 
 
 class _ShardSelector:
-    """Keeps every N-th selected test, see ``--shard``."""
+    """Keeps every N-th selected test."""
 
     def __init__(self, index: int, count: int):
         self.index, self.count = index, count
 
-    # trylast: shard what is left after `-m`/`-k` deselection, so shards stay balanced.
+    # trylast: after `-m`/`-k` deselection.
     @pytest.hookimpl(trylast=True)
     def pytest_collection_modifyitems(self, config, items):
-        """Deselect all tests that are not in this shard."""
         keep = items[self.index - 1 :: self.count]
         kept = set(map(id, keep))
         config.hook.pytest_deselected(items=[item for item in items if id(item) not in kept])

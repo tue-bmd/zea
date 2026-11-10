@@ -10,11 +10,7 @@ os.environ["KERAS_BACKEND"] = TEST_BACKEND
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 os.environ["ZEA_FIND_H5_SHAPES_PARALLEL"] = "0"
 
-# Persist JAX compilations across test runs. The JAX backend workers run op-by-op
-# (jax.disable_jit), which still compiles every primitive per shape, and that dominates
-# many tests (e.g. test_metrics[ultrapips]: ~45s cold, ~7s warm). The thresholds are
-# zeroed so these small per-op compilations are cached too. Set before anything imports
-# jax; the backend workers inherit it through the environment.
+# Persist JAX compilations across runs, including small per-op ones.
 if os.environ.get("ZEA_DISABLE_CACHE", "").lower() not in ("1", "true"):
     _zea_cache_dir = os.environ.get("ZEA_CACHE_DIR", os.path.join("~", ".cache", "zea"))
     os.environ.setdefault(

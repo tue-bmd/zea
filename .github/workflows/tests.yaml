@@ -13,9 +13,7 @@ env:
   MAIN_REPO: tue-bmd/zea
 
 jobs:
-  # The unit tests, split round-robin over a few runners (see --shard in tests/conftest.py).
-  # Codecov merges the per-shard uploads; keep `after_n_builds` in codecov.yml in step
-  # with the number of shards.
+  # Keep `after_n_builds` in codecov.yml in step with the number of shards.
   unit-tests:
     name: unit-tests (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
@@ -37,10 +35,7 @@ jobs:
 
       - uses: ./.github/actions/setup-zea
 
-      # JAX compilations dominate many tests; tests/__init__.py turns on JAX's persistent
-      # compilation cache, which only pays off if it survives between runs. The run id
-      # makes every run save a fresh copy; restore-keys picks the most recent one.
-      - name: Restore JAX compilation cache
+      - name: Cache JAX compilations
         uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/jax-cache
@@ -74,7 +69,7 @@ jobs:
           files: ./junit.xml
           verbose: true
 
-  # Single status for the sharded unit tests, so the required `tests` check keeps working.
+  # Gate job: the required `tests` check.
   tests:
     if: ${{ !cancelled() }}
     needs: unit-tests

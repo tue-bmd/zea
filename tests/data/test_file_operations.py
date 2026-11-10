@@ -34,8 +34,7 @@ HF_FOLDER_PATH = "hf://zeahub/pytest/folder"
 
 
 def _run_zea_cli(monkeypatch, *args):
-    """Run the ``zea`` CLI in-process. A ``python -m zea`` subprocess would re-import all
-    backends (~7s per call); this exercises the same parsing and dispatch."""
+    """Run the ``zea`` CLI in-process (a subprocess re-imports all backends)."""
     from zea.__main__ import main
 
     monkeypatch.setattr(sys, "argv", ["zea", *map(str, args)])
