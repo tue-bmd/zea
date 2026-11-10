@@ -105,8 +105,6 @@ class _GalleryDirective(SphinxDirective):
     def _thumbnail_src(self, filename: str) -> str | None:
         relpath = f"{THUMBNAIL_DIR}/{filename}"
         path = _find_static(self.env.app, relpath)
-        # A missing file is a dependency too: Sphinx then rereads this page on
-        # every build until the thumbnail exists.
         self.env.note_dependency(str(path or _static_dirs(self.env.app)[0] / relpath))
         return None if path is None else self._uri_from_here(f"_static/{relpath}")
 
@@ -128,6 +126,7 @@ class ExampleGallery(_GalleryDirective):
     def run(self):
         folder = self.arguments[0].strip().rstrip("/")
         src = Path(self.env.srcdir) / folder
+        self.env.note_reread()
         notebooks = sorted(src.glob("*.ipynb"))
         if not notebooks:
             self._problem(f"example-gallery: no notebooks in {folder}")
