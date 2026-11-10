@@ -494,11 +494,11 @@ def test_correlate(mode):
         ["multiply", (0, None), 0, 3, None, False],  # batched map
         ["dummy", (0, None), 0, 3, None, True],  # batched map
         ["dummy", (0, 1), 0, None, 5, True],  # chunked map
-        ["multiple_out", (1, None), (1, None), None, 4, False],  # chunked map with multiple outputs
+        ["multiple_out", (1, 1), (1, 0), None, 4, False],  # chunked map with multiple outputs
         [
             "multiple_out",
-            (1, None),
-            (1, None),
+            (1, 1),
+            (1, 0),
             None,
             None,
             False,
@@ -635,6 +635,504 @@ def test_vmap_none_arg():
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
 
     return result
+
+
+@pytest.mark.parametrize(
+    "none_pattern",
+    [
+        (False, True),
+        (True, False),
+        (False, True, True),
+        (True, True, False),
+        (True, False, True),
+        (False, True, True, False),
+        (True, True, True, False),
+        (False, True, False, True, False),
+        (True, False, True, False, True),
+    ],
+)
+@pytest.mark.parametrize(
+    "vmap_kwargs",
+    [
+        {},
+        {"disable_jit": True},
+        {"batch_size": 2},
+        {"chunks": 2},
+        {"batch_size": 2, "fn_supports_batch": True, "disable_jit": True},
+    ],
+)
+@backend_equality_check()
+def test_vmap_none_arg_positions(none_pattern, vmap_kwargs):
+    """`vmap` should pass every argument at its own position, wherever the `None`s are."""
+    from keras import ops
+
+    import zea
+
+    n_samples = 4
+    # A distinct value per argument, so that a shifted argument changes the result.
+    args = [
+        None if is_none else ops.full((n_samples, 1), float(i + 1))
+        for i, is_none in enumerate(none_pattern)
+    ]
+
+    def func(*fn_args):
+        assert [arg is None for arg in fn_args] == list(none_pattern)
+        real_arg = next(arg for arg in fn_args if arg is not None)
+        return ops.stack(
+            [ops.zeros_like(real_arg) if arg is None else arg for arg in fn_args], axis=-1
+        )
+
+    result = ops.convert_to_numpy(zea.func.vmap(func, **vmap_kwargs)(*args))
+
+    expected = [0.0 if is_none else float(i + 1) for i, is_none in enumerate(none_pattern)]
+    assert result.shape == (n_samples, 1, len(none_pattern))
+    np.testing.assert_array_equal(result[0, 0], expected)
+
+    return result
+
+
+_VMAP_PATHS = [
+    {},
+    {"disable_jit": True},
+    {"batch_size": 2},
+    {"chunks": 2, "disable_jit": True},
+]
+_VMAP_BATCH_PATHS = [
+    {"batch_size": 2, "fn_supports_batch": True},
+    {"chunks": 2, "fn_supports_batch": True, "disable_jit": True},
+]
+# These outputs and inputs do not use axes, so `fun` also works on a whole batch.
+_VMAP_DEFAULT_AXES_CASES = [
+    "more_outputs_than_inputs",
+    "many_more_outputs_than_inputs",
+    "fewer_outputs_than_inputs",
+    "one_tuple",
+    "list",
+    "none_output_middle",
+    "none_output_first",
+    "none_outputs_mixed",
+    "only_none",
+    "only_nones",
+    "none_input_and_output",
+    "nested",
+    "dict",
+    "dict_with_none",
+]
+_VMAP_AXES_CASES = [
+    "out_axes_1",
+    "out_axes_negative",
+    "out_axes_negative_2",
+    "out_axes_per_output",
+    "out_axes_per_output_with_none_output",
+    "out_axes_nested",
+    "out_axes_prefix",
+    "in_axes_1",
+    "in_axes_negative",
+    "in_axes_and_out_axes_negative",
+    "in_axes_negative_with_none_input",
+    "in_axes_none",
+]
+
+
+@pytest.mark.parametrize(
+    "case, vmap_kwargs",
+    [
+        (case, kwargs)
+        for case in _VMAP_DEFAULT_AXES_CASES
+        for kwargs in _VMAP_PATHS + _VMAP_BATCH_PATHS
+    ]
+    + [(case, kwargs) for case in _VMAP_AXES_CASES for kwargs in _VMAP_PATHS],
+)
+@backend_equality_check(allow_none=True)
+def test_vmap_matches_jax(case, vmap_kwargs):
+    """`vmap` should give the same outputs and output structure as `jax.vmap`."""
+    import jax
+    import keras
+    from keras import ops
+
+    import zea
+
+    a = np.arange(15, dtype="float32").reshape(5, 3)
+    b = a + 100
+    c = a + 200
+
+    fun, args, axes = {
+        "more_outputs_than_inputs": (lambda a: (a, a + 1), (a,), {}),
+        "many_more_outputs_than_inputs": (lambda a, b: (a, b, a + b, a - b), (a, b), {}),
+        "fewer_outputs_than_inputs": (lambda a, b, c: (a, c), (a, b, c), {}),
+        "one_tuple": (lambda a: (a,), (a,), {}),
+        "list": (lambda a: [a, a + 1], (a,), {}),
+        "none_output_middle": (lambda a, b, c: (a, None, c), (a, b, c), {}),
+        "none_output_first": (lambda a: (None, a), (a,), {}),
+        "none_outputs_mixed": (lambda a: [None, a, None, a + 1], (a,), {}),
+        "only_none": (lambda a: None, (a,), {}),
+        "only_nones": (lambda a: (None, None), (a,), {}),
+        "none_input_and_output": (lambda a, b, c: (b, a, c), (a, None, c), {}),
+        "nested": (lambda a: (a, [a + 1, (a + 2, None)]), (a,), {}),
+        "dict": (lambda a: {"y": a, "x": a + 1}, (a,), {}),
+        "dict_with_none": (lambda a: {"y": None, "x": (a, a + 1)}, (a,), {}),
+        "out_axes_1": (lambda a: (a, a + 1), (a,), {"out_axes": 1}),
+        "out_axes_negative": (lambda a: (a, a + 1), (a,), {"out_axes": -1}),
+        "out_axes_negative_2": (lambda a: a, (a,), {"out_axes": -2}),
+        "out_axes_per_output": (lambda a: (a, a + 1), (a,), {"out_axes": (0, 1)}),
+        "out_axes_per_output_with_none_output": (
+            lambda a: (a, None, a + 1),
+            (a,),
+            {"out_axes": (1, 0, 0)},
+        ),
+        "out_axes_nested": (lambda a: (a, (a, a + 1)), (a,), {"out_axes": (0, (1, 0))}),
+        "out_axes_prefix": (lambda a: (a, (a, a + 1)), (a,), {"out_axes": (0, 1)}),
+        "in_axes_1": (lambda a: (a, a + 1), (a.T,), {"in_axes": 1}),
+        "in_axes_negative": (lambda a: (a, a + 1), (a.T,), {"in_axes": -1}),
+        "in_axes_and_out_axes_negative": (
+            lambda a: a * 2,
+            (a.T,),
+            {"in_axes": -1, "out_axes": -1},
+        ),
+        "in_axes_negative_with_none_input": (
+            lambda a, b, c: (c, a),
+            (a.T, None, b.T),
+            {"in_axes": -1},
+        ),
+        "in_axes_none": (lambda a, b: (a, b, a + b), (a, b[0]), {"in_axes": (0, None)}),
+    }[case]
+
+    expected = jax.vmap(fun, **axes)(*args)
+    result = zea.func.vmap(fun, **axes, **vmap_kwargs)(
+        *[None if arg is None else ops.convert_to_tensor(arg) for arg in args]
+    )
+    result = keras.tree.map_structure(
+        lambda x: None if x is None else ops.convert_to_numpy(x), result
+    )
+
+    assert jax.tree.structure(result) == jax.tree.structure(expected)
+    jax.tree.map(lambda x, y: np.testing.assert_allclose(x, y), result, expected)
+
+    leaves = jax.tree.leaves(result)
+    return leaves[-1] if leaves else None
+
+
+@pytest.mark.parametrize("vmap_kwargs", _VMAP_PATHS)
+@pytest.mark.parametrize(
+    "case",
+    [
+        "different_lengths",
+        "too_few_out_axes",
+        "too_many_out_axes",
+        "out_axes_for_single_output",
+        "no_mapped_axis",
+    ],
+)
+@backend_equality_check(allow_none=True)
+def test_vmap_raises_like_jax(case, vmap_kwargs):
+    """`vmap` should raise where `jax.vmap` raises, instead of returning a wrong result."""
+    import jax
+    from keras import ops
+
+    import zea
+
+    a = np.arange(15, dtype="float32").reshape(5, 3)
+
+    fun, args, axes = {
+        "different_lengths": (lambda a, b: a, (a, a[:3]), {}),
+        "too_few_out_axes": (lambda a: (a, a + 1), (a,), {"out_axes": (0,)}),
+        "too_many_out_axes": (lambda a: (a, a + 1), (a,), {"out_axes": (0, 0, 0)}),
+        "out_axes_for_single_output": (lambda a: a, (a,), {"out_axes": (0, 0)}),
+        "no_mapped_axis": (lambda a: a, (a,), {"in_axes": None}),
+    }[case]
+
+    with pytest.raises(ValueError):
+        jax.vmap(fun, **axes)(*args)
+    with pytest.raises(ValueError):
+        zea.func.vmap(fun, **axes, **vmap_kwargs)(*[ops.convert_to_tensor(arg) for arg in args])
+
+
+# These functions also work on a whole batch.
+_VMAP_DEFAULT_AXES_INPUT_CASES = [
+    "dict_input",
+    "tuple_input",
+    "list_input",
+    "nested_input",
+    "none_in_dict_input",
+    "none_after_nested_input",
+    "keyword",
+    "only_keywords",
+    "nested_keyword",
+]
+_VMAP_AXES_INPUT_CASES = [
+    "dict_in_axes",
+    "dict_in_axes_unsorted_keys",
+    "dict_in_axes_unmapped",
+    "tuple_in_axes",
+    "int_for_container",
+    "none_for_container",
+    "in_axes_list",
+    "keyword_with_in_axes",
+    "dict_out_axes",
+]
+
+
+@pytest.mark.parametrize(
+    "case, vmap_kwargs",
+    [
+        (case, kwargs)
+        for case in _VMAP_DEFAULT_AXES_INPUT_CASES
+        for kwargs in _VMAP_PATHS + _VMAP_BATCH_PATHS
+    ]
+    + [(case, kwargs) for case in _VMAP_AXES_INPUT_CASES for kwargs in _VMAP_PATHS],
+)
+@backend_equality_check(allow_none=True)
+def test_vmap_inputs_match_jax(case, vmap_kwargs):
+    """`vmap` should accept the same inputs and axes as `jax.vmap`, with the same results."""
+    import jax
+    import keras
+    from keras import ops
+
+    import zea
+
+    a = np.arange(15, dtype="float32").reshape(5, 3)
+    b = a + 100
+    c = a + 200
+
+    fun, args, kwargs, axes = {
+        "dict_input": (lambda d: d["x"] - d["y"], ({"x": a, "y": b},), {}, {}),
+        "tuple_input": (lambda t: t[0] - t[1], ((a, b),), {}, {}),
+        "list_input": (lambda t: [t[1], t[0] + 1], ([a, b],), {}, {}),
+        "nested_input": (lambda d: d["x"][1][0] - d["y"], ({"x": (a, [b]), "y": c},), {}, {}),
+        "none_in_dict_input": (lambda d: (d["x"], d["y"]), ({"x": a, "y": None},), {}, {}),
+        "none_after_nested_input": (
+            lambda d, n, m, c: (d["x"] - c, n, m),
+            ({"x": a}, None, None, b),
+            {},
+            {},
+        ),
+        "keyword": (lambda x, y: x - y, (a,), {"y": b}, {}),
+        "only_keywords": (lambda x, y: x - y, (), {"y": b, "x": a}, {}),
+        "nested_keyword": (lambda x, y: x - y["z"], (a,), {"y": {"z": b}}, {}),
+        "dict_in_axes": (
+            lambda d: d["x"] - d["y"],
+            ({"x": a, "y": b.T},),
+            {},
+            {"in_axes": ({"x": 0, "y": 1},)},
+        ),
+        # Leaves are sorted by key, which should not mix up the axes.
+        "dict_in_axes_unsorted_keys": (
+            lambda d: d["z"] - d["a"],
+            ({"z": a.T, "a": b},),
+            {},
+            {"in_axes": ({"z": 1, "a": 0},)},
+        ),
+        "dict_in_axes_unmapped": (
+            lambda d, e: d["x"] - d["y"] + e,
+            ({"x": a, "y": b[0]}, c[0]),
+            {},
+            {"in_axes": ({"x": 0, "y": None}, None)},
+        ),
+        "tuple_in_axes": (
+            lambda t: t[0] - t[1][0],
+            ((a, (b.T,)),),
+            {},
+            {"in_axes": ((0, (1,)),)},
+        ),
+        "int_for_container": (
+            lambda d: d["x"] - d["y"],
+            ({"x": a.T, "y": b.T},),
+            {},
+            {"in_axes": (1,)},
+        ),
+        "none_for_container": (
+            lambda d, e: d["x"] - d["y"] + e,
+            ({"x": a[0], "y": b[0]}, c),
+            {},
+            {"in_axes": (None, 0)},
+        ),
+        "in_axes_list": (lambda x, y: x - y, (a, b[0]), {}, {"in_axes": [0, None]}),
+        "keyword_with_in_axes": (lambda x, y: x - y, (a.T,), {"y": b}, {"in_axes": (1,)}),
+        "dict_out_axes": (
+            lambda x: {"y": x, "x": (x + 1, x + 2)},
+            (a,),
+            {},
+            {"out_axes": {"y": 1, "x": (0, -1)}},
+        ),
+    }[case]
+
+    def to_tensor(x):
+        return None if x is None else ops.convert_to_tensor(x)
+
+    expected = jax.vmap(fun, **axes)(*args, **kwargs)
+    tensor_args, tensor_kwargs = keras.tree.map_structure(to_tensor, (args, kwargs))
+    result = zea.func.vmap(fun, **axes, **vmap_kwargs)(*tensor_args, **tensor_kwargs)
+    result = keras.tree.map_structure(
+        lambda x: None if x is None else ops.convert_to_numpy(x), result
+    )
+
+    assert jax.tree.structure(result) == jax.tree.structure(expected)
+    jax.tree.map(lambda x, y: np.testing.assert_allclose(x, y), result, expected)
+
+    return jax.tree.leaves(result)[-1]
+
+
+@pytest.mark.parametrize("vmap_kwargs", _VMAP_PATHS)
+@backend_equality_check()
+def test_vmap_unmapped_numpy_input(vmap_kwargs):
+    """Unmapped numpy inputs should work with tensors in `fun` on all backends."""
+    from keras import ops
+
+    import zea
+
+    a = np.arange(15, dtype="float32").reshape(5, 3)
+    b = a[0] + 100
+
+    result = zea.func.vmap(lambda x, y: x - y, in_axes=(0, None), **vmap_kwargs)(
+        ops.convert_to_tensor(a), b
+    )
+
+    result = ops.convert_to_numpy(result)
+    np.testing.assert_allclose(result, a - b)
+    return result
+
+
+@pytest.mark.parametrize("vmap_kwargs", _VMAP_PATHS + _VMAP_BATCH_PATHS)
+@backend_equality_check(allow_none=True)
+def test_vmap_out_axes_none(vmap_kwargs):
+    """`out_axes=None` needs the native `jax.vmap`, which can check that an output is unmapped."""
+    import jax
+    import keras
+    from keras import ops
+
+    import zea
+
+    a = np.arange(15, dtype="float32").reshape(5, 3)
+    b = a[0] + 100
+    fun = lambda a, b: (a, b)  # noqa: E731
+    axes = {"in_axes": (0, None), "out_axes": (0, None)}
+    args = (ops.convert_to_tensor(a), ops.convert_to_tensor(b))
+
+    is_native = (
+        keras.backend.backend() == "jax"
+        and not vmap_kwargs.get("disable_jit", False)
+        and not vmap_kwargs.get("fn_supports_batch", False)
+    )
+    if not is_native:
+        with pytest.raises(ValueError, match="out_axes=None"):
+            zea.func.vmap(fun, **axes, **vmap_kwargs)
+        return None
+
+    expected = jax.vmap(fun, **axes)(a, b)
+    result = zea.func.vmap(fun, **axes, **vmap_kwargs)(*args)
+    jax.tree.map(lambda x, y: np.testing.assert_allclose(x, y), result, expected)
+    with pytest.raises(ValueError):
+        zea.func.vmap(lambda a: a, out_axes=None, **vmap_kwargs)(args[0])
+    return None
+
+
+@pytest.mark.parametrize("vmap_kwargs", _VMAP_PATHS)
+@pytest.mark.parametrize(
+    "case",
+    [
+        "in_axes_too_long",
+        "in_axes_too_short",
+        "in_axes_wrong_keys",
+        "in_axes_missing_keys",
+        "in_axes_list_for_tuple",
+        "in_axes_tuple_for_list",
+        "in_axis_out_of_bounds",
+        "out_axes_list_for_tuple",
+        "out_axes_tuple_for_list",
+        "out_axes_wrong_keys",
+        "nested_different_lengths",
+    ],
+)
+@backend_equality_check(allow_none=True)
+def test_vmap_invalid_axes_raise_like_jax(case, vmap_kwargs):
+    """Axes that do not match the inputs or outputs should raise, as in `jax.vmap`."""
+    import jax
+    import keras
+    from keras import ops
+
+    import zea
+
+    a = np.arange(15, dtype="float32").reshape(5, 3)
+
+    fun, args, axes = {
+        "in_axes_too_long": (lambda x: x, (a,), {"in_axes": (0, 0)}),
+        "in_axes_too_short": (lambda x, y: x, (a, a), {"in_axes": (0,)}),
+        "in_axes_wrong_keys": (lambda d: d["x"], ({"x": a},), {"in_axes": ({"y": 0},)}),
+        "in_axes_missing_keys": (lambda d: d["x"], ({"x": a, "y": a},), {"in_axes": ({"x": 0},)}),
+        "in_axes_list_for_tuple": (lambda t: t[0], ((a, a),), {"in_axes": ([0, 0],)}),
+        "in_axes_tuple_for_list": (lambda t: t[0], ([a, a],), {"in_axes": ((0, 0),)}),
+        "in_axis_out_of_bounds": (lambda x: x, (a,), {"in_axes": 5}),
+        "out_axes_list_for_tuple": (lambda x: (x, x), (a,), {"out_axes": [0, 0]}),
+        "out_axes_tuple_for_list": (lambda x: [x, x], (a,), {"out_axes": (0, 0)}),
+        "out_axes_wrong_keys": (lambda x: {"x": x}, (a,), {"out_axes": {"y": 0}}),
+        "nested_different_lengths": (lambda d: d["x"], ({"x": a, "y": a[:3]},), {}),
+    }[case]
+
+    with pytest.raises(ValueError):
+        jax.vmap(fun, **axes)(*args)
+    tensor_args = keras.tree.map_structure(ops.convert_to_tensor, args)
+    with pytest.raises(ValueError):
+        zea.func.vmap(fun, **axes, **vmap_kwargs)(*tensor_args)
+
+
+@pytest.mark.parametrize("chunks", [None, 1])
+def test_vmap_out_axes_none_fn_supports_batch_fast_path(chunks):
+    """`out_axes=None` should also raise when `fn_supports_batch` would return `fun` as is."""
+    import zea
+
+    with pytest.raises(ValueError, match="out_axes=None"):
+        zea.func.vmap(lambda x: x, out_axes=None, fn_supports_batch=True, chunks=chunks)
+
+
+@pytest.mark.parametrize("inner_kwargs", _VMAP_PATHS)
+@pytest.mark.parametrize("outer_kwargs", _VMAP_PATHS)
+@backend_equality_check()
+def test_vmap_nested(outer_kwargs, inner_kwargs):
+    """`vmap` can be nested, also with moved axes, unmapped and `None` arguments and outputs."""
+    import jax
+    from keras import ops
+
+    import zea
+
+    a = np.arange(24, dtype="float32").reshape(2, 3, 4)
+    b = np.arange(4, dtype="float32")
+    fun = lambda x, y, z: (x * y, None)  # noqa: E731
+    inner = {"in_axes": (1, 0, None), "out_axes": (-1, 0)}
+    outer = {"in_axes": (0, None, None)}
+
+    expected = jax.vmap(jax.vmap(fun, **inner), **outer)(a, b, None)
+    inner_fn = zea.func.vmap(fun, **inner, **inner_kwargs)
+    result = zea.func.vmap(inner_fn, **outer, **outer_kwargs)(
+        ops.convert_to_tensor(a), ops.convert_to_tensor(b), None
+    )
+    assert result[1] is None
+    result = ops.convert_to_numpy(result[0])
+    np.testing.assert_allclose(result, expected[0])
+    return result
+
+
+@pytest.mark.parametrize(
+    "axes",
+    [
+        {"in_axes": True},
+        {"in_axes": 0.0},
+        {"in_axes": np.int64(0)},
+        {"in_axes": {"x": 0}},
+        {"in_axes": ("a",)},
+        {"out_axes": ("a",)},
+        {"out_axes": 0.0},
+    ],
+)
+def test_vmap_invalid_axis_types_raise_like_jax(axes):
+    """Only integers and `None` are valid axes, as in `jax.vmap`."""
+    import jax
+
+    import zea
+
+    with pytest.raises(TypeError):
+        jax.vmap(lambda x: x, **axes)
+    with pytest.raises(TypeError):
+        zea.func.vmap(lambda x: x, **axes)
 
 
 @backend_equality_check()
