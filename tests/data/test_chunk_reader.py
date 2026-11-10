@@ -919,6 +919,98 @@ class TestRetry:
         finally:
             server.close()
 
+    @pytest.mark.parametrize(
+        "failure",
+        [{"reject_first": 1000, "reject_status": 503}, {"drop_first": 1000}],
+        ids=["503", "dropped"],
+    )
+    def test_exhausted_retries_raise_os_error(
+        self, structured_file, fast_backoff, monkeypatch, failure
+    ):
+        """aiohttp errors are not ``OSError``, so callers that reopen on ``OSError`` missed them."""
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
+        server = _CountingServer(structured_file.parent, latency=0, **failure)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)  # no signature to redact
+            with pytest.raises(chunk_reader.RemoteReadError):
+                fetcher.fetch([(0, 16)])
+        finally:
+            server.close()
+
+    @staticmethod
+    def _flaky_frames(tmp_path, monkeypatch, key="data", status=503):
+        """A chunked file streamed from a server whose first read fails both of its attempts."""
+        path = tmp_path / "frames.hdf5"
+        data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
+        with h5py.File(path, "w") as f:
+            f.create_dataset(key, data=data, chunks=(1, 8, 8), compression="gzip")
+
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
+        server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=status)
+        monkeypatch.setattr(
+            chunk_reader, "fetcher_for", lambda file: HTTPFetcher(server.url + path.name)
+        )
+        return path, data, server
+
+    def test_dataloader_recovers_from_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
+        """One read that outlasts the retries is reopened and read again, not fatal to the epoch."""
+        from zea.data.dataloader import H5DataSource
+
+        path, data, server = self._flaky_frames(tmp_path, monkeypatch)
+        try:
+            source = H5DataSource(str(path), key="data", validate=False, frame_axis=0)
+            np.testing.assert_array_equal(np.squeeze(source[0]), data[0])
+            assert server.count == 3
+        finally:
+            server.close()
+
+    def test_cached_handle_survives_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
+        """A failed read leaves no state behind: every chunk read sends fresh range requests, so
+        the next read through the same cached handle works without reopening the file."""
+        from zea.data.datasets import H5FileHandleCache
+
+        path, data, server = self._flaky_frames(tmp_path, monkeypatch)
+        cache = H5FileHandleCache()
+        try:
+            file = cache.get_file(str(path))
+            with pytest.raises(OSError):
+                file.dataset("data")[0]
+            assert cache.get_file(str(path)) is file
+            np.testing.assert_array_equal(file.dataset("data")[0], data[0])
+            assert server.count == 3
+        finally:
+            cache.close()
+            server.close()
+
+    @pytest.mark.parametrize(
+        "status, error", [(503, chunk_reader.RemoteReadError), (404, FileNotFoundError)]
+    )
+    def test_load_data_keeps_failed_reads_an_os_error(
+        self, tmp_path, fast_backoff, monkeypatch, status, error
+    ):
+        """``load_data`` turns bad indices into ``ValueError``; a failed read is not one."""
+        from zea.data.datasets import H5FileHandleCache
+
+        path, data, server = self._flaky_frames(
+            tmp_path, monkeypatch, key="data/raw_data", status=status
+        )
+        cache = H5FileHandleCache()
+        try:
+            file = cache.get_file(str(path))
+            with pytest.raises(error):
+                file.load_data("raw_data", 0)
+        finally:
+            cache.close()
+            server.close()
+
+    @pytest.mark.parametrize("fsspec_error", [False, True])
+    def test_an_exhausted_timeout_is_a_remote_read_error(self, fsspec_error):
+        """A bare timeout is an ``OSError`` that ``load_data`` would take for a bad index."""
+        from fsspec.exceptions import FSTimeoutError
+
+        exc = FSTimeoutError() if fsspec_error else TimeoutError()
+        assert isinstance(chunk_reader._as_os_error(exc), chunk_reader.RemoteReadError)
+
     def test_a_missing_file_is_not_retried(self, structured_file, fast_backoff):
         """Only transient statuses are worth another attempt; 404 is an answer, not a stall."""
         server = _CountingServer(
@@ -1041,8 +1133,9 @@ class TestRefusedLocation:
         )
         try:
             fetcher = HTTPFetcher(server.url + structured_file.name)
-            with pytest.raises(aiohttp.ClientResponseError):
+            with pytest.raises(chunk_reader.RemoteReadError) as info:
                 fetcher.fetch([(0, 16)])
+            assert info.value.status == 403
             assert server.count == 1
         finally:
             server.close()
