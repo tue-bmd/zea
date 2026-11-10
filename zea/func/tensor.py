@@ -370,45 +370,85 @@ def simple_map(function, elements):
 if keras.backend.backend() == "numpy":
 
     def vectorized_map(function, elements):
-        """Fixes keras.ops.vectorized_map in numpy backend with multiple outputs."""
-        if not isinstance(elements, (list, tuple)):
-            return np.stack([function(x) for x in elements])
-        else:
-            batch_size = elements[0].shape[0]
-            output_store = []
-            for index in range(batch_size):
-                output_store.append(function([x[index] for x in elements]))
-            if isinstance(output_store[0], (list, tuple)):
-                return [np.stack(tensors) for tensors in zip(*output_store)]
-            else:
-                return np.stack(output_store)
+        """Fixes keras.ops.vectorized_map in numpy backend with multiple outputs.
+
+        Only used by `_map`, which passes and returns a tuple of tensors.
+        """
+        outputs = [function([x[i] for x in elements]) for i in range(elements[0].shape[0])]
+        return [np.stack(tensors) for tensors in zip(*outputs)]
 else:
     vectorized_map = ops.vectorized_map
 
 
-def _find_map_length(args, in_axes) -> int:
-    """Find the length of the axis to map over."""
-    for arg, axis in zip(args, in_axes):
-        if axis is None or arg is None:
-            continue
-
-        return ops.shape(arg)[axis]
-
-    raise ValueError("At least one in_axes must be non-None to determine map length.")
+def _is_mapped(leaf, axis) -> bool:
+    """Whether an input leaf is mapped over: `None` leaves and axes are not."""
+    return leaf is not None and axis is not None
 
 
-def _repeat_int_to_tuple(value, length: int) -> Tuple[Union[int, None], ...]:
-    """Convert an int or None to a tuple of length `length`."""
-    if isinstance(value, int) or value is None:
-        return (value,) * length
-    elif isinstance(value, (tuple, list)):
-        if len(value) != length:
-            raise ValueError(f"Expected sequence of length {length}, got {len(value)}.")
-        return tuple(value)
-    raise ValueError("Value must be an int, None, or a tuple or list.")
+def _find_map_length(leaves, axes) -> int:
+    """Find the length of the axis to map over, which all mapped leaves should share."""
+    lengths = [
+        ops.shape(leaf)[canonicalize_axis(axis, ops.ndim(leaf))]
+        for leaf, axis in zip(leaves, axes)
+        if _is_mapped(leaf, axis)
+    ]
+    if not lengths:
+        raise ValueError("At least one in_axes must be non-None to determine map length.")
+
+    # Lengths can be unknown (not an int) while tracing
+    if len({length for length in lengths if isinstance(length, int)}) > 1:
+        raise ValueError(f"Mapped arguments should have the same length, got {lengths}.")
+
+    return lengths[0]
 
 
-def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
+def _flatten_axes(axes, tree, name: str) -> list:
+    """Get the axis of each leaf in `tree`, in the order of `keras.tree.flatten`.
+
+    Like in `jax.vmap`, `axes` should be a prefix of `tree`: an int or None applies to all leaves
+    below it, and a container should match the type and the length or keys of the one in `tree`.
+    """
+    if isinstance(axes, int) or axes is None:
+        return [axes] * len(keras.tree.flatten(tree))
+    if isinstance(axes, dict) and isinstance(tree, dict) and axes.keys() == tree.keys():
+        return [leaf for key in sorted(tree) for leaf in _flatten_axes(axes[key], tree[key], name)]
+    for container in (tuple, list):
+        if isinstance(axes, container) and isinstance(tree, container) and len(axes) == len(tree):
+            return [leaf for ax, sub in zip(axes, tree) for leaf in _flatten_axes(ax, sub, name)]
+    raise ValueError(f"{name}={axes} does not match the structure of the corresponding values.")
+
+
+def _flatten_inputs(args, kwargs, in_axes) -> Tuple[list, list]:
+    """Get the input leaves and their axes. Like in `jax.vmap`, keywords map over axis 0."""
+    if isinstance(in_axes, tuple) and len(in_axes) != len(args):
+        raise ValueError(
+            f"in_axes should have an entry per positional argument, got {len(in_axes)} entries "
+            f"for {len(args)} arguments."
+        )
+    tree = (args, kwargs)
+    return keras.tree.flatten(tree), _flatten_axes((in_axes, 0), tree, "in_axes")
+
+
+def _check_axes(axes, name: str) -> None:
+    """Like `jax.vmap`, only accept plain integers and `None` as axes."""
+    for axis in keras.tree.flatten(axes):
+        if axis is not None and type(axis) is not int:
+            raise TypeError(f"{name} should only contain integers and None, got {axes}.")
+
+
+def _moveaxis(x, source: int, destination: int):
+    """`ops.moveaxis` that also works when nested in `torch.vmap`, which has no batching rule for
+    `aten::moveaxis.int`."""
+    ndim = ops.ndim(x)
+    source, destination = canonicalize_axis(source, ndim), canonicalize_axis(destination, ndim)
+    if source == destination:
+        return x
+    perm = [i for i in range(ndim) if i != source]
+    perm.insert(destination, source)
+    return ops.transpose(x, perm)
+
+
+def _map(fun, in_axes=0, out_axes=0, map_fn=None):
     """Mapping function, vectorized by default.
 
     For jax, this uses the native vmap implementation.
@@ -419,16 +459,11 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
 
     Args:
         fun: The function to be mapped.
-        in_axes: The axis or axes to be mapped over in the input.
-            Can be an integer, a tuple of integers, or None.
-            If None, the corresponding argument is not mapped over.
+        in_axes: The axis or axes to be mapped over in the input, see `zea.func.vmap`.
             Defaults to 0.
-        out_axes: The axis or axes to be mapped over in the output.
-            Can be an integer, a tuple of integers, or None.
-            If None, the corresponding output is not mapped over.
-            Defaults to 0.
+        out_axes: The axis or axes to be mapped over in the output, see `zea.func.vmap`.
+            Only the native jax vmap supports `None`. Defaults to 0.
         map_fn: The mapping function to use. If None, defaults to `ops.vectorized_map`.
-        _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
 
     Returns:
         A function that applies `fun` (in a vectorized manner) over the specified axes.
@@ -440,90 +475,74 @@ def _map(fun, in_axes=0, out_axes=0, map_fn=None, _use_torch_vmap=False):
 
         return jax.vmap(fun, in_axes=in_axes, out_axes=out_axes)
 
-    # Use native vmap for PyTorch backend when map_fn is not provided and _use_torch_vmap is True
-    if keras.backend.backend() == "torch" and map_fn is None and _use_torch_vmap:
-        import torch
-
-        return torch.vmap(fun, in_dims=in_axes, out_dims=out_axes)
-
     # Default to keras vectorized_map if map_fn not provided
     if map_fn is None:
         map_fn = vectorized_map
 
-    def _moveaxes(args, in_axes, out_axes) -> tuple:
-        """Move axes of the input arguments."""
-        args = list(args)
-        new_args = []
-        map_length = _find_map_length(args, in_axes)
-        for arg, in_axis, out_axis in zip(args, in_axes, out_axes):
-            if arg is None:
-                # filter out None arguments
-                continue
-            if out_axis is None:
-                new_args.append(ops.take(arg, 0, axis=in_axis))
-            elif in_axis is not None:
-                new_args.append(ops.moveaxis(arg, in_axis, out_axis))
-            else:
-                new_args.append(
-                    ops.repeat(ops.expand_dims(arg, out_axis), map_length, axis=out_axis)
-                )
-        return tuple(new_args)
+    def mapped_wrapper(*args, **kwargs):
+        tree = (args, kwargs)
+        leaves, leaf_axes = _flatten_inputs(args, kwargs, in_axes)
+        # Unmapped arrays are passed on as they are, and not all backends can mix them with tensors
+        leaves = [
+            ops.convert_to_tensor(leaf) if isinstance(leaf, (np.ndarray, np.generic)) else leaf
+            for leaf in leaves
+        ]
+        _find_map_length(leaves, leaf_axes)  # Checks that the mapped leaves share their length
 
-    def _partial_at(func, idx, value) -> Callable[..., Any]:
-        """Return a new function with value inserted at index idx in args."""
+        # `tf.vectorized_map` can not return a captured eager tensor as it is, so wrap the outputs
+        # in `tf.identity` there
+        identity_outputs = keras.backend.backend() == "tensorflow" and map_fn is vectorized_map
 
-        def wrapper(*args, **kwargs):
-            args = list(args)
-            args[idx:idx] = [value]
-            return func(*args, **kwargs)
+        # Map over the tensors with a mapped axis only, the other leaves are kept as they are
+        mapped_ids, elements = [], []
+        for i, (leaf, axis) in enumerate(zip(leaves, leaf_axes)):
+            if _is_mapped(leaf, axis):
+                mapped_ids.append(i)
+                elements.append(_moveaxis(leaf, axis, 0))
+        elements = tuple(elements)
 
-        return wrapper
+        # Not all map functions support nested or None outputs, so map over the tensors only
+        is_none = None
 
-    def mapped_wrapper(*args):
-        _in_axes = _repeat_int_to_tuple(in_axes, len(args))
+        def _fun(elements):
+            nonlocal is_none
+            fn_leaves = list(leaves)
+            for i, element in zip(mapped_ids, elements):
+                fn_leaves[i] = element
+            fn_args, fn_kwargs = keras.tree.pack_sequence_as(tree, fn_leaves)
+            outputs = fun(*fn_args, **fn_kwargs)
+            is_none = keras.tree.map_structure(lambda output: output is None, outputs)
+            tensors = [output for output in keras.tree.flatten(outputs) if output is not None]
+            if identity_outputs:
+                import tensorflow as tf
 
-        # Move mapped axes to front
-        zeros = (0,) * len(args)
-        none_indexes = [i for i, arg in enumerate(args) if arg is None]
-        args = _moveaxes(args, _in_axes, zeros)
+                tensors = [tf.identity(tensor) for tensor in tensors]
+            # Map functions need at least one output, also when the function only returns None
+            return tuple(tensors) or (ops.zeros(()),)
 
-        # Build function with None arguments prefilled
-        _prefilled_none_fn = fun
-        for none_idx in none_indexes:
-            _prefilled_none_fn = _partial_at(_prefilled_none_fn, none_idx, None)
+        mapped = iter(keras.tree.flatten(map_fn(_fun, elements)))
 
-        def _fun(args):
-            return _prefilled_none_fn(*args)
-
-        outputs = map_fn(_fun, tuple(args))
-
-        # Wrap outputs to tuple for easier processing
-        tuple_output = isinstance(outputs, (tuple, list))
-        if not tuple_output:
-            outputs = (outputs,)
-
-        _out_axes = _repeat_int_to_tuple(out_axes, len(outputs))
-
-        # Move mapped axes back to original position
-        outputs = _moveaxes(outputs, zeros, _out_axes)
-
-        if not tuple_output:
-            outputs = outputs[0]
-
-        return outputs
+        # Restore the structure of the outputs, with the None outputs in place and the mapped
+        # axes back at their position
+        new_leaves = [
+            None if none else _moveaxis(next(mapped), 0, axis)
+            for none, axis in zip(
+                keras.tree.flatten(is_none), _flatten_axes(out_axes, is_none, "out_axes")
+            )
+        ]
+        return keras.tree.pack_sequence_as(is_none, new_leaves)
 
     return mapped_wrapper
 
 
 def vmap(
     fun: Callable[..., Any],
-    in_axes: Sequence[int | None] | int = 0,
-    out_axes: Sequence[int | None] | int = 0,
+    in_axes: Any = 0,
+    out_axes: Any = 0,
     chunks: int | None = None,
     batch_size: int | None = None,
     fn_supports_batch: bool = False,
     disable_jit: bool = False,
-    _use_torch_vmap: bool = False,
 ):
     """`vmap` with batching or chunking support to avoid memory issues.
 
@@ -531,21 +550,31 @@ def vmap(
     to avoid memory issues with large inputs. Choose the `batch_size` or `chunks` wisely, because
     it pads the input to make it divisible, and then crop the output back to the original size.
 
+    Follows `jax.vmap` on all backends. The inputs and outputs of `fun` can be tensors, `None`, or
+    nested tuples, lists and dicts of those. Keyword arguments are mapped over axis 0. The only
+    difference is `out_axes=None`, see below.
+
     Args:
         fun: Function to be mapped.
-        in_axes: Axis or axes to be mapped over in the input.
-        out_axes: Axis or axes to be mapped over in the output.
+        in_axes: Axis or axes to be mapped over in the input. An integer or `None` applies to all
+            inputs below it, with `None` meaning that they are not mapped over. Otherwise, a tuple
+            or list with an entry per positional argument, where each entry can also be a container
+            that matches the structure of that argument, such as `({"x": 0, "y": None},)`.
+        out_axes: Axis or axes to be mapped over in the output. An integer or `None` applies to
+            all outputs below it, and a tuple, list or dict should match the structure of the
+            outputs. `None` keeps an output that does not depend on the mapped axis unmapped. It
+            is only supported by the native `jax.vmap`, which can check that dependency, so it
+            raises an error on other backends, with `disable_jit` and with `fn_supports_batch`.
         batch_size: Size of the batch for each step. If `None`, the function will be equivalent
             to `vmap`. If `1`, will be equivalent to `map`. Mutually exclusive with `chunks`.
         chunks: Number of chunks to split the input into. If `None` or `1`, the function will be
             equivalent to `vmap`. Mutually exclusive with `batch_size`.
         fn_supports_batch: If True, assumes that `fun` can already handle batched inputs.
             In this case, this function will only handle padding and reshaping for batching.
+            Unlike in `jax.vmap`, `in_axes` and `out_axes` then do not move any axes: `fun`
+            should take its batch at `in_axes` and return it at `out_axes` itself.
         disable_jit: If True, disables JIT compilation for backends that support it.
             This can be useful for debugging. Will fall back to simple mapping.
-        _use_torch_vmap: If True, uses PyTorch's native vmap implementation.
-            Advantage: you can apply `vmap` multiple times without issues.
-            Disadvantage: does not support None arguments.
     Returns:
         A function that applies `fun` in a batched manner over the specified axes.
     """
@@ -560,66 +589,92 @@ def vmap(
     if chunks is not None:
         assert chunks > 0, "chunks must be greater than 0."
 
+    # Like in `jax.vmap`, the outer container has an entry per positional argument
+    if isinstance(in_axes, list):
+        in_axes = tuple(in_axes)
+    if not (in_axes is None or type(in_axes) in (int, tuple)):
+        raise TypeError(
+            f"in_axes should be an integer, None, or a tuple or list with an entry per "
+            f"positional argument, got {in_axes}."
+        )
+    _check_axes(in_axes, "in_axes")
+    _check_axes(out_axes, "out_axes")
+
+    # Other map functions stack all results, so they can not check that an output is really
+    # unmapped. Without this check, a mapped output would silently be reduced to its first element.
+    native_jax_vmap = keras.backend.backend() == "jax" and not disable_jit and not fn_supports_batch
+    if not native_jax_vmap and None in keras.tree.flatten(out_axes):
+        raise ValueError(
+            "out_axes=None is only supported by the native `jax.vmap`, so on the jax backend "
+            "without `disable_jit` and `fn_supports_batch`."
+        )
+
     no_chunks_or_batch = batch_size is None and (chunks is None or chunks == 1)
 
     if fn_supports_batch and no_chunks_or_batch:
         return fun
 
-    if not fn_supports_batch:
-        # vmap to support batches
-        fun = _map(
-            fun,
-            in_axes=in_axes,
-            out_axes=out_axes,
-            map_fn=None if not disable_jit else simple_map,
-            _use_torch_vmap=_use_torch_vmap,
-        )
+    # vmap to support batches
+    vmap_fun = _map(
+        fun, in_axes=in_axes, out_axes=out_axes, map_fn=None if not disable_jit else simple_map
+    )
 
     if no_chunks_or_batch:
-        return fun
+        return vmap_fun
+
+    batch_fun = fun if fn_supports_batch else vmap_fun
 
     # map (sequentially) to support batches/chunks that fit in memory
     map_fn = ops.map if not disable_jit else simple_map
 
-    def batched_fun(*args):
-        _in_axes = _repeat_int_to_tuple(in_axes, len(args))
-        total_length = _find_map_length(args, _in_axes)
+    def batched_fun(*args, **kwargs):
+        tree = (args, kwargs)
+        leaves, leaf_axes = _flatten_inputs(args, kwargs, in_axes)
+        total_length = _find_map_length(leaves, leaf_axes)
 
         if chunks is not None:
             _batch_size = np.ceil(total_length / chunks).astype(int)
         else:
             _batch_size = batch_size
 
-        new_args = []
-        for arg, in_axis in zip(args, _in_axes):
-            if in_axis is None or arg is None:
-                new_args.append(arg)
+        new_leaves = []
+        batch_axes = []
+        for leaf, axis in zip(leaves, leaf_axes):
+            if not _is_mapped(leaf, axis):
+                new_leaves.append(leaf)
+                batch_axes.append(axis)
                 continue
-            padded_arg = pad_array_to_divisible(arg, _batch_size, axis=in_axis)
-            reshaped_arg = reshape_axis(padded_arg, (-1, _batch_size), axis=in_axis)
-            new_args.append(reshaped_arg)
+            # Non-negative, because reshaping adds an axis
+            axis = canonicalize_axis(axis, ops.ndim(leaf))
+            padded_leaf = pad_array_to_divisible(leaf, _batch_size, axis=axis)
+            new_leaves.append(reshape_axis(padded_leaf, (-1, _batch_size), axis=axis))
+            batch_axes.append(axis)
 
-        outputs = _map(fun, in_axes=_in_axes, out_axes=out_axes, map_fn=map_fn)(*new_args)
+        new_args, new_kwargs = keras.tree.pack_sequence_as(tree, new_leaves)
+        batch_in_axes, _ = keras.tree.pack_sequence_as(tree, batch_axes)
 
-        # Wrap outputs to tuple for easier processing
-        tuple_output = isinstance(outputs, (tuple, list))
-        if not tuple_output:
-            outputs = (outputs,)
+        # The leading axis of each output are the batches
+        outputs = _map(batch_fun, in_axes=batch_in_axes, out_axes=0, map_fn=map_fn)(
+            *new_args, **new_kwargs
+        )
 
         new_outputs = []
-        _out_axes = _repeat_int_to_tuple(out_axes, len(outputs))
-        for output, out_axis in zip(outputs, _out_axes):
-            if out_axis is None:
-                new_outputs.append(output)
+        leaves = keras.tree.flatten(outputs)
+        for output, out_axis in zip(leaves, _flatten_axes(out_axes, outputs, "out_axes")):
+            if output is None:
+                new_outputs.append(None)
                 continue
-            reshaped_output = flatten(output, start_dim=out_axis, end_dim=out_axis + 1)
+            if out_axis is None:
+                new_outputs.append(ops.take(output, 0, axis=0))
+                continue
+            # Put the batches right before the samples in each batch, then merge the two
+            out_axis = canonicalize_axis(out_axis, ops.ndim(output) - 1)
+            reshaped_output = _moveaxis(output, 0, out_axis)
+            reshaped_output = flatten(reshaped_output, start_dim=out_axis, end_dim=out_axis + 1)
             cropped_output = ops.take(reshaped_output, ops.arange(total_length), axis=out_axis)
             new_outputs.append(cropped_output)
 
-        if tuple_output:
-            return tuple(new_outputs)
-        else:
-            return new_outputs[0]
+        return keras.tree.pack_sequence_as(outputs, new_outputs)
 
     return batched_fun
 
@@ -1713,9 +1768,9 @@ def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     axis = canonicalize_axis(axis, num_dims)
     func = lambda arr: func1d(arr, *args, **kwargs)
     for i in range(1, num_dims - axis):
-        func = vmap(func, in_axes=i, out_axes=-1, _use_torch_vmap=True)
+        func = vmap(func, in_axes=i, out_axes=-1)
     for i in range(axis):
-        func = vmap(func, in_axes=0, out_axes=0, _use_torch_vmap=True)
+        func = vmap(func, in_axes=0, out_axes=0)
     return func(arr)
 
 
