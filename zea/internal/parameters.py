@@ -296,13 +296,25 @@ class BaseParameters:
         """Recursively find all leaf parameters that a property depends on.
 
         If it is an optional dependency parameter, it will be included as a leaf. Not the ones it
-        depends on.
+        depends on, unless it is unset and derived from them instead.
         """
         if seen is None:
             seen = set()
         if name in seen:
             return set()
         seen.add(name)
+
+        # An optional dependency parameter that is unset falls back to its dependencies, so
+        # those are leaves too (e.g. bandwidth derived from center_frequency).
+        if (
+            name in self.VALID_PARAMS
+            and self._params.get(name) is None
+            and self._is_property_with_dependencies(name)
+        ):
+            leaves = {name}
+            for dep in self._get_dependencies(name):
+                leaves |= self._find_leaf_params(dep, seen)  # union
+            return leaves
 
         # If the name is already a leaf parameter, return it
         if name in self._params or name in self.VALID_PARAMS:

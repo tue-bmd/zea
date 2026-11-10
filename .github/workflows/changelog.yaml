@@ -1,0 +1,57 @@
+# Checks that a pull request adds an entry under "Current" in
+# `docs/source/changelog.rst`, compared to the changelog of its base branch.
+#
+# Changes that users do not notice need no entry: label the PR `dev` (CI,
+# dependency bumps; Dependabot adds it), `documentation` or `skip changelog`, and
+# the check passes. It re-runs when labels change, so adding one fixes a red check.
+name: Changelog
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog entry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check for a skip label
+        id: labels
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          for label in "dev" "documentation" "skip changelog"; do
+            if jq -e --arg label "${label}" 'index($label)' <<< "${LABELS}" > /dev/null; then
+              echo "Labelled \`${label}\`: no changelog entry needed." >> "$GITHUB_STEP_SUMMARY"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # The default checkout is the PR merged into its base branch. The first parent
+      # of that merge commit is the base it merged against, so comparing with it
+      # shows exactly the entries this PR adds.
+      - name: Checkout repository
+        if: steps.labels.outputs.skip == 'false'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check for a new entry under Current
+        if: steps.labels.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # Empty when the base branch has no changelog yet.
+          git show HEAD^1:docs/source/changelog.rst > "${RUNNER_TEMP}/base.rst" 2>/dev/null || true
+
+          if ! python3 .github/scripts/changelog.py check "${RUNNER_TEMP}/base.rst"; then
+            echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, ending with (:gh:\`<PR number>\` by :user:\`<GitHub handle>\`), or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
+            exit 1
+          fi

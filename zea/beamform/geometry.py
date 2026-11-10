@@ -28,6 +28,10 @@ def is_plane_wave(focus_distances):
     return (focus_distances == 0) | np.isinf(focus_distances)
 
 
+def _is_focused(focus_distances, xp):
+    return xp.logical_and(xp.isfinite(focus_distances), focus_distances > 0)
+
+
 def is_focused(focus_distances):
     """Mask of the transmits that are focused.
 
@@ -40,8 +44,7 @@ def is_focused(focus_distances):
     Returns:
         np.ndarray: Boolean mask with the shape of ``focus_distances``.
     """
-    focus_distances = np.asarray(focus_distances, dtype=float)
-    return np.isfinite(focus_distances) & (focus_distances > 0)
+    return _is_focused(np.asarray(focus_distances, dtype=float), xp=np)
 
 
 def is_diverging(focus_distances):

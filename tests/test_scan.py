@@ -868,6 +868,36 @@ def test_rx_aperture_indices_follows_transmit_selection():
     np.testing.assert_array_equal(parameters.rx_aperture_indices, indices)
 
 
+def test_waveforms_follow_transmit_selection():
+    """Waveforms are stored over the full transmit axis, so a selection slices them."""
+    n_tx = scan_args["n_tx"]
+    # A distinct waveform per transmit, so the selected rows can be identified.
+    one_way = np.arange(n_tx)[:, None] + np.zeros((1, 64))
+    two_way = -np.arange(n_tx)[:, None] + np.zeros((1, 128))
+    parameters = Parameters(
+        **{**scan_args, "waveforms_one_way": one_way, "waveforms_two_way": two_way}
+    )
+    assert parameters.n_waveforms == n_tx
+
+    selection = [1, 3, 7]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.waveforms_one_way, one_way[selection])
+    np.testing.assert_array_equal(parameters.waveforms_two_way, two_way[selection])
+    assert parameters.n_waveforms == parameters.n_tx == len(selection)
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.waveforms_one_way, one_way)
+    assert parameters.n_waveforms == n_tx
+
+
+def test_waveforms_absent_stay_none_under_selection():
+    args = {k: v for k, v in scan_args.items() if not k.startswith("waveforms_")}
+    parameters = Parameters(**args)
+    parameters.set_transmits(3)
+    assert parameters.waveforms_one_way is None
+    assert parameters.waveforms_two_way is None
+
+
 def test_flat_aligned_apodization_derived():
     """Derived: None, unless scanline mode, where it is the one-hot transmit mask."""
     assert Parameters(**scan_args).flat_aligned_apodization is None
@@ -1284,6 +1314,60 @@ def test_custom_parameters_passthrough_to_tensor():
     assert "my_custom_parameter" in tensors
     # Derived properties still compute (custom params don't interfere).
     assert parameters.wavelength == parameters.sound_speed / parameters.center_frequency
+
+
+def test_bandwidth_derived_from_probe():
+    """Left unset, the bandwidth is center_frequency * probe_bandwidth_percent / 100."""
+    parameters = Parameters(center_frequency=5e6, probe_bandwidth_percent=60.0)
+    assert parameters.bandwidth == pytest.approx(3e6)
+
+    # Changing a dependency invalidates the cached value.
+    parameters.probe_bandwidth_percent = 80.0
+    assert parameters.bandwidth == pytest.approx(4e6)
+
+    # Without probe_bandwidth_percent in the file, its 100 % default applies.
+    assert Parameters(center_frequency=5e6).bandwidth == pytest.approx(5e6)
+
+    assert "bandwidth" in Parameters(**scan_args).to_tensor(include=["bandwidth"])
+
+
+def test_bandwidth_follows_in_place_changes():
+    """In-place changes to center_frequency refresh the derived bandwidth."""
+    parameters = Parameters(center_frequency=np.full(3, 5e6), probe_bandwidth_percent=60.0)
+    assert parameters.bandwidth == pytest.approx(3e6)
+
+    parameters.center_frequency[:] = 6e6
+    assert parameters.bandwidth == pytest.approx(3.6e6)
+
+
+def test_bandwidth_explicit_value_wins():
+    """An explicit bandwidth overrides the derived one, and unsetting it falls back."""
+    parameters = Parameters(center_frequency=5e6, probe_bandwidth_percent=60.0, bandwidth=1e6)
+    assert parameters.bandwidth == pytest.approx(1e6)
+
+    # Dependencies do not affect an explicit value.
+    parameters.center_frequency = 7e6
+    assert parameters.bandwidth == pytest.approx(1e6)
+
+    parameters.update(bandwidth=2e6)
+    assert parameters.bandwidth == pytest.approx(2e6)
+    assert "bandwidth" in parameters._params
+
+    parameters.bandwidth = None
+    assert parameters.bandwidth == pytest.approx(4.2e6)
+
+
+def test_bandwidth_per_transmit_center_frequency():
+    """A per-transmit center_frequency that is the same everywhere gives a scalar bandwidth."""
+    uniform = Parameters(center_frequency=np.full(3, 5e6), probe_bandwidth_percent=60.0)
+    assert np.ndim(uniform.bandwidth) == 0
+    assert uniform.bandwidth == pytest.approx(3e6)
+
+    # Varying per transmit: no bandwidth is derived, but an explicit one is still used.
+    varying = Parameters(center_frequency=np.array([4e6, 5e6]), probe_bandwidth_percent=50.0)
+    assert varying.bandwidth is None
+    varying.bandwidth = 2e6
+    assert varying.bandwidth == pytest.approx(2e6)
 
 
 # --- distance_to_apex ---

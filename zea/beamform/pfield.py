@@ -87,7 +87,7 @@ def compute_pfield(
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
-            Default is 1.
+            Default is 1. Values above roughly 10 can overflow float32, giving NaN.
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
             Higher is more aggressive. Default is 10.
         norm (bool, optional): per pixel normalization over the transmit axis (True)
@@ -101,8 +101,9 @@ def compute_pfield(
             transmit's insonified region; "bilinear" (default) removes those steps at a
             small extra cost and is recommended for display-quality images.
         attenuation_coef (float, optional): Frequency-dependent attenuation of the
-            medium in dB/(cm·MHz), applied one-way along the transmit path (Eq. 42's
-            exponential). Default is 0 (lossless). Soft tissue is ~0.5; with it the
+            medium in dB/(cm·MHz), applied one-way along the transmit path (Eq. 40)
+            at the true frequency, regardless of `downmix`. Default is 0 (lossless).
+            Soft tissue is ~0.5; with it the
             high end of the band, which focuses hardest, is lost with depth, so the
             focus is wider and weaker than in the lossless field.
 
@@ -111,7 +112,12 @@ def compute_pfield(
             of shape (n_tx, grid_size_z, grid_size_x).
     """
     # medium params: attenuation dB/(cm·MHz) -> Np/(cm·MHz) -> Np/(m·Hz)
-    attenuation_coef = float(attenuation_coef) / 8.686 * 1e2 / 1e6
+    attenuation_coef = float(attenuation_coef)
+    if not (np.isfinite(attenuation_coef) and attenuation_coef >= 0):
+        raise ValueError(
+            f"`attenuation_coef` must be finite and non-negative, got {attenuation_coef!r}"
+        )
+    attenuation_coef = attenuation_coef / 8.686 * 1e2 / 1e6
 
     # Element orientation (theta) is assumed zero and sub-elements are laid out along x.
     geometry = ops.convert_to_numpy(probe_geometry)
@@ -259,11 +265,12 @@ def compute_pfield(
 
     # Exponential arrays of size [numel(x) n_el num_sub_elements]
     wavenumber = 2 * np.pi * freq[0] / sound_speed
-    attenuation_wavenumber = attenuation_coef * freq[0]
+    # freq is downmixed, which only coarsens the phase: the loss follows the true frequency.
+    attenuation_wavenumber = attenuation_coef * downmix * freq[0]
 
     # Exponential array for the increment wavenumber dk
     wavenumber_step = 2 * np.pi * freq_step / sound_speed
-    attenuation_wavenumber_step = attenuation_coef * freq_step
+    attenuation_wavenumber_step = attenuation_coef * downmix * freq_step
 
     @jit(torch=False)
     def _pfield_freq_loop(distance, sub_element_directivity):
@@ -298,7 +305,7 @@ def compute_pfield(
                 freq[k],
                 t0_delays,
                 tx_apodizations,
-                ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
+                ops.mean(monochromatic_pressure, axis=1),  # as PFIELD; Eq. (37) sums instead
                 pulse_spect[k],
                 probe_spect[k],
             )
@@ -333,8 +340,9 @@ def compute_pfield(
     # itself set above from max(t0_delays), so a bare sum would depend on which
     # transmits are in the stack -- times the element width, whose square root is the
     # amplitude factor of Eq. (36). Like PFIELD we integrate over ordinary frequency,
-    # so there is no 2 pi against Eq. (42)'s dw. No effect when norm=True.
-    pressure_squared = pressure_squared * freq_step * element_width
+    # so there is no 2 pi against Eq. (42)'s Δω. The step is taken at the true frequency,
+    # since downmixing shrinks the band by the same factor. No effect when norm=True.
+    pressure_squared = pressure_squared * (freq_step * downmix) * element_width
 
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))

@@ -74,7 +74,7 @@ class EchoNetDynamic(BaseModel):
             "required even if you are using the JAX backend, the model is built using TensorFlow. "
             "Installing JAX and TensorFlow together is tricky, regarding compatible CUDA versions. "
             "One option is to run in our Docker container, which has been tested to work with "
-            "both backends. See https://zea.readthedocs.io/en/latest/installation.html#docker "
+            "both backends. See https://zea.readthedocs.io/en/stable/installation.html#docker "
             "for more details."
         )
 

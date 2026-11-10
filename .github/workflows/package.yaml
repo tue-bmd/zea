@@ -1,0 +1,73 @@
+# Builds the wheel and sdist, checks their metadata, and installs the wheel in a
+# fresh environment to import zea and run its CLI.
+#
+# Runs on PRs that change `pyproject.toml`, which includes every release PR, and
+# is called by `publish.yaml` to build the files it uploads to PyPI.
+name: Package
+
+on:
+  pull_request:
+    paths:
+      - pyproject.toml
+      - .github/workflows/package.yaml
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build and check package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7.6.0
+        with:
+          enable-cache: false
+
+      - name: Build a binary wheel and a source tarball
+        run: uv build
+
+      - name: Check package metadata
+        run: uvx twine check --strict dist/*
+
+      - name: Check the version matches the release tag
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          wheel=$(basename dist/*.whl)
+          if [[ "${wheel}" != "zea-${TAG#v}-"* ]]; then
+            echo "::error::built ${wheel}, but the release is tagged ${TAG}"
+            exit 1
+          fi
+
+      # Jax on CPU as the backend: zea needs one to import, and it is the
+      # lightest to install.
+      - name: Install the wheel in a fresh environment
+        run: |
+          set -euo pipefail
+          uv venv --python 3.11 "${RUNNER_TEMP}/venv"
+          uv pip install --python "${RUNNER_TEMP}/venv" dist/*.whl jax
+
+      # Run from outside the checkout, so `import zea` cannot pick up the source tree.
+      - name: Import zea and run its CLI
+        working-directory: ${{ runner.temp }}
+        env:
+          KERAS_BACKEND: jax
+        run: |
+          set -euo pipefail
+          venv/bin/python -I -c "import zea, zea.ops, zea.models; print('zea', zea.__version__)"
+          venv/bin/zea --help
+
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-package-distributions
+          path: dist/

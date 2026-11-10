@@ -1,3 +1,4 @@
+import dataclasses
 import difflib
 import inspect
 import json
@@ -314,6 +315,7 @@ class Pipeline:
                 - "coherence_factor"
                 - "generalized_coherence_factor"
                 - "minimum_variance"
+                - "admire" (always beamforms the full grid at once: ``num_patches=1``)
                 - "able" (available once :mod:`zea.models.able` is imported)
                 Defaults to "delay_and_sum".
             num_patches (int, optional): Number of patches for the PatchedGrid operation.
@@ -1094,7 +1096,7 @@ class Map(Pipeline):
         operations: List[Operation],
         argnames: List[str] | str,
         in_axes: List[Union[int, None]] | int = 0,
-        out_axes: List[Union[int, None]] | int = 0,
+        out_axes: int = 0,
         chunks: int | None = None,
         batch_size: int | None = None,
         **kwargs,
@@ -1106,8 +1108,7 @@ class Map(Pipeline):
                 Can also be a single string if only one argument is mapped over.
             in_axes (int or list): Axes to map over for each argument.
                 If a single int is provided, it is used for all arguments.
-            out_axes (int or list): Axes to map over for each output.
-                If a single int is provided, it is used for all outputs.
+            out_axes (int): Axis of the output to map over.
             chunks (int, optional): Number of chunks to split the input data into.
                 If None, no chunking is performed. Mutually exclusive with ``batch_size``.
             batch_size (int, optional): Size of batches to process at once.
@@ -1408,6 +1409,7 @@ class Beamform(Pipeline):
                 - "coherence_factor"
                 - "generalized_coherence_factor"
                 - "minimum_variance"
+                - "admire" (always beamforms the full grid at once: ``num_patches=1``)
                 Defaults to "delay_and_sum".
             num_patches (int, optional): Number of patches to split the grid into for
                 patch-wise beamforming. If 1, no patching is performed. Prefer
@@ -1441,6 +1443,21 @@ class Beamform(Pipeline):
             raise ValueError(
                 "num_patches and patch_size are mutually exclusive. Please specify only one."
             )
+
+        if beamformer == "admire":
+            # ADMIRE fits every image line over its full depth, so it cannot be patched
+            if patch_size is not None or num_patches not in (None, 1):
+                requested = (
+                    f"patch_size={patch_size}"
+                    if patch_size is not None
+                    else f"num_patches={num_patches}"
+                )
+                raise ValueError(
+                    "The ADMIRE beamformer fits every image line over its full depth, so it "
+                    f"needs the whole grid at once and cannot be patched. Got {requested}; "
+                    "use num_patches=1 (the default for ADMIRE) or leave it unset."
+                )
+            num_patches = 1
 
         self.beamformer_type = beamformer
         self.num_patches = num_patches
@@ -1483,14 +1500,17 @@ class Beamform(Pipeline):
         # `with_batch_dim`): those must keep reaching Pipeline / PatchedGrid.
         pipeline_params = set(inspect.signature(Pipeline.__init__).parameters)
         beamformer_params -= pipeline_params
+        self._beamformer_params = beamformer_params
         self.beamformer_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in beamformer_params}
+
+        self._beamformer = beamformer_cls(**self.beamformer_kwargs)
 
         # Get beamforming ops
         beamforming: List[Operation] = [
             TOFCorrection(),
             # ReceiveApodization() / AlignedApodization() / PfieldWeighting(),
             # inserted conditionally
-            beamformer_cls(**self.beamformer_kwargs),
+            self._beamformer,
         ]
 
         if self.enable_receive_apodization:
@@ -1559,9 +1579,9 @@ class Beamform(Pipeline):
             params["enable_aligned_apodization"] = self.enable_aligned_apodization
         if not compact or self.enable_receive_apodization:
             params["enable_receive_apodization"] = self.enable_receive_apodization
-        # Beamformer keywords that are objects rather than plain values (such as the
-        # trained model of the "able" beamformer) cannot be written to a config.
-        params.update({k: v for k, v in self.beamformer_kwargs.items() if not callable(v)})
+        # The beamformer serializes its own parameters, leaving out unserializable objects
+        beamformer_params = self._beamformer.get_dict(compact=compact).get("params", {})
+        params.update({k: v for k, v in beamformer_params.items() if k in self._beamformer_params})
 
         # Merge in the pipeline-level params from super().
         params.update(config.get("params", {}))
@@ -2132,6 +2152,332 @@ class MinimumVariance(Operation):
         else:
             beamformed_data = ops.map(lambda image: self.process_image(image, stride), data)
         return {self.output_key: beamformed_data}
+
+
+@beamformer_registry("admire")
+@ops_registry("admire")
+class ADMIRE(Operation):
+    """Aperture Domain Model Image REconstruction (ADMIRE) beamformer.
+
+    ADMIRE suppresses off-axis and multipath (reverberation) clutter by fitting a
+    model of point-scatterer wavefronts to the aperture-domain signal of short axial
+    windows, frequency by frequency, and rebuilding the channel data from only the
+    scatterers in a small region around each window. The decluttered channels are
+    then summed as in :class:`DelayAndSum`. See :mod:`zea.beamform.admire` for the
+    method and :class:`~zea.beamform.admire.ADMIREConfig` for its settings.
+
+    ADMIRE models image *lines*: for every column of the beamforming ``grid`` it
+    fits the ``n_elements`` neighbouring elements, centered as closely as the element
+    pitch allows on that column (elements beyond the array edge contribute zeros). It
+    therefore needs:
+
+    - a linear array (``probe_geometry`` with uniformly spaced elements along x);
+    - a regular cartesian ``grid`` of shape ``(n_z, n_x, 3)`` with uniform axial
+      spacing, fine enough to sample the signal band (for IQ data the axial
+      sampling rate ``c / (2 dz)`` must exceed the fitted bandwidth; for RF data it
+      must exceed twice its highest frequency). For exact lateral registration put
+      the grid columns on the element positions (odd ``n_elements``) or halfway
+      between them (even ``n_elements``);
+    - the full grid at once: windows run along depth, so the pipeline must not be
+      patched. Use ``Beamform(beamformer="admire", num_patches=1)``.
+
+    Transmits are compounded (summed) before ADMIRE is applied. ADMIRE was designed
+    for focused walking-aperture (scanline) data: use ``enable_scanline=True`` with
+    ``Beamform(beamformer="admire", enable_aligned_apodization=True)``. The
+    compounded channel data of plane-wave or diverging-wave sequences works too, but
+    the default settings were tuned for focused transmits. Aperture growth follows
+    the pipeline ``f_number`` parameter (``0`` disables it).
+
+    The models depend on the geometry only; they are generated (on the CPU, which
+    takes seconds to minutes) the first time the operation sees a geometry, and
+    cached in memory and on disk. Pass precomputed ``models`` (see
+    :func:`~zea.beamform.admire.generate_admire_models`) to skip generation. Because
+    the models and the line layout are derived from concrete parameter values, the
+    operation itself runs eagerly and cannot be traced as part of a compiled
+    pipeline; the fit is JIT compiled on its own (when ``jit_compile`` is true,
+    the default) and reused for as long as the geometry stays the same.
+
+    .. citation:: byram2015model, dei2019computationally, khan2021realtime
+
+    Args:
+        n_elements (int, optional): Number of elements per image line. Defaults to
+            all elements of the probe. Model generation and fitting get slower with
+            more elements.
+        config (ADMIREConfig or dict, optional): Model and fit settings. Defaults to
+            the settings of the reference implementation.
+        models (ADMIREModels, optional): Precomputed models. When given, ``n_elements``
+            and ``config`` are taken from them and no models are generated.
+        window_batch_size (int, optional): Number of STFT windows fitted at once,
+            which bounds memory use. Defaults to all windows at once.
+        **kwargs: Forwarded to :class:`~zea.ops.base.Operation`.
+    """
+
+    def __init__(
+        self,
+        n_elements=None,
+        config=None,
+        models=None,
+        window_batch_size=None,
+        **kwargs,
+    ):
+        from zea.beamform.admire import ADMIREConfig
+
+        if n_elements is not None and (not isinstance(n_elements, int) or n_elements < 2):
+            raise ValueError(f"n_elements must be an integer of at least 2, got {n_elements!r}.")
+        if models is not None:
+            n_elements = models.n_elements
+            config = models.config
+        if isinstance(config, ADMIREConfig):
+            config = dataclasses.asdict(config)
+        if config is not None:
+            # Validate early; lists and arrays (e.g. from a JSON or YAML config) become
+            # tuples again, so the config stays hashable
+            def _as_tuple(v):
+                if isinstance(v, np.ndarray):
+                    v = v.tolist()
+                return tuple(_as_tuple(x) for x in v) if isinstance(v, (list, tuple)) else v
+
+            config = {k: _as_tuple(v) for k, v in config.items()}
+            ADMIREConfig(**config)
+        super().__init__(
+            input_data_type=DataTypes.ALIGNED_DATA,
+            output_data_type=DataTypes.BEAMFORMED_DATA,
+            jittable=False,
+            **kwargs,
+        )
+        self.n_elements = n_elements
+        self.config = config
+        self.models = models
+        self.window_batch_size = window_batch_size
+        # The jit flag is consumed by the fit, since the operation itself runs eagerly
+        self._jit_fit = kwargs.get("jit_compile", True)
+        self._models_cache = {}
+        self._fit_cache = {}
+        self._checked_geometry = None
+
+    def get_dict(self, compact=True):
+        """Serialize the operation, leaving out precomputed ``models``.
+
+        Models are regenerated (or loaded from the disk cache) on first use.
+        """
+        models = self.models
+        self.models = None
+        try:
+            return super().get_dict(compact=compact)
+        finally:
+            self.models = models
+
+    @staticmethod
+    def _linear_array_pitch(probe_x):
+        """Element pitch of a uniform linear array."""
+        spacing = np.diff(probe_x)
+        pitch = float(np.median(spacing))
+        if pitch <= 0 or not np.allclose(spacing, pitch, rtol=1e-3, atol=0):
+            raise ValueError(
+                "ADMIRE requires a linear array with uniformly spaced elements along x."
+            )
+        return pitch
+
+    @staticmethod
+    def _check_models(models, depths, pitch, sound_speed, center_frequency, f_number):
+        """Raise if precomputed models were generated for a different geometry.
+
+        Models from before the geometry was recorded on them are only checked for
+        their pitch.
+        """
+        mismatches = []
+        if not np.allclose(np.diff(models.element_positions), pitch, rtol=1e-3, atol=0):
+            mismatches.append("pitch")
+        if models.depths is not None and (
+            models.depths.shape != depths.shape
+            or not np.allclose(models.depths, depths, rtol=0, atol=1e-3 * np.diff(depths).mean())
+        ):
+            mismatches.append("depths (grid z-axis)")
+        for name, value, expected in [
+            ("sound_speed", models.sound_speed, sound_speed),
+            ("center_frequency", models.center_frequency, center_frequency),
+            ("f_number", models.f_number, f_number),
+        ]:
+            if value is not None and not np.isclose(value, expected, rtol=1e-5, atol=0):
+                mismatches.append(name)
+        if mismatches:
+            raise ValueError(
+                "The precomputed ADMIRE models were generated for a different "
+                f"{', '.join(mismatches)} than the current inputs. Regenerate them with "
+                "zea.beamform.admire.generate_admire_models, or leave out `models`."
+            )
+
+    def _get_models(
+        self, depths, pitch, n_elements, sound_speed, center_frequency, f_number, analytic
+    ):
+        """Return the models for a geometry, generating them on first use."""
+        from zea.beamform.admire import ADMIREConfig, generate_admire_models
+
+        if self.models is not None:
+            self._check_models(self.models, depths, pitch, sound_speed, center_frequency, f_number)
+            return self.models
+        config = ADMIREConfig(**(self.config or {}))
+        key = (
+            depths.tobytes(), pitch, n_elements, sound_speed, center_frequency, f_number,
+            analytic, config,
+        )  # fmt: skip
+        if key not in self._models_cache:
+            log.info("Generating ADMIRE models; this can take a few minutes.")
+            self._models_cache = {
+                key: generate_admire_models(
+                    depths,
+                    sound_speed=sound_speed,
+                    center_frequency=center_frequency,
+                    pitch=pitch,
+                    n_elements=n_elements,
+                    f_number=f_number,
+                    analytic=analytic,
+                    config=config,
+                    verbose=True,
+                )
+            }
+        return self._models_cache[key]
+
+    def call(
+        self,
+        grid=None,
+        probe_geometry=None,
+        sound_speed=None,
+        center_frequency=None,
+        demodulation_frequency=None,
+        f_number=None,
+        **kwargs,
+    ):
+        """Apply ADMIRE to TOF-corrected data and sum the channels.
+
+        Args:
+            data (ops.Tensor): The TOF corrected input of shape
+                ``(n_tx, n_z * n_x, n_el, n_ch)`` with optional batch dimension.
+            grid (ops.Tensor): Beamforming grid of shape ``(n_z, n_x, 3)``.
+            probe_geometry (ops.Tensor): Element positions of shape ``(n_el, 3)``.
+            sound_speed (float): Speed of sound in m/s.
+            center_frequency (float): Transmit center frequency in Hz.
+            demodulation_frequency (float): Demodulation frequency in Hz. For IQ
+                data, it stands in for a zero ``center_frequency``, which is what
+                :class:`~zea.ops.Demodulate` leaves behind.
+            f_number (float): F-number of aperture growth.
+
+        Returns:
+            dict: Dictionary containing the beamformed data of shape
+            ``(n_z * n_x, n_ch)`` with optional batch dimension.
+        """
+        data = kwargs[self.key]
+        if grid is None or len(grid.shape) != 3:
+            raise ValueError("ADMIRE requires a 2D `grid` parameter of shape (n_z, n_x, 3).")
+        if probe_geometry is None:
+            raise ValueError("ADMIRE requires the `probe_geometry` parameter.")
+        n_z, n_x = grid.shape[0], grid.shape[1]
+        n_pix, n_el, n_ch = data.shape[-3:]
+        if n_pix != n_z * n_x:
+            raise ValueError(
+                f"ADMIRE needs the full grid of {n_z * n_x} pixels at once, but got {n_pix}. "
+                "Disable patching with `Beamform(beamformer='admire', num_patches=1)`."
+            )
+
+        try:
+            grid_np = ops.convert_to_numpy(grid).astype(float)
+            probe_x = ops.convert_to_numpy(probe_geometry)[:, 0].astype(float)
+            geometry = [
+                float(ops.convert_to_numpy(v)) if v is not None else None
+                for v in (sound_speed, center_frequency, demodulation_frequency, f_number)
+            ]
+        except Exception as e:
+            raise RuntimeError(
+                "ADMIRE derives its models and line layout from concrete parameter values "
+                "and cannot run inside a traced function, even with precomputed `models`. "
+                "Run it eagerly, e.g. in a Pipeline with jit_options='ops' or None; the fit "
+                "itself is JIT compiled separately."
+            ) from e
+        sound_speed, center_frequency, demodulation_frequency, f_number = geometry
+        if n_ch == 2 and not center_frequency:
+            # Aligned IQ data is analytic and carries the carrier again (see tof_correction)
+            center_frequency = demodulation_frequency
+        if not sound_speed or not center_frequency:
+            raise ValueError(
+                "ADMIRE requires the `sound_speed` and `center_frequency` parameters (or, "
+                "for IQ data, `demodulation_frequency`)."
+            )
+
+        pitch = self._linear_array_pitch(probe_x)
+        n_sub = self.n_elements if self.n_elements is not None else n_el
+
+        # For every grid column, the sub-aperture whose center lies closest to it
+        if self.models is not None:
+            relative = self.models.element_positions
+        else:  # the positions generate_admire_models will use
+            relative = (np.arange(n_sub) - (n_sub - 1) / 2) * pitch
+        columns = grid_np[0, :, 0]
+        first = np.round((columns + relative[0] - probe_x[0]) / pitch).astype(int)
+        indices = first[:, None] + np.arange(n_sub)
+        indices = np.where((indices >= 0) & (indices < n_el), indices, n_el)  # n_el: zeros
+
+        # Check the geometry once, before the (slow) model generation
+        geometry_key = (grid_np.tobytes(), indices.tobytes())
+        if geometry_key != self._checked_geometry:
+            self._warn_unsupported_geometry(grid_np, pitch, indices, n_el)
+            self._checked_geometry = geometry_key
+
+        models = self._get_models(
+            grid_np[:, 0, 2], pitch, n_sub, sound_speed, center_frequency, f_number or 0.0,
+            analytic=n_ch == 2,
+        )  # fmt: skip
+        key = (id(models), indices.tobytes(), data.shape, self.with_batch_dim)
+        if key not in self._fit_cache:
+            fn = self._make_fit(models, indices, n_z, n_x, n_el, n_ch)
+            self._fit_cache = {key: jit(fn) if self._jit_fit else fn}
+        return {self.output_key: self._fit_cache[key](data)}
+
+    @staticmethod
+    def _warn_unsupported_geometry(grid, pitch, indices, n_el):
+        """Warn about the easy-to-spot geometries that ADMIRE does not model.
+
+        Not exhaustive: it catches non-cartesian grids (such as polar sector grids)
+        and grids that extend well beyond the array.
+        """
+        x, z = grid[..., 0], grid[..., 2]
+        tol = 1e-3 * pitch
+        if not (np.allclose(x, x[:1], atol=tol) and np.allclose(z, z[:, :1], atol=tol)):
+            log.warning(
+                "ADMIRE models every grid column as an unsteered line straight below the "
+                "array, but this grid is not cartesian (for example a polar or sector grid). "
+                "The result will not be a valid ADMIRE image; use grid_type='cartesian'. "
+                "Steered lines, as in phased-array sector scans, are not supported."
+            )
+        mostly_off = np.mean(indices == n_el, axis=1) > 0.5
+        if np.mean(mostly_off) > 0.25:
+            log.warning(
+                f"For {np.mean(mostly_off):.0%} of the grid columns, more than half of the "
+                "ADMIRE sub-aperture lies beyond the array, where the channels are filled "
+                "with zeros. Limit the grid to the width of the array (xlims) or use a "
+                "smaller n_elements."
+            )
+
+    def _make_fit(self, models, indices, n_z, n_x, n_el, n_ch):
+        """Build the function that beamforms aligned data with ADMIRE."""
+        from zea.beamform.admire import apply_admire
+
+        n_lines, n_sub = indices.shape
+        # Flat gather indices into (n_x * (n_el + 1)): each column with a zero channel
+        flat_indices = (np.arange(n_x)[:, None] * (n_el + 1) + indices).ravel()
+
+        def process_image(image):
+            image = ops.sum(ops.cast(image, "float32"), axis=0)  # compound transmits
+            image = ops.reshape(image, (n_z, n_x, n_el, n_ch))
+            image = ops.pad(image, [[0, 0], [0, 0], [0, 1], [0, 0]])
+            image = ops.reshape(image, (n_z, n_x * (n_el + 1), n_ch))
+            lines = ops.take(image, flat_indices, axis=1)
+            lines = ops.reshape(lines, (n_z, n_lines, n_sub, n_ch))
+            lines = apply_admire(lines, models, window_batch_size=self.window_batch_size)
+            return ops.reshape(ops.sum(lines, axis=2), (n_z * n_x, n_ch))
+
+        if not self.with_batch_dim:
+            return process_image
+        return lambda data: ops.map(process_image, data)
 
 
 @ops_registry("refocus")

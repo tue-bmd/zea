@@ -440,7 +440,7 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
     total_bins = bins_per**3
     # counts per bin in the final histogram
     counts = np.zeros(total_bins, dtype=np.int64)
-    # per-bin sum of the colors that landed in it, to average into its entry
+    # sum of the colors per bin
     sums = np.zeros((total_bins, 3), dtype=np.int64)
 
     shift = 8 - bits_per_channel
@@ -466,16 +466,12 @@ def compute_global_palette_by_histogram(pillow_imgs, bits_per_channel=5, palette
     # sort top bins by frequency
     top_idx = top_idx[np.argsort(-counts[top_idx])]
 
-    # Represent each bin by the mean of the colors in it, not by the bin's center: a
-    # bin holding one exact color is then reproduced exactly, which matters most for
-    # the flat backgrounds that dominate plots -- a pure black one quantized to the
-    # center of its bin comes out a visibly non-black (4, 4, 4).
+    # represent each bin by the mean color in it, so exact colors are preserved
     occupied = counts[top_idx] > 0
-    mean = np.zeros((len(top_idx), 3), dtype=np.uint8)
-    mean[occupied] = np.round(sums[top_idx][occupied] / counts[top_idx][occupied, None]).astype(
-        np.uint8
-    )
-    palette_colors = mean.reshape(-1, 3)  # shape (k,3)
+    palette_colors = np.zeros((len(top_idx), 3), dtype=np.uint8)  # shape (k,3)
+    palette_colors[occupied] = np.round(
+        sums[top_idx][occupied] / counts[top_idx][occupied, None]
+    ).astype(np.uint8)
 
     # build a PIL 'P' palette image from these colors
     pal = np.zeros(768, dtype=np.uint8)  # 256*3 entries

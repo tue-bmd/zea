@@ -343,6 +343,87 @@ def test_low_pass_filter_iq():
     return output
 
 
+def test_filter_bandwidth_from_parameters():
+    """A config-built pipeline with ``low_pass_filter`` and ``band_pass_filter`` runs without an
+    explicit ``bandwidth``: it is derived from the probe metadata, and explicit values still win.
+    """
+    from zea import Config
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    center_frequency, sampling_frequency = 2e6, 12.5e6
+    derived_bandwidth = center_frequency * 60.0 / 100
+
+    def run(operation, data, parameters, **overrides):
+        pipeline = Pipeline.from_config(
+            Config({"pipeline": {"operations": [{"name": operation, "params": {"num_taps": 63}}]}})
+        )
+        inputs = pipeline.prepare_parameters(parameters, **overrides)
+        return keras.ops.convert_to_numpy(pipeline(data=data, **inputs)["data"])
+
+    def parameters(**kwargs):
+        return Parameters(
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
+            probe_bandwidth_percent=60.0,
+            **kwargs,
+        )
+
+    for operation, n_ch in (("low_pass_filter", 2), ("band_pass_filter", 1)):
+        data = rng.standard_normal((1, 256, 4, n_ch)).astype("float32")
+
+        derived = run(operation, data, parameters())
+        explicit_derived = run(operation, data, parameters(bandwidth=derived_bandwidth))
+        np.testing.assert_allclose(derived, explicit_derived, rtol=1e-5, atol=1e-6)
+
+        # An explicit bandwidth, on the parameters or as an override, wins over the derived one.
+        parameter_level = run(operation, data, parameters(bandwidth=3e6))
+        call_level = run(operation, data, parameters(), bandwidth=3e6)
+        np.testing.assert_allclose(parameter_level, call_level, rtol=1e-5, atol=1e-6)
+        assert not np.allclose(derived, parameter_level, rtol=1e-5, atol=1e-6)
+
+        # A call-time override also wins over a bandwidth set on the parameters.
+        overridden = run(operation, data, parameters(bandwidth=derived_bandwidth), bandwidth=3e6)
+        np.testing.assert_allclose(overridden, call_level, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "operation, kwargs",
+    [
+        (
+            ops.LowPassFilterIQ(num_taps=31),
+            {"center_frequency": 0.0, "bandwidth": np.array([2e6, 2.5e6])},
+        ),
+        (
+            ops.LowPassFilterIQ(num_taps=31),
+            {"center_frequency": 0.0, "bandwidth": None},
+        ),
+        (
+            ops.BandPassFilter(num_taps=31),
+            {"demodulation_frequency": np.array([4e6, 5e6]), "bandwidth": 2e6},
+        ),
+        (
+            ops.BandPassFilter(num_taps=31),
+            {"demodulation_frequency": 5e6, "bandwidth": None},
+        ),
+    ],
+)
+def test_filters_reject_per_transmit_inputs(operation, kwargs):
+    """The filters design one set of taps, so per-transmit or missing inputs raise clearly."""
+    n_ch = 2 if isinstance(operation, ops.LowPassFilterIQ) else 1
+    data = np.ones((1, 64, 2, n_ch), dtype=np.float32)
+    with pytest.raises(ValueError, match="bandwidth|scalar"):
+        operation(data=data, sampling_frequency=20e6, **kwargs)
+
+
+def test_fixed_band_pass_filter_without_center_frequency():
+    """A fixed passband does not require deriving a bandwidth."""
+    pipeline = Pipeline([ops.BandPassFilter(passband=(3e6, 7e6), num_taps=31)])
+    parameters = Parameters(sampling_frequency=20e6, demodulation_frequency=5e6)
+    inputs = pipeline.prepare_parameters(parameters)
+    data = np.ones((1, 64, 2, 1), dtype=np.float32)
+    assert pipeline(data=data, **inputs)["data"].shape == data.shape
+
+
 @pytest.mark.parametrize(
     "factor, batch_size",
     [
@@ -1008,10 +1089,11 @@ def test_compute_time_to_peak():
 # "able", registered by zea.models.able) is not comparable across backends: its
 # weights are randomly initialized per backend, and under torch its output requires
 # grad, which this harness cannot convert to numpy. Those live with their model.
+# ADMIRE needs a real imaging geometry; it is tested in test_admire.py.
 _OPS_BEAMFORMERS = [
     name
     for name in beamformer_registry.registered_names()
-    if beamformer_registry[name].__module__.startswith("zea.ops.")
+    if beamformer_registry[name].__module__.startswith("zea.ops.") and name != "admire"
 ]
 
 
