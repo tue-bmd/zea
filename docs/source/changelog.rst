@@ -22,6 +22,19 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+
+Changed
+^^^^^^^
+
+Fixed
+^^^^^
+
+
+v0.1.9 (2026-11-10)
+-------------------
+
+New Features
+^^^^^^^^^^^^
 - ADMIRE (Aperture Domain Model Image REconstruction), a model-based beamformer that suppresses off-axis and multipath clutter, as :class:`zea.ops.ADMIRE` or ``zea.ops.Beamform(beamformer="admire")``. See :mod:`zea.beamform.admire` (:gh:`650` by :user:`tristan-deep`)
 - UltraPIPS, a perceptual metric for B-mode ultrasound built on an ultrasound foundation model: :class:`zea.models.ultrapips.UltraPIPS`, or the ``ultrapips`` metric in :mod:`zea.metrics`, used like ``lpips`` (:gh:`649` by :user:`tristan-deep`)
 - Transparent GIFs from RGBA frames with ``transparent=True`` in :func:`zea.io_lib.save_video` and :func:`zea.io_lib.save_to_gif` (:gh:`663` by :user:`tristan-deep`)
