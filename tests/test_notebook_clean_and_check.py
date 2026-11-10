@@ -80,6 +80,7 @@ def test_check_doc_links_ignores_code_cells():
 
 check_tags = notebook_clean_and_check.check_tags
 check_thumbnail = notebook_clean_and_check.check_thumbnail
+check_level = notebook_clean_and_check.check_level
 
 
 def _nb_with_tags(tags) -> dict:
@@ -107,6 +108,17 @@ def test_check_tags_rejects_bad_tags(nb):
         check_tags(nb, "dummy.ipynb")
 
 
+@pytest.mark.parametrize("level", ["beginner", "intermediate", "advanced"])
+def test_check_level_accepts_levels(level):
+    check_level({"cells": [], "metadata": {"zea": {"level": level}}}, "dummy.ipynb")
+
+
+@pytest.mark.parametrize("zea_meta", [{}, {"level": "Beginner"}, {"level": "expert"}])
+def test_check_level_rejects_bad_levels(zea_meta):
+    with pytest.raises(SystemExit):
+        check_level({"cells": [], "metadata": {"zea": zea_meta}}, "dummy.ipynb")
+
+
 def test_check_thumbnail(tmp_path):
     with pytest.raises(SystemExit):
         check_thumbnail("notebooks/models/new_example.ipynb", thumbnail_dir=tmp_path)
@@ -114,11 +126,12 @@ def test_check_thumbnail(tmp_path):
     check_thumbnail("notebooks/models/new_example.ipynb", thumbnail_dir=tmp_path)
 
 
-def test_every_notebook_has_tags_and_thumbnail():
+def test_every_notebook_has_tags_level_and_thumbnail():
     """Every example notebook in the repo is ready for the examples page."""
     notebooks = sorted((_MODULE_PATH.parent / "notebooks").rglob("*.ipynb"))
     assert notebooks
     for nb_path in notebooks:
         nb = json.loads(nb_path.read_text(encoding="utf-8"))
         check_tags(nb, nb_path)
+        check_level(nb, nb_path)
         check_thumbnail(nb_path)

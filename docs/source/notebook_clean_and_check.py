@@ -32,6 +32,8 @@ This script enforces consistency and quality standards for example notebooks. It
    Every notebook is a card on the examples page, so it needs:
    - tags in the notebook metadata, as ``"zea": {"tags": ["beamforming", ...]}``:
      a non-empty list of lowercase strings without duplicates;
+   - a level in the notebook metadata, ``"zea": {"level": "beginner"}``:
+     one of ``beginner``, ``intermediate`` or ``advanced``;
    - a thumbnail at ``docs/_static/thumbnails/<notebook name>.webp`` (or .png/.jpg),
      made with ``docs/source/make_thumbnail.py``.
    See "Adding an example notebook" in the contributing guide.
@@ -70,6 +72,7 @@ DOCS_URL = "https://github.com/tue-bmd/zea/blob/main/docs/source/notebook_clean_
 
 THUMBNAIL_DIR = Path(__file__).resolve().parents[1] / "_static" / "thumbnails"
 THUMBNAIL_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
+LEVELS = ("beginner", "intermediate", "advanced")
 
 
 def error(msg, nb_path=None):
@@ -280,6 +283,18 @@ def check_tags(nb, nb_path):
         error(f"Notebook tags contain duplicates: {tags}", nb_path)
 
 
+def check_level(nb, nb_path):
+    """Require an examples-page level in the notebook metadata."""
+    level = nb.get("metadata", {}).get("zea", {}).get("level")
+    if level not in LEVELS:
+        error(
+            'Add a level for the examples page to the notebook metadata: "zea": '
+            f'{{"level": "beginner"}}, one of {", ".join(LEVELS)}. '
+            f"Found: {level!r}",
+            nb_path,
+        )
+
+
 def check_thumbnail(nb_path, thumbnail_dir=THUMBNAIL_DIR):
     """Require an examples-page thumbnail named after the notebook."""
     stem = Path(nb_path).stem
@@ -307,6 +322,7 @@ def process_notebook(nb_path):
     badge_cell_idx = check_badges(nb, nb_path)
     check_gpu_warning(nb, nb_path, badge_cell_idx)
     check_tags(nb, nb_path)
+    check_level(nb, nb_path)
     check_thumbnail(nb_path)
 
     if clean_outputs(nb, nb_path):

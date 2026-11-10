@@ -46,32 +46,53 @@ body[data-theme="dark"] .admonition.citation-admonition {
    Everything else uses furo's colours. */
 .example-filter {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  flex-direction: column;
+  gap: 0.3rem;
   margin: 1.25rem 0 0.5rem;
+}
+
+.example-filter-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+}
+
+.example-filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.9rem;
+  row-gap: 0.15rem;
+}
+
+.example-filter-label {
+  flex: none;
+  width: 3.2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
 }
 
 .example-filter button {
   font: inherit;
-  font-size: 0.8rem;
-  line-height: 1.6;
-  padding: 0 0.65rem;
-  border: 1px solid var(--color-background-border);
-  border-radius: 999px;
-  background: transparent;
+  font-size: 0.85rem;
+  padding: 0.1rem 0;
+  border: none;
+  background: none;
   color: var(--color-foreground-secondary);
+  border-bottom: 2px solid transparent;
   cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
 .example-filter button:hover {
   color: var(--color-foreground-primary);
-  border-color: var(--color-foreground-muted);
 }
 
 .example-filter button[aria-pressed="true"] {
-  background: var(--color-brand-primary);
-  border-color: var(--color-brand-primary);
-  color: var(--color-background-primary);
+  color: var(--color-foreground-primary);
+  border-bottom-color: var(--color-brand-primary);
 }
 
 .example-gallery {
@@ -127,9 +148,38 @@ body[data-theme="dark"] .admonition.citation-admonition {
   color: var(--color-foreground-secondary);
 }
 
-.example-card-tags {
+.example-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
   font-size: 0.72rem;
   color: var(--color-foreground-muted);
+}
+
+.example-card-level {
+  color: var(--color-foreground-secondary);
+}
+
+/* Level as stars, on the cards and on the level buttons. */
+.example-card-level::before,
+.example-filter button[data-level]::before {
+  letter-spacing: 0.05em;
+  margin-right: 0.3em;
+}
+
+.example-card-level[data-level="beginner"]::before,
+.example-filter button[data-level="beginner"]::before {
+  content: "★☆☆";
+}
+
+.example-card-level[data-level="intermediate"]::before,
+.example-filter button[data-level="intermediate"]::before {
+  content: "★★☆";
+}
+
+.example-card-level[data-level="advanced"]::before,
+.example-filter button[data-level="advanced"]::before {
+  content: "★★★";
 }
 
 .example-card-tags span + span::before {

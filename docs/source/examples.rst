@@ -60,7 +60,7 @@ Agent
 Examples outside the toolbox
 ----------------------------
 
-``zea`` is also used in other libraries, blog posts and tutorials. These examples live outside this repository and link to their original source.
+``zea`` is also used in other libraries, blog posts and tutorials. These examples are linked here below:
 
 .. container:: example-gallery
 
@@ -69,3 +69,4 @@ Examples outside the toolbox
       :thumbnail: deepinv_zea_ultrasound.webp
       :source: DeepInverse
       :tags: beamforming, inverse problems, simulation
+      :level: intermediate

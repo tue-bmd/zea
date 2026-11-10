@@ -22,11 +22,13 @@ order as the ``:glob:`` toctree of that folder. Each notebook needs:
   ``docs/source/make_thumbnail.py``.
 - tags in the notebook metadata, under ``"zea": {"tags": [...]}``. Reuse the
   tags that are already on the examples page where possible.
+- a level in the notebook metadata, ``"zea": {"level": "beginner"}``:
+  ``beginner``, ``intermediate`` or ``advanced``.
 
 ``external-example`` adds a card for an example that lives outside this
 repository, such as a blog post or another library's docs. It needs a
-``:link:``, a ``:thumbnail:`` (a file in ``docs/_static/thumbnails/``) and
-``:tags:``.
+``:link:``, a ``:thumbnail:`` (a file in ``docs/_static/thumbnails/``),
+``:tags:`` and a ``:level:``.
 
 A missing thumbnail or missing tags are reported as errors at the end of the
 build, which then exits with a non-zero status, so that every card on the page
@@ -50,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 THUMBNAIL_DIR = "thumbnails"
 THUMBNAIL_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
+LEVELS = ("beginner", "intermediate", "advanced")
 
 
 def _static_dirs(app) -> list[Path]:
@@ -79,20 +82,24 @@ def _notebook_title(nb: dict) -> str | None:
     return None
 
 
-def _card_html(href, thumb_src, title, tags, *, source=None, external=False) -> str:
+def _card_html(href, thumb_src, title, tags, level, *, source=None, external=False) -> str:
     tag_attr = html.escape("|".join(tags))
+    level = html.escape(level)
     target = ' target="_blank" rel="noopener"' if external else ""
     source_html = (
         f'<span class="example-card-source">{html.escape(source)} ↗</span>' if source else ""
     )
     tags_html = "".join(f"<span>{html.escape(t)}</span>" for t in tags)
     return (
-        f'<a class="example-card" href="{html.escape(href)}" data-tags="{tag_attr}"{target}>'
+        f'<a class="example-card" href="{html.escape(href)}" data-tags="{tag_attr}" '
+        f'data-level="{level}"{target}>'
         f'<span class="example-card-thumb"><img src="{html.escape(thumb_src)}" alt="" '
         'loading="lazy"></span>'
         f'<span class="example-card-title">{_inline_markup(title)}</span>'
         f"{source_html}"
-        f'<span class="example-card-tags">{tags_html}</span>'
+        f'<span class="example-card-meta"><span class="example-card-level" '
+        f'data-level="{level}">{level}</span>'
+        f'<span class="example-card-tags">{tags_html}</span></span>'
         "</a>"
     )
 
@@ -146,7 +153,9 @@ class ExampleGallery(_GalleryDirective):
                 ),
                 None,
             )
-            tags = nb.get("metadata", {}).get("zea", {}).get("tags")
+            meta = nb.get("metadata", {}).get("zea", {})
+            tags = meta.get("tags")
+            level = meta.get("level")
             title = _notebook_title(nb)
             if thumb is None:
                 self._thumbnail_src(f"{stem}.webp")  # reread this page until it exists
@@ -156,14 +165,19 @@ class ExampleGallery(_GalleryDirective):
                 )
             if not tags:
                 self._problem(f'{rel}: add tags to the notebook metadata: "zea": {{"tags": [...]}}')
+            if level not in LEVELS:
+                self._problem(
+                    f'{rel}: add a level to the notebook metadata: "zea": {{"level": '
+                    f"one of {', '.join(LEVELS)}}}"
+                )
             if title is None:
                 self._problem(f"{rel}: the notebook has no markdown heading to use as title")
-            if thumb is None or not tags or title is None:
+            if thumb is None or not tags or level not in LEVELS or title is None:
                 continue
 
             docname = f"{folder}/{stem}"
             href = self._uri_from_here(self.env.app.builder.get_target_uri(docname))
-            cards.append(_card_html(href, self._thumbnail_src(thumb), title, tags))
+            cards.append(_card_html(href, self._thumbnail_src(thumb), title, tags, level))
         return self._raw('<div class="example-gallery">' + "".join(cards) + "</div>")
 
 
@@ -176,12 +190,14 @@ class ExternalExample(_GalleryDirective):
         "link": directives.uri,
         "thumbnail": directives.unchanged_required,
         "tags": directives.unchanged_required,
+        "level": lambda arg: directives.choice(arg, LEVELS),
         "source": directives.unchanged,
     }
 
     def run(self):
         title = self.arguments[0]
-        missing = [k for k in ("link", "thumbnail", "tags") if not self.options.get(k)]
+        required = ("link", "thumbnail", "tags", "level")
+        missing = [k for k in required if not self.options.get(k)]
         if missing:
             self._problem(
                 f"external-example '{title}' is missing " + ", ".join(f":{k}:" for k in missing)
@@ -200,6 +216,7 @@ class ExternalExample(_GalleryDirective):
             thumb_src,
             title,
             tags,
+            self.options["level"],
             source=self.options.get("source"),
             external=True,
         )
@@ -232,8 +249,8 @@ def _report_problems(app, exception):
             logger.error(msg, location=docname)
     if any(problems.values()):
         logger.error(
-            "Every example needs a thumbnail and tags, see 'Adding an example notebook' "
-            "in docs/source/contributing.rst"
+            "Every example needs a thumbnail, tags and a level, see "
+            "'Adding an example notebook' in docs/source/contributing.rst"
         )
         app.statuscode = 1
 

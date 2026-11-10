@@ -384,14 +384,15 @@ New example notebooks are always welcome! Each one shows up on the
    Copy the structure of an existing notebook: a title, the Colab and GitHub
    badges, ``%pip install zea`` as the first cell, and all cells run in order.
 
-2. **Add tags** to the notebook metadata (*Edit → Edit Notebook Metadata* in
-   Jupyter):
+2. **Add tags and a level** to the notebook metadata (*Edit → Edit
+   Notebook Metadata* in Jupyter):
 
    .. code-block:: json
 
-      "zea": {"tags": ["beamforming", "cardiac"]}
+      "zea": {"tags": ["beamforming", "cardiac"], "level": "beginner"}
 
-   Use lowercase, and reuse the tags already on the examples page where possible.
+   Use lowercase tags, and reuse the ones already on the examples page where
+   possible. The level is ``beginner``, ``intermediate`` or ``advanced``.
 
 3. **Add a thumbnail** at ``docs/_static/thumbnails/<notebook name>.webp``: the
    image only, without axes, titles or colorbars. Make it from the image array
@@ -424,6 +425,7 @@ the same folder:
       :thumbnail: my_external_example.webp
       :source: Name of the library or blog
       :tags: beamforming, inverse problems
+      :level: intermediate
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~
