@@ -462,6 +462,12 @@ def test_simulate_op_rejects_the_removed_elevation_keyword():
         op(**kwargs, elevation_lens=True)
 
 
+@pytest.mark.parametrize("simulator", [simulate_rf, simulate_rf_td])
+def test_simulators_reject_the_removed_elevation_keyword(simulator):
+    with pytest.raises(TypeError, match="two_dimensional"):
+        simulator(**tensors(CASES["linear"]), elevation_lens=True)
+
+
 def test_simulate_op_accepts_the_old_method_names(caplog, reset_warning_once):
     """The names from before the rename still select their simulator, with a deprecation
     warning naming the new one."""

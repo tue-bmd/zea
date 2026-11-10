@@ -37,6 +37,7 @@ from zea.internal.registry import ops_registry
 from zea.internal.utils import deprecated, renamed_keywords
 from zea.ops.base import Filter, Operation
 from zea.simulator import fft_length, scatter_exponent_bounds, simulate_rf, simulate_rf_td
+from zea.simulator.response import _reject_elevation_lens
 from zea.utils import canonicalize_axis
 
 # Different function arguments, so annotate as Callable to avoid the type checker trying to check
@@ -254,12 +255,8 @@ class Simulate(Operation):
 
     def __call__(self, **kwargs):
         merged = {**self._input_cache, **kwargs}
-        if "elevation_lens" in merged:
-            # `call` takes **kwargs, so the removed keyword would otherwise be silently ignored.
-            raise TypeError(
-                "`elevation_lens` was removed. Use `two_dimensional` for a 2D simulation, or "
-                "`elevation_focus` for a physical cylindrical elevation lens."
-            )
+        # `call` takes **kwargs, so the removed keyword would otherwise be silently ignored.
+        _reject_elevation_lens(merged.get("elevation_lens"))
         if isinstance(merged.get("scatter_exponent"), (list, tuple)):
             # As an array it is traced whole; jit would trace a list element by element.
             merged["scatter_exponent"] = np.asarray(merged["scatter_exponent"])

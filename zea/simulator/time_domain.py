@@ -11,6 +11,7 @@ from zea.simulator.response import (
     _element_angles,
     _element_frame,
     _one_way_time,
+    _reject_elevation_lens,
     _scene_positions,
     attenuate,
     medium_model,
@@ -47,6 +48,7 @@ def simulate_rf_td(
     scatter_exponent=2.0,
     waveforms_two_way=None,
     waveform_sampling_frequency=250e6,
+    elevation_lens=None,
 ):
     """Time-domain (splat-and-convolve) RF simulator.
 
@@ -82,6 +84,7 @@ def simulate_rf_td(
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1), noiseless:
             the receive chain is :func:`zea.func.apply_receive_chain`.
     """
+    _reject_elevation_lens(elevation_lens)
     if ndim(scatter_exponent) > 0:
         raise ValueError(
             "per-scatterer backscatter coefficients are only supported in the frequency "

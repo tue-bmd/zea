@@ -33,6 +33,7 @@ from zea.backend import checkpoint, highest_matmul_precision
 from zea.internal.core import concrete, ndim
 from zea.simulator.response import (
     _ray_means,
+    _reject_elevation_lens,
     _scene_positions,
     _validate_maps,
     element_responses,
@@ -93,6 +94,7 @@ def simulate_rf(
     n_sos_ray_samples=64,
     attenuation_map=None,
     attenuation_power=1.0,
+    elevation_lens=None,
 ):
     """Simulates RF data for a given set of scatterers.
 
@@ -277,6 +279,7 @@ def simulate_rf(
     Returns:
         rf_data (array-like): The simulated RF data of shape (n_tx, n_ax, n_el, 1).
     """
+    _reject_elevation_lens(elevation_lens)
     _validate_maps(sos_map, attenuation_map, map_grid_x, map_grid_z, map_grid_y)
     fc, fs = float(center_frequency), float(sampling_frequency)
     n_ax = int(n_ax)

@@ -613,6 +613,15 @@ def _as_f32(x):
     return ops.cast(0.0 if x is None else x, "float32")
 
 
+def _reject_elevation_lens(elevation_lens):
+    """Checks presence only (``is not None``), so it also works on a tracer under jit."""
+    if elevation_lens is not None:
+        raise TypeError(
+            "`elevation_lens` was removed. Use `two_dimensional` for a 2D simulation, or "
+            "`elevation_focus` for a physical cylindrical elevation lens."
+        )
+
+
 def _validate_two_dimensional(two_dimensional, elevation_focus, probe_geometry, tol=1e-6):
     """2D is a 1D probe with an ideal elevation lens, so it excludes the 3D lens model."""
     if not two_dimensional:
