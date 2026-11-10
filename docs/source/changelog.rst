@@ -55,7 +55,7 @@ Fixed
 - Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
 - Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)
 - ``zea app`` and ``load_model_from_hf`` download to the zea cache instead of the Hugging Face cache (:gh:`689` by :user:`Louisvh`)
-- Cached functions that call a recursive function load their result from the cache instead of recomputing it on every call (:gh:`703` by :user:`wesselvannierop`)
+- The cache key of a ``@cache_output`` function includes the source of other cached functions it calls, so editing those functions invalidates its cached results (:gh:`703` by :user:`wesselvannierop`)
 
 
 v0.1.8 (2026-10-01)
