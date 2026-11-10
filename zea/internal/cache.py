@@ -211,9 +211,9 @@ def cache_output(*arg_names, verbose=False):
                 cache_key = generate_cache_key(func, args, kwargs, arg_names)
             except Exception as e:
                 log.warning(
-                    f"Could not cache result for {func.__qualname__}: {e}. "
-                    "Running the function without caching. "
-                    "Often happens for a function wrapped with jax.jit or tf.function."
+                    f"Could not generate a cache key for {func.__qualname__} "
+                    f"({type(e).__name__}: {e}). Running the function without caching. "
+                    "This is expected when its arguments are traced by jax.jit or tf.function."
                 )
                 return func(*args, **kwargs)
             if cache_key is None:
