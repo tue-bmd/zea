@@ -134,7 +134,8 @@ def test_rst_to_markdown():
         "### Fixed\n"
         "- [`Normalize`](https://zea.readthedocs.io/en/v0.1.9/_autosummary/zea.ops.html"
         "#zea.ops.Normalize) and `zea.func.missing` use `x` and "
-        "[a link](https://example.org) (#681 by @someone)\n"
+        "[a link](https://example.org) "
+        "([#681](https://github.com/tue-bmd/zea/pull/681) by @someone)\n"
     )
 
 
@@ -142,7 +143,9 @@ def test_notes_of_released_and_pre_release_versions(changelog_file, capsys):
     changelog_file.write_text(make_changelog(ENTRY))
 
     changelog.notes("0.1.8", None)
-    assert capsys.readouterr().out == "### Fixed\n- An older fix (#637 by @someone)\n"
+    assert capsys.readouterr().out == (
+        "### Fixed\n- An older fix ([#637](https://github.com/tue-bmd/zea/pull/637) by @someone)\n"
+    )
 
     # A pre-release has no section yet, so its notes come from Current.
     changelog.notes("0.2.0rc1", "latest")

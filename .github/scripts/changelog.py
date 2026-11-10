@@ -36,6 +36,8 @@ SUBSECTIONS = ("New Features", "Changed", "Fixed")
 CURRENT = "Current"
 
 DOCS_URL = "https://zea.readthedocs.io/en/{version}/"
+# As the `gh` role in docs/source/conf.py.
+PR_URL = "https://github.com/tue-bmd/zea/pull/"
 # `latest` builds from `main`, so it knows every object a release can mention.
 INVENTORY_URL = DOCS_URL.format(version="latest") + "objects.inv"
 # The inventory types each Sphinx role can resolve to; None accepts any Python object.
@@ -246,8 +248,9 @@ def rst_to_markdown(body, inventory, docs_url):
     """Convert the subset of RST used in the changelog to GitHub Markdown."""
     # Headings first, while their underlines still match.
     body = HEADING.sub(lambda m: f"### {m.group('title')}", drop_empty_subsections(body))
-    # GitHub links "#123" and "@handle" by itself.
-    body = re.sub(r":gh:`(\d+)`", r"#\1", body)
+    # An explicit link, as GitHub expands a bare "#123" into the PR title in PR
+    # descriptions (but not in releases); it links "@handle" by itself.
+    body = re.sub(r":gh:`(\d+)`", rf"[#\1]({PR_URL}\1)", body)
     body = re.sub(r":user:`([^`]+)`", r"@\1", body)
     # Cross-references link to the API reference or doc page they point at.
     body = re.sub(
