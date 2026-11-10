@@ -35,11 +35,11 @@ Changed
 ^^^^^^^
 - Streaming ``hf://`` datasets no longer runs into the Hugging Face rate limit, so you can train on many batches with many workers without downloading the data. The API is unchanged; two new environment variables, ``ZEA_MAX_CONCURRENT_REQUESTS`` and ``ZEA_FIND_H5_SHAPES_WORKERS``, tune it (see :doc:`environment`) (:gh:`671` by :user:`tristan-deep`)
 - Conversion scripts for EchoNet-Dynamic, CAMUS and PICMUS accept the ``.zip`` file itself. EchoNet-Dynamic reproduces the published split by default, and its polar conversion is about 15 times faster (:gh:`676` by :user:`wesselvannierop`)
-- (Breaking) In ``compute_pfield``, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
+- (Breaking) In :func:`~zea.beamform.pfield.compute_pfield`, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
 - (Breaking) :func:`zea.func.vmap` validates axes like ``jax.vmap``, so a list no longer matches a tuple. ``out_axes=None`` only works on the native ``jax.vmap``, and the ``_use_torch_vmap`` argument is removed (:gh:`692` by :user:`wesselvannierop`)
 - ``Parameters.copy()`` and ``set_transmits`` are much faster (:gh:`656` by :user:`wesselvannierop`)
 - (Breaking) The check on cartesian beamforming grids uses per-axis limits from the image's k-space support instead of λ/2, see :doc:`notebooks/pipeline/kspace_aliasing_example`. Auto-sized grids get one more pixel per axis (:gh:`673` by :user:`wesselvannierop`)
-- The default ``probe_bandwidth_percent`` is 100 instead of 200, which also narrows the band used by ``compute_pfield`` (:gh:`644` by :user:`tristan-deep`)
+- The default ``probe_bandwidth_percent`` is 100 instead of 200, which also narrows the band used by :func:`~zea.beamform.pfield.compute_pfield` (:gh:`644` by :user:`tristan-deep`)
 
 Fixed
 ^^^^^
@@ -55,6 +55,7 @@ Fixed
 - Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
 - Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)
 - ``zea app`` and ``load_model_from_hf`` download to the zea cache instead of the Hugging Face cache (:gh:`689` by :user:`Louisvh`)
+- The cache key of a ``@cache_output`` function includes the source of other cached functions it calls, so editing those functions invalidates its cached results (:gh:`703` by :user:`wesselvannierop`)
 
 
 v0.1.8 (2026-10-01)
