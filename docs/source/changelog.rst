@@ -40,6 +40,7 @@ Changed
 
 Fixed
 ^^^^^
+- :func:`zea.func.vmap` passes arguments at the right positions with multiple ``None`` arguments. It also keeps all outputs, supports nested and ``None`` outputs, supports negative axes when batching, and raises an error for arguments of different lengths (:gh:`691` by :user:`wesselvannierop`)
 - The pressure field uses the one-way transmit spectrum, averages over frequencies instead of summing, and takes the element positions from ``probe_geometry`` (:gh:`657` by :user:`wesselvannierop`)
 - ``t_peak`` estimated from ``waveforms_two_way`` uses the envelope peak; values change where the carrier peak differs from it (:gh:`656` by :user:`wesselvannierop`)
 - Conversion of Verasonics ``BS100BW`` and ``BS50BW`` data samples I and Q at the same time instants. Data converted with earlier versions, such as some Open-H-RF data, may be affected (:gh:`672` by :user:`vincentvdschaft`)
