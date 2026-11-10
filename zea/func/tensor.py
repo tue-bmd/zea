@@ -571,6 +571,8 @@ def vmap(
             equivalent to `vmap`. Mutually exclusive with `batch_size`.
         fn_supports_batch: If True, assumes that `fun` can already handle batched inputs.
             In this case, this function will only handle padding and reshaping for batching.
+            Unlike in `jax.vmap`, `in_axes` and `out_axes` then do not move any axes: `fun`
+            should take its batch at `in_axes` and return it at `out_axes` itself.
         disable_jit: If True, disables JIT compilation for backends that support it.
             This can be useful for debugging. Will fall back to simple mapping.
     Returns:
