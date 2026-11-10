@@ -606,10 +606,32 @@ class Pipeline:
 
     def set_jit(self, value: bool):
         """Set the JIT compilation for the pipeline."""
+        self._jit_self = value
         if value:
             self._jit()
         else:
             self._unjit()
+
+    # Copies rebuild their compiled and timed callables, so they run their own
+    # operations instead of the original's.
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for name in ("_call_pipeline", "_jittable_call", "_callable_layers"):
+            state.pop(name, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._call_pipeline = self.call  # as in __init__, before set_jit may compile it
+        self.set_jit(self._jit_self)
+        if self._timed:
+            restored_timer = self.timer
+            self._callable_layers = self._get_timed_operations()
+            # New wrappers get the same names, so they keep the timings recorded so far
+            self.timer.timings = restored_timer.timings
+            self.timer.last_append = restored_timer.last_append
+        else:
+            self._callable_layers = self._pipeline_layers
 
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):
@@ -2234,6 +2256,13 @@ class ADMIRE(Operation):
         self._models_cache = {}
         self._fit_cache = {}
         self._checked_geometry = None
+
+    def __getstate__(self):
+        # The fit cache holds a compiled closure, which cannot be pickled; it is
+        # rebuilt on the next call.
+        state = super().__getstate__()
+        state["_fit_cache"] = {}
+        return state
 
     def get_dict(self, compact=True):
         """Serialize the operation, leaving out precomputed ``models``.
