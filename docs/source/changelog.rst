@@ -35,24 +35,27 @@ Changed
 ^^^^^^^
 - Streaming ``hf://`` datasets no longer runs into the Hugging Face rate limit, so you can train on many batches with many workers without downloading the data. The API is unchanged; two new environment variables, ``ZEA_MAX_CONCURRENT_REQUESTS`` and ``ZEA_FIND_H5_SHAPES_WORKERS``, tune it (see :doc:`environment`) (:gh:`671` by :user:`tristan-deep`)
 - Conversion scripts for EchoNet-Dynamic, CAMUS and PICMUS accept the ``.zip`` file itself. EchoNet-Dynamic reproduces the published split by default, and its polar conversion is about 15 times faster (:gh:`676` by :user:`wesselvannierop`)
-- (Breaking) In ``compute_pfield``, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
+- (Breaking) In :func:`~zea.beamform.pfield.compute_pfield`, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
 - (Breaking) :func:`zea.func.vmap` validates axes like ``jax.vmap``, so a list no longer matches a tuple. ``out_axes=None`` only works on the native ``jax.vmap``, and the ``_use_torch_vmap`` argument is removed (:gh:`692` by :user:`wesselvannierop`)
 - ``Parameters.copy()`` and ``set_transmits`` are much faster (:gh:`656` by :user:`wesselvannierop`)
 - (Breaking) The check on cartesian beamforming grids uses per-axis limits from the image's k-space support instead of λ/2, see :doc:`notebooks/pipeline/kspace_aliasing_example`. Auto-sized grids get one more pixel per axis (:gh:`673` by :user:`wesselvannierop`)
-- The default ``probe_bandwidth_percent`` is 100 instead of 200, which also narrows the band used by ``compute_pfield`` (:gh:`644` by :user:`tristan-deep`)
+- The default ``probe_bandwidth_percent`` is 100 instead of 200, which also narrows the band used by :func:`~zea.beamform.pfield.compute_pfield` (:gh:`644` by :user:`tristan-deep`)
 
 Fixed
 ^^^^^
+- A streamed ``hf://`` read that still fails after its retries, such as a dropped connection, no longer ends the epoch: the ``Dataloader`` reopens the file and reads the sample again (:gh:`690` by :user:`tristan-deep`)
 - :func:`zea.func.vmap` passes arguments at the right positions with multiple ``None`` arguments. It also keeps all outputs, supports nested and ``None`` outputs, supports negative axes when batching, and raises an error for arguments of different lengths (:gh:`691` by :user:`wesselvannierop`)
 - The pressure field uses the one-way transmit spectrum, averages over frequencies instead of summing, and takes the element positions from ``probe_geometry`` (:gh:`657` by :user:`wesselvannierop`)
 - ``t_peak`` estimated from ``waveforms_two_way`` uses the envelope peak; values change where the carrier peak differs from it (:gh:`656` by :user:`wesselvannierop`)
 - Conversion of Verasonics ``BS100BW`` and ``BS50BW`` data samples I and Q at the same time instants. Data converted with earlier versions, such as some Open-H-RF data, may be affected (:gh:`672` by :user:`vincentvdschaft`)
 - :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`wesselvannierop`)
 - ``waveforms_one_way`` and ``waveforms_two_way`` follow ``selected_transmits``, like the other per-transmit parameters (:gh:`683` by :user:`wesselvannierop`)
+- Operations and pipelines can be deep-copied and pickled, also when not registered with Keras, and copies keep their JIT settings (:gh:`698` by :user:`tristan-deep`)
 - The shared GIF palette keeps exact colors, so pure black stays ``(0, 0, 0)`` (:gh:`680` by :user:`wesselvannierop`)
 - Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
 - Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)
 - ``zea app`` and ``load_model_from_hf`` download to the zea cache instead of the Hugging Face cache (:gh:`689` by :user:`Louisvh`)
+- The cache key of a ``@cache_output`` function includes the source of other cached functions it calls, so editing those functions invalidates its cached results (:gh:`703` by :user:`wesselvannierop`)
 
 
 v0.1.8 (2026-10-01)
