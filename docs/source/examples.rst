@@ -70,3 +70,10 @@ Examples outside the toolbox
       :source: DeepInverse
       :tags: beamforming, inverse problems, simulation
       :level: intermediate
+
+   .. external-example:: Ultrasound despeckling from B-mode images
+      :link: https://deepinv.org/auto_examples/self-supervised-learning/demo_ultrasound_despeckling.html
+      :thumbnail: deepinv_ultrasound_despeckling.webp
+      :source: DeepInverse
+      :tags: image enhancement
+      :level: beginner
