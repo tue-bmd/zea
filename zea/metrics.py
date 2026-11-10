@@ -433,7 +433,7 @@ class Metrics:
         return_numpy,
         device,
         mapped_batch_size=None,
-        _use_torch_vmap=True,
+        torch_vmappable=True,
     ):
         num_batch_axes = max(0, ops.ndim(y_true) - 3)
 
@@ -447,11 +447,10 @@ class Metrics:
             # disable_jit only when on the torch backend and the metric is not
             # torch-vmappable (e.g. LPIPS), so that other backends (JAX, etc.)
             # still benefit from their native vmap / vectorized_map paths.
-            disable_jit = not _use_torch_vmap and keras.backend.backend() == "torch"
+            disable_jit = not torch_vmappable and keras.backend.backend() == "torch"
             metric_fn = tensor.vmap(
                 metric_fn,
                 in_axes=0,
-                _use_torch_vmap=_use_torch_vmap,
                 disable_jit=disable_jit,
                 batch_size=mapped_batch_size,
             )
@@ -510,7 +509,7 @@ class Metrics:
                 return_numpy,
                 device,
                 mapped_batch_size=mapped_batch_size,
-                _use_torch_vmap=self.torch_vmappable[name],
+                torch_vmappable=self.torch_vmappable[name],
             )
         return results
 
