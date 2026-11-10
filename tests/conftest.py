@@ -146,6 +146,42 @@ def pytest_addoption(parser):
         help="Run only notebooks under this subfolder (e.g. --notebook-dir models)."
         " Can be repeated.",
     )
+    parser.addoption(
+        "--shard",
+        action="store",
+        default=None,
+        help="Run only shard I of N (e.g. --shard 1/3), assigning the selected tests "
+        "round-robin so slow files are spread over all shards. Used by CI.",
+    )
+
+
+class _ShardSelector:
+    """Keeps every N-th selected test, see ``--shard``."""
+
+    def __init__(self, index: int, count: int):
+        self.index, self.count = index, count
+
+    # trylast: shard what is left after `-m`/`-k` deselection, so shards stay balanced.
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, config, items):
+        """Deselect all tests that are not in this shard."""
+        keep = items[self.index - 1 :: self.count]
+        kept = set(map(id, keep))
+        config.hook.pytest_deselected(items=[item for item in items if id(item) not in kept])
+        items[:] = keep
+
+
+def _register_shard_selector(config):
+    shard = config.getoption("--shard")
+    if not shard:
+        return
+    try:
+        index, count = (int(part) for part in shard.split("/"))
+    except ValueError:
+        raise pytest.UsageError(f"--shard expects I/N, e.g. 1/3; got {shard!r}") from None
+    if not 1 <= index <= count:
+        raise pytest.UsageError(f"--shard {shard}: I must be between 1 and N")
+    config.pluginmanager.register(_ShardSelector(index, count), "zea-shard-selector")
 
 
 def _enable_subprocess_coverage():
@@ -171,6 +207,7 @@ def _enable_subprocess_coverage():
 def pytest_configure(config):
     """Validate backend availability before importing backend-dependent test modules."""
     _enable_subprocess_coverage()
+    _register_shard_selector(config)
 
     for backend in ML_BACKENDS:
         config.addinivalue_line("markers", f"{backend}: test requires the {backend} backend")

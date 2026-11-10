@@ -1,9 +1,9 @@
 codecov:
   notify:
-    # tests.yaml uploads coverage under two flags: `unit` (fast job) and `heavy`
-    # (self-hosted, up to 2h). Wait for both before notifying, otherwise Codecov
-    # reports as soon as `unit` lands while `heavy` is still running.
-    after_n_builds: 2
+    # tests.yaml uploads coverage under two flags: `unit` (3 sharded jobs) and `heavy`
+    # (self-hosted, up to 2h). Wait for all four uploads before notifying, otherwise
+    # Codecov reports as soon as the first lands while the others are still running.
+    after_n_builds: 4
   require_ci_to_pass: false
   max_report_age: off
 
@@ -33,7 +33,7 @@ comment:
   layout: "reach, diff, flags, files"
   behavior: default
   require_changes: false
-  after_n_builds: 2
+  after_n_builds: 4
 
 ignore:
   - "tests/**"
