@@ -28,6 +28,7 @@ Changed
 
 Fixed
 ^^^^^
+- An unbuilt Keras ``augmentation`` passed to :class:`zea.Dataloader` no longer fails at random when Grain calls it from several threads at once (:gh:`706` by :user:`tristan-deep`)
 
 
 v0.1.9 (2026-11-10)
