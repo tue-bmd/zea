@@ -24,56 +24,6 @@ SINC_HALF_AMPLITUDE = 0.6033545644016143
 """The argument ``x`` at which ``sinc(x) = sin(pi x) / (pi x)`` drops to 0.5 (-6 dB)."""
 
 
-def is_plane_wave(focus_distances):
-    """Mask of the transmits that are plane waves.
-
-    A plane wave is marked by an infinite focus distance (``np.inf``, the
-    canonical value) or by ``0``.
-
-    Args:
-        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
-            marks no transmit type.
-
-    Returns:
-        np.ndarray: Boolean mask with the shape of ``focus_distances``.
-    """
-    focus_distances = np.asarray(focus_distances, dtype=float)
-    return (focus_distances == 0) | np.isinf(focus_distances)
-
-
-def is_focused(focus_distances):
-    """Mask of the transmits that are focused.
-
-    A focused transmit has a finite, positive focus distance.
-
-    Args:
-        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
-            marks no transmit type.
-
-    Returns:
-        np.ndarray: Boolean mask with the shape of ``focus_distances``.
-    """
-    focus_distances = np.asarray(focus_distances, dtype=float)
-    return np.isfinite(focus_distances) & (focus_distances > 0)
-
-
-def is_diverging(focus_distances):
-    """Mask of the transmits that are diverging waves.
-
-    A diverging wave has a finite, negative focus distance (a virtual source
-    behind the array).
-
-    Args:
-        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
-            marks no transmit type.
-
-    Returns:
-        np.ndarray: Boolean mask with the shape of ``focus_distances``.
-    """
-    focus_distances = np.asarray(focus_distances, dtype=float)
-    return np.isfinite(focus_distances) & (focus_distances < 0)
-
-
 def element_pitch(probe_geometry):
     """Median distance between neighbouring elements in metres.
 
@@ -267,6 +217,59 @@ def element_acceptance_angle(element_width, wavelength):
     """
     sine = SINC_HALF_AMPLITUDE * wavelength / element_width
     return float(np.pi / 2 if sine >= 1 else np.arcsin(sine))
+
+
+def is_plane_wave(focus_distances):
+    """Mask of the transmits that are plane waves.
+
+    A plane wave is marked by an infinite focus distance (``np.inf``, the
+    canonical value) or by ``0``.
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = np.asarray(focus_distances, dtype=float)
+    return (focus_distances == 0) | np.isinf(focus_distances)
+
+
+def _is_focused(focus_distances, xp):
+    return xp.logical_and(xp.isfinite(focus_distances), focus_distances > 0)
+
+
+def is_focused(focus_distances):
+    """Mask of the transmits that are focused.
+
+    A focused transmit has a finite, positive focus distance.
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    return _is_focused(np.asarray(focus_distances, dtype=float), xp=np)
+
+
+def is_diverging(focus_distances):
+    """Mask of the transmits that are diverging waves.
+
+    A diverging wave has a finite, negative focus distance (a virtual source
+    behind the array).
+
+    Args:
+        focus_distances: Focus distance per transmit, scalar or array. ``NaN``
+            marks no transmit type.
+
+    Returns:
+        np.ndarray: Boolean mask with the shape of ``focus_distances``.
+    """
+    focus_distances = np.asarray(focus_distances, dtype=float)
+    return np.isfinite(focus_distances) & (focus_distances < 0)
 
 
 def compute_element_normals(probe_geometry, eps=1e-12):

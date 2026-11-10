@@ -650,11 +650,15 @@ class Parameters(BaseParameters):
                 grid_size_x=self.grid_size_x,
                 grid_size_y=self.grid_size_y,
             )
-            try:
-                check_for_aliasing(self)
-            except MissingDependencyError:
-                # No wavelength (e.g. missing center frequency); cannot assess aliasing.
-                pass
+            # Aliasing cannot be assessed without the frequency and probe geometry.
+            if (
+                self._params.get("center_frequency") is not None
+                and self._params.get("probe_geometry") is not None
+            ):
+                try:
+                    self.check_for_aliasing()
+                except MissingDependencyError:
+                    pass
             return grid
         else:
             raise ValueError(
@@ -715,6 +719,75 @@ class Parameters(BaseParameters):
                     "selected_transmits, or use a regular grid (enable_scanline=False)."
                 )
         return polar_angles
+
+    def check_for_aliasing(self, demodulated=True, bandwidth=None) -> list:
+        """Warn when the beamforming grid under-samples the data it will carry.
+
+        Run by :attr:`grid` for cartesian grids. Whether a pixel pitch
+        under-samples depends on whether the data reaching the grid is RF or
+        baseband IQ, which the parameters alone do not tell. By default IQ is
+        assumed: its axial limit is never stricter than the RF one, so a grid
+        that fails it aliases either way, and the lateral limit is the same for
+        both. See :func:`zea.beamform.pixelgrid.aliasing_limits` for the
+        criteria. Only regular cartesian grids, 2D or 3D, are checked.
+
+        Args:
+            demodulated: Whether the data reaching the grid is baseband IQ.
+                Pass ``False`` to check against the stricter RF axial limit.
+            bandwidth: The RF band in Hz. Overrides the ``bandwidth`` parameter;
+                when neither is set, ``probe_bandwidth_percent`` of the
+                ``center_frequency`` is assumed.
+
+        Returns:
+            list of str: The warnings emitted; empty when the grid is adequate.
+        """
+        if self.grid_type != "cartesian" or self.enable_scanline:
+            return []
+
+        def stored(name):
+            # Read through the property so the transmit selection applies, but only
+            # when the value was provided: the fallbacks log a warning that the
+            # check should not trigger.
+            return getattr(self, name) if self._params.get(name) is not None else None
+
+        focus_distances = stored("focus_distances")
+        tx_apodizations = stored("tx_apodizations")
+        if focus_distances is None or tx_apodizations is None:
+            # Unknown transmit geometry: an empty one makes aliasing_limits assume
+            # the symmetric transmit cone.
+            focus_distances, tx_apodizations = np.zeros(0), np.zeros((0, 0))
+        transmit_origins = stored("transmit_origins")
+        if transmit_origins is None:
+            transmit_origins = np.zeros((len(focus_distances), 3))
+
+        if bandwidth is None:
+            bandwidth = self._params.get("bandwidth")
+        if bandwidth is None:
+            center_frequency = np.max(np.asarray(self.center_frequency, dtype=float))
+            bandwidth = self.probe_bandwidth_percent / 100 * center_frequency
+
+        return check_for_aliasing(
+            self.xlims,
+            self.zlims,
+            self.grid_size_x,
+            self.grid_size_z,
+            self.sound_speed,
+            self.center_frequency,
+            self.f_number,
+            demodulation_frequency=self.demodulation_frequency,
+            focus_distances=focus_distances,
+            probe_geometry=self.probe_geometry,
+            tx_apodizations=tx_apodizations,
+            polar_angles=self.polar_angles,
+            transmit_origins=transmit_origins,
+            demodulated=demodulated,
+            bandwidth=bandwidth,
+            azimuth_angles=stored("azimuth_angles"),
+            ylims=self.ylims if self.is_3d else (0.0, 0.0),
+            grid_size_y=self.grid_size_y if self.is_3d else 1,
+            element_width=self._params.get("element_width"),
+            element_height=self._params.get("element_height"),
+        )
 
     @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
     def flat_aligned_apodization(self):
@@ -788,7 +861,8 @@ class Parameters(BaseParameters):
             width = outer_radius * abs(float(limits[1]) - float(limits[0]))
         else:
             width = self.xlims[1] - self.xlims[0]
-        return max(int(np.ceil(width / pixel)), 1)
+        # Pixels sit on both limits, so n pixels span n - 1 pitches.
+        return max(int(np.ceil(width / pixel)) + 1, 1)
 
     @cache_with_dependencies(
         "ylims",
@@ -805,7 +879,7 @@ class Parameters(BaseParameters):
             return grid_size_y
 
         height = self.ylims[1] - self.ylims[0]
-        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_y, 1)
 
     @cache_with_dependencies(
@@ -822,7 +896,7 @@ class Parameters(BaseParameters):
             return grid_size_z
 
         depth = self.zlims[1] - self.zlims[0]
-        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_z, 1)
 
     @cache_with_dependencies("sound_speed", "center_frequency")
@@ -1546,11 +1620,14 @@ class Parameters(BaseParameters):
         "grid",
         "t0_delays",
         "pfield_kwargs",
+        "attenuation_coef",
         optional=("element_width",),
     )
     def pfield(self) -> np.ndarray:
         """Compute or return the pressure field (pfield) for weighting
-        of shape (n_tx, grid_size_z, grid_size_x)."""
+        of shape (n_tx, grid_size_z, grid_size_x).
+
+        Uses :attr:`attenuation_coef`, unless overridden in :attr:`pfield_kwargs`."""
         if self.is_3d:
             raise NotImplementedError("Pfield computation is not yet implemented for 3D scans.")
 
@@ -1563,7 +1640,7 @@ class Parameters(BaseParameters):
             t0_delays=self.t0_delays,
             probe_bandwidth_percent=self.probe_bandwidth_percent,
             element_width=self._params.get("element_width"),
-            **self.pfield_kwargs,
+            **{"attenuation_coef": self.attenuation_coef, **self.pfield_kwargs},
         )
         return ops.convert_to_numpy(pfield)
 

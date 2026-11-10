@@ -632,10 +632,32 @@ class Pipeline:
 
     def set_jit(self, value: bool):
         """Set the JIT compilation for the pipeline."""
+        self._jit_self = value
         if value:
             self._jit()
         else:
             self._unjit()
+
+    # Copies rebuild their compiled and timed callables, so they run their own
+    # operations instead of the original's.
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        for name in ("_call_pipeline", "_jittable_call", "_callable_layers"):
+            state.pop(name, None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._call_pipeline = self.call  # as in __init__, before set_jit may compile it
+        self.set_jit(self._jit_self)
+        if self._timed:
+            restored_timer = self.timer
+            self._callable_layers = self._get_timed_operations()
+            # New wrappers get the same names, so they keep the timings recorded so far
+            self.timer.timings = restored_timer.timings
+            self.timer.last_append = restored_timer.last_append
+        else:
+            self._callable_layers = self._pipeline_layers
 
     @jit_options.setter
     def jit_options(self, value: Union[str, None]):
@@ -1125,7 +1147,7 @@ class Map(Pipeline):
         operations: List[Operation],
         argnames: List[str] | str,
         in_axes: List[Union[int, None]] | int = 0,
-        out_axes: List[Union[int, None]] | int = 0,
+        out_axes: int = 0,
         chunks: int | None = None,
         batch_size: int | None = None,
         **kwargs,
@@ -1137,8 +1159,7 @@ class Map(Pipeline):
                 Can also be a single string if only one argument is mapped over.
             in_axes (int or list): Axes to map over for each argument.
                 If a single int is provided, it is used for all arguments.
-            out_axes (int or list): Axes to map over for each output.
-                If a single int is provided, it is used for all outputs.
+            out_axes (int): Axis of the output to map over.
             chunks (int, optional): Number of chunks to split the input data into.
                 If None, no chunking is performed. Mutually exclusive with ``batch_size``.
             batch_size (int, optional): Size of batches to process at once.
@@ -2264,6 +2285,13 @@ class ADMIRE(Operation):
         self._models_cache = {}
         self._fit_cache = {}
         self._checked_geometry = None
+
+    def __getstate__(self):
+        # The fit cache holds a compiled closure, which cannot be pickled; it is
+        # rebuilt on the next call.
+        state = super().__getstate__()
+        state["_fit_cache"] = {}
+        return state
 
     def get_dict(self, compact=True):
         """Serialize the operation, leaving out precomputed ``models``.

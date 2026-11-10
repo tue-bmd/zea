@@ -34,6 +34,7 @@ extensions = [
     "sphinx.ext.mathjax",  # for rendering math in the documentation
     "tyroprogram",  # local: auto-documents the tyro CLI (docs/source/_ext/tyroprogram.py)
     "citation",  # local: the .. citation:: block (docs/source/_ext/citation.py)
+    "example_gallery",  # local: example cards on the examples page (_ext/example_gallery.py)
 ]
 
 autodoc_mock_imports = [

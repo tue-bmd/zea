@@ -134,7 +134,8 @@ def test_rst_to_markdown():
         "### Fixed\n"
         "- [`Normalize`](https://zea.readthedocs.io/en/v0.1.9/_autosummary/zea.ops.html"
         "#zea.ops.Normalize) and `zea.func.missing` use `x` and "
-        "[a link](https://example.org) (#681 by @someone)\n"
+        "[a link](https://example.org) "
+        "([#681](https://github.com/tue-bmd/zea/pull/681) by @someone)\n"
     )
 
 
@@ -142,7 +143,9 @@ def test_notes_of_released_and_pre_release_versions(changelog_file, capsys):
     changelog_file.write_text(make_changelog(ENTRY))
 
     changelog.notes("0.1.8", None)
-    assert capsys.readouterr().out == "### Fixed\n- An older fix (#637 by @someone)\n"
+    assert capsys.readouterr().out == (
+        "### Fixed\n- An older fix ([#637](https://github.com/tue-bmd/zea/pull/637) by @someone)\n"
+    )
 
     # A pre-release has no section yet, so its notes come from Current.
     changelog.notes("0.2.0rc1", "latest")
@@ -174,6 +177,69 @@ def test_check_requires_a_new_entry_under_current(changelog_file, tmp_path):
         changelog.check(base)
     changelog_file.write_text(make_changelog(f"{ENTRY}\n- Another fix (:gh:`700` by :user:`b`)"))
     changelog.check(base)
+
+
+@pytest.mark.parametrize(
+    "attribution",
+    [
+        "(by :user:`someone`)",
+        "(#689 by @someone)",
+        "(:gh:`689`)",
+        "(:gh:`689` by someone)",
+        "",
+    ],
+)
+def test_check_requires_pr_and_author(changelog_file, tmp_path, attribution):
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+    changelog_file.write_text(make_changelog(f"- A fix {attribution}".rstrip()))
+    with pytest.raises(SystemExit, match="end each new entry with"):
+        changelog.check(base)
+
+
+@pytest.mark.parametrize(
+    "attribution",
+    [
+        "(:gh:`689` by :user:`someone`)",
+        "(:gh:`689` by :user:`a` and :user:`b`)",
+        "(:gh:`1` and :gh:`2` by :user:`a`, :gh:`3` by :user:`b`)",
+    ],
+)
+def test_check_accepts_pr_and_author(changelog_file, tmp_path, attribution):
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+    changelog_file.write_text(make_changelog(f"- A fix {attribution}"))
+    changelog.check(base)
+
+
+def test_check_accepts_a_wrapped_entry(changelog_file, tmp_path):
+    """RST lets a bullet wrap onto indented lines; the attribution may be on the last one."""
+    base = tmp_path / "base.rst"
+    base.write_text(make_changelog())
+    changelog_file.write_text(
+        make_changelog("- A long fix that wraps\n  onto the next line (:gh:`1` by :user:`a`)")
+    )
+    changelog.check(base)
+
+
+def test_entries_join_wrapped_lines():
+    body = "- One that wraps\n  onto a second line\n- Another\n\nNot part of it"
+    assert changelog.entries(body) == ["- One that wraps onto a second line", "- Another"]
+
+
+def test_lint_requires_every_entry_to_be_attributed(changelog_file):
+    """Unlike `check`, `lint` also catches an edit that breaks an existing entry."""
+    changelog_file.write_text(make_changelog(ENTRY))
+    changelog.lint()
+
+    changelog_file.write_text(make_changelog(ENTRY).replace("(:gh:`637`", "(:gh:637"))
+    with pytest.raises(SystemExit, match="An older fix"):
+        changelog.lint()
+
+
+def test_every_entry_in_the_changelog_is_attributed():
+    """The real changelog follows the format the check enforces on new entries."""
+    changelog.lint()
 
 
 def test_load_inventory(tmp_path):
@@ -208,6 +274,7 @@ def test_command_line(changelog_file, tmp_path, monkeypatch, capsys):
     base.write_text(make_changelog())
 
     run("check", str(base))
+    run("lint")
     run("release", "v0.1.9", "--date", "2026-11-05")
     assert "v0.1.9 (2026-11-05)" in changelog_file.read_text()
 

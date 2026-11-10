@@ -311,6 +311,25 @@ def test_reads_match_the_file(small_cdn, cache_type):
     assert stream.read(200) == expected[4000:4200] and stream.tell() == 4200
 
 
+@pytest.mark.parametrize("cache_type", ["blockcache", "none"])
+def test_stream_survives_exhausted_retries(tmp_path, hub, monkeypatch, cache_type):
+    """A read that outlasts the retries raises an ``OSError`` and keeps no block, so
+    the next read through the same stream gets the right bytes."""
+    monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
+    monkeypatch.setattr(chunk_reader, "BASE_BACKOFF", 0.01)
+    path = _write(tmp_path / "x.hdf5", _structured())
+    server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=503)
+    hub.location, hub.size = server.url + path.name, path.stat().st_size
+    try:
+        stream = hf_remote.open_remote(HF_PATH, block_size=4096, cache_type=cache_type)
+        with pytest.raises(OSError):
+            stream.read_at(100, 50)
+        assert stream.read_at(100, 50) == path.read_bytes()[100:150]
+        assert server.count == 3
+    finally:
+        server.close()
+
+
 def test_read_shares_the_blocks_of_read_at(small_cdn):
     """h5py's reads and the chunk reader's positional reads use the same blocks."""
     stream = hf_remote.open_remote(HF_PATH, block_size=4096)

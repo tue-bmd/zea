@@ -14,8 +14,13 @@ the layout it relies on.
     python .github/scripts/changelog.py notes 0.1.9 [--docs-version latest]
 
     # Check that "Current" has an entry that the changelog of the base branch
-    # (here saved to base.rst) does not have. Used by the Changelog workflow.
+    # (here saved to base.rst) does not have, ending with its PR and author.
+    # Used by the Changelog workflow.
     python .github/scripts/changelog.py check base.rst
+
+    # Check that every entry in the changelog, old or new, ends with its PR and
+    # author. Used by the Changelog workflow, also on PRs that need no new entry.
+    python .github/scripts/changelog.py lint
 """
 
 import argparse
@@ -31,6 +36,8 @@ SUBSECTIONS = ("New Features", "Changed", "Fixed")
 CURRENT = "Current"
 
 DOCS_URL = "https://zea.readthedocs.io/en/{version}/"
+# As the `gh` role in docs/source/conf.py.
+PR_URL = "https://github.com/tue-bmd/zea/pull/"
 # `latest` builds from `main`, so it knows every object a release can mention.
 INVENTORY_URL = DOCS_URL.format(version="latest") + "objects.inv"
 # The inventory types each Sphinx role can resolve to; None accepts any Python object.
@@ -54,6 +61,10 @@ VERSION = re.compile(r"\d+\.\d+\.\d+((a|b|rc)\d+)?")
 PRE_RELEASE = re.compile(r"\d+\.\d+\.\d+(a|b|rc)\d+")
 # An RST comment: ".." alone or followed by text, but not a directive (".. note::"),
 # link target (".. _label:") or footnote (".. [1]").
+# The end of an entry: "(:gh:`681` by :user:`handle`)", with more PRs or authors joined
+# by "and" or ", ", e.g. "(:gh:`1` and :gh:`2` by :user:`a`, :gh:`3` by :user:`b`)".
+_GROUP = r":gh:`\d+`(?:(?:, | and ):gh:`\d+`)* by :user:`[^`]+`(?:(?:, | and ):user:`[^`]+`)*"
+ATTRIBUTION = re.compile(rf"\({_GROUP}(?:, {_GROUP})*\)$")
 COMMENT = re.compile(r"\.\.(?:\s+(?!_|\[)(?!\S+::).*)?")
 CODE_BLOCK = re.compile(r"\.\.\s+(?:code-block|code|sourcecode)::.*")
 
@@ -130,9 +141,19 @@ def strip_comments(body):
 
 
 def entries(body):
-    """The bullet lines of a section, ignoring comments and code examples."""
+    """The bullets of a section, each on one line, ignoring comments and code examples."""
     body = strip_blocks(strip_comments(body), CODE_BLOCK)
-    return [line.strip() for line in body.splitlines() if re.match(r"\s*- \S", line)]
+    found, in_bullet = [], False
+    for line in body.splitlines():
+        if re.match(r"\s*- \S", line):
+            found.append(line.strip())
+            in_bullet = True
+        elif in_bullet and line[:1].isspace() and line.strip():
+            # An indented line right below a bullet continues it.
+            found[-1] += " " + line.strip()
+        else:
+            in_bullet = False
+    return found
 
 
 def release(version, date):
@@ -227,8 +248,9 @@ def rst_to_markdown(body, inventory, docs_url):
     """Convert the subset of RST used in the changelog to GitHub Markdown."""
     # Headings first, while their underlines still match.
     body = HEADING.sub(lambda m: f"### {m.group('title')}", drop_empty_subsections(body))
-    # GitHub links "#123" and "@handle" by itself.
-    body = re.sub(r":gh:`(\d+)`", r"#\1", body)
+    # An explicit link, as GitHub expands a bare "#123" into the PR title in PR
+    # descriptions (but not in releases); it links "@handle" by itself.
+    body = re.sub(r":gh:`(\d+)`", rf"[#\1]({PR_URL}\1)", body)
     body = re.sub(r":user:`([^`]+)`", r"@\1", body)
     # Cross-references link to the API reference or doc page they point at.
     body = re.sub(
@@ -270,9 +292,28 @@ def check(base_path):
     # Rewording an existing entry is not a new one, so the count has to go up too.
     if not added or len(current_entries) <= len(base_entries):
         sys.exit(f"no new entry under {CURRENT!r} in {CHANGELOG.name}")
+    unattributed = sorted(entry for entry in added if not ATTRIBUTION.search(entry))
+    if unattributed:
+        sys.exit(
+            "end each new entry with (:gh:`<PR number>` by :user:`<GitHub handle>`):\n"
+            + "\n".join(f"  {entry}" for entry in unattributed)
+        )
     print(f"new entries under {CURRENT!r}:")
     for entry in sorted(added):
         print(f"  {entry}")
+
+
+def lint():
+    """Exit with an error unless every entry in the changelog ends with its PR and author."""
+    _, sections = split_sections(CHANGELOG.read_text())
+    unattributed = [
+        entry for _, body in sections for entry in entries(body) if not ATTRIBUTION.search(entry)
+    ]
+    if unattributed:
+        sys.exit(
+            "end each entry with (:gh:`<PR number>` by :user:`<GitHub handle>`):\n"
+            + "\n".join(f"  {entry}" for entry in unattributed)
+        )
 
 
 def main():
@@ -297,10 +338,14 @@ def main():
         "check", help="check that 'Current' has a new entry compared to a base changelog"
     )
     check_parser.add_argument("base", help="the changelog of the base branch")
+    commands.add_parser("lint", help="check that every entry ends with its PR and author")
     args = parser.parse_args()
 
     if args.command == "check":
         check(args.base)
+        return
+    if args.command == "lint":
+        lint()
         return
     version = args.version.strip().removeprefix("v")
     if not VERSION.fullmatch(version):

@@ -4,6 +4,8 @@
 # Changes that users do not notice need no entry: label the PR `dev` (CI,
 # dependency bumps; Dependabot adds it), `documentation` or `skip changelog`, and
 # the check passes. It re-runs when labels change, so adding one fixes a red check.
+# Every PR, labelled or not, also checks that all entries end with their PR and
+# author, so a broken edit to an existing entry fails here instead of in the tests.
 name: Changelog
 
 on:
@@ -19,6 +21,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # The default checkout is the PR merged into its base branch. The first parent
+      # of that merge commit is the base it merged against, so comparing with it
+      # shows exactly the entries this PR adds.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check that every entry names its PR and author
+        run: |
+          if ! python3 .github/scripts/changelog.py lint; then
+            echo "::error::End every entry in docs/source/changelog.rst with (:gh:\`<PR number>\` by :user:\`<GitHub handle>\`), including the backticks."
+            exit 1
+          fi
+
       - name: Check for a skip label
         id: labels
         env:
@@ -34,16 +52,6 @@ jobs:
           done
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      # The default checkout is the PR merged into its base branch. The first parent
-      # of that merge commit is the base it merged against, so comparing with it
-      # shows exactly the entries this PR adds.
-      - name: Checkout repository
-        if: steps.labels.outputs.skip == 'false'
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
-          persist-credentials: false
-
       - name: Check for a new entry under Current
         if: steps.labels.outputs.skip == 'false'
         run: |
@@ -52,6 +60,6 @@ jobs:
           git show HEAD^1:docs/source/changelog.rst > "${RUNNER_TEMP}/base.rst" 2>/dev/null || true
 
           if ! python3 .github/scripts/changelog.py check "${RUNNER_TEMP}/base.rst"; then
-            echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
+            echo "::error::Add an entry under 'Current' in docs/source/changelog.rst, ending with (:gh:\`<PR number>\` by :user:\`<GitHub handle>\`), or label this PR 'skip changelog' if users will not notice the change (also accepted: 'dev', 'documentation')."
             exit 1
           fi
