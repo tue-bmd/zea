@@ -22,6 +22,7 @@
 import ast
 import atexit
 import contextlib
+import functools
 import inspect
 import os
 import shutil
@@ -104,10 +105,13 @@ def get_function_source(func, _visited=None):
     """Recursively get the source code of a function and its nested functions.
 
     Each function's source is included once, so recursive and mutually recursive
-    functions are supported.
+    functions are supported. Decorated functions (e.g. ``@cache_output``) are unwrapped
+    so their own source is used.
     """
-    if _visited is None:
-        _visited = set()
+    func = inspect.unwrap(func)
+    _visited = set() if _visited is None else _visited
+    if func in _visited:
+        return ""
     _visited.add(func)
     try:
         source = inspect.getsource(func)
@@ -134,11 +138,7 @@ def get_function_source(func, _visited=None):
     for called_func_name in sorted(called_functions):
         try:
             called_func = func.__globals__.get(called_func_name)
-            if (
-                inspect.isfunction(called_func)
-                and called_func.__module__ != "zea.internal.cache"
-                and called_func not in _visited
-            ):
+            if inspect.isfunction(called_func) and called_func.__module__ != "zea.internal.cache":
                 nested_source = get_function_source(called_func, _visited)
                 if nested_source is None:
                     # If any nested function's source cannot be retrieved, do not cache
@@ -201,6 +201,7 @@ def cache_output(*arg_names, verbose=False):
     )
 
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             if is_cache_disabled():
                 if verbose:
