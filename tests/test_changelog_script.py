@@ -224,16 +224,19 @@ def test_entries_join_wrapped_lines():
     assert changelog.entries(body) == ["- One that wraps onto a second line", "- Another"]
 
 
+def test_lint_requires_every_entry_to_be_attributed(changelog_file):
+    """Unlike `check`, `lint` also catches an edit that breaks an existing entry."""
+    changelog_file.write_text(make_changelog(ENTRY))
+    changelog.lint()
+
+    changelog_file.write_text(make_changelog(ENTRY).replace("(:gh:`637`", "(:gh:637"))
+    with pytest.raises(SystemExit, match="An older fix"):
+        changelog.lint()
+
+
 def test_every_entry_in_the_changelog_is_attributed():
     """The real changelog follows the format the check enforces on new entries."""
-    _, sections = changelog.split_sections(changelog.CHANGELOG.read_text())
-    unattributed = [
-        entry
-        for _, body in sections
-        for entry in changelog.entries(body)
-        if not changelog.ATTRIBUTION.search(entry)
-    ]
-    assert not unattributed
+    changelog.lint()
 
 
 def test_load_inventory(tmp_path):
@@ -268,6 +271,7 @@ def test_command_line(changelog_file, tmp_path, monkeypatch, capsys):
     base.write_text(make_changelog())
 
     run("check", str(base))
+    run("lint")
     run("release", "v0.1.9", "--date", "2026-11-05")
     assert "v0.1.9 (2026-11-05)" in changelog_file.read_text()
 
