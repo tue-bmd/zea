@@ -71,8 +71,6 @@ Fixed
 - @cache_output functions that call a recursive function can now be cached. Additionaly, the cache key now also includes other @cache_output functions it calls, so editing those invalidates its cache (:gh:703 by :user:wesselvannierop)
 
 
-
-
 v0.1.8 (2026-10-01)
 -------------------
 
