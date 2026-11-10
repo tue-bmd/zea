@@ -50,6 +50,7 @@ Fixed
 - Conversion of Verasonics ``BS100BW`` and ``BS50BW`` data samples I and Q at the same time instants. Data converted with earlier versions, such as some Open-H-RF data, may be affected (:gh:`672` by :user:`vincentvdschaft`)
 - :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`wesselvannierop`)
 - ``waveforms_one_way`` and ``waveforms_two_way`` follow ``selected_transmits``, like the other per-transmit parameters (:gh:`683` by :user:`wesselvannierop`)
+- Operations and pipelines can be deep-copied and pickled, also when not registered with Keras, and copies keep their JIT settings (:gh:`698` by :user:`tristan-deep`)
 - The shared GIF palette keeps exact colors, so pure black stays ``(0, 0, 0)`` (:gh:`680` by :user:`wesselvannierop`)
 - Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
 - Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)

@@ -283,6 +283,20 @@ class Operation(keras.Operation):
         else:
             self._call = self.call
 
+    # Copy and pickle as a plain Python object, skipping Keras' config round trip,
+    # which fails for unregistered ops and drops the JIT flag. The (compiled) `_call`
+    # is rebuilt afterwards.
+    __reduce__ = object.__reduce__
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_call", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.set_jit(self._jit_compile)
+
     def _trace_signatures(self):
         """
         Analyze and store the input/output signatures of the `call` method.
