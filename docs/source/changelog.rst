@@ -43,6 +43,7 @@ Changed
 
 Fixed
 ^^^^^
+- A streamed ``hf://`` read that still fails after its retries, such as a dropped connection, no longer ends the epoch: the ``Dataloader`` reopens the file and reads the sample again (:gh:`690` by :user:`tristan-deep`)
 - :func:`zea.func.vmap` passes arguments at the right positions with multiple ``None`` arguments. It also keeps all outputs, supports nested and ``None`` outputs, supports negative axes when batching, and raises an error for arguments of different lengths (:gh:`691` by :user:`wesselvannierop`)
 - The pressure field uses the one-way transmit spectrum, averages over frequencies instead of summing, and takes the element positions from ``probe_geometry`` (:gh:`657` by :user:`wesselvannierop`)
 - ``t_peak`` estimated from ``waveforms_two_way`` uses the envelope peak; values change where the carrier peak differs from it (:gh:`656` by :user:`wesselvannierop`)
