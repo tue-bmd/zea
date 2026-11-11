@@ -9,6 +9,7 @@ from zea.beamform.beamformer import (
     calculate_delays,
     complex_rotate,
     compute_receive_distances,
+    recorded_depth,
     tof_correction,
     transmit_delays,
 )
@@ -944,3 +945,50 @@ def test_lens_correction_z_zero_no_nan(probe_geometry):
     )
     assert np.isfinite(tt).all()
     return tt
+
+
+def _single_element_inputs(t_peak=0.0):
+    """One element at the origin firing an unsteered plane wave."""
+    return dict(
+        t0_delays=np.zeros((1, 1), np.float32),
+        tx_apodizations=np.ones((1, 1), np.float32),
+        probe_geometry=np.zeros((1, 3), np.float32),
+        initial_times=np.zeros(1, np.float32),
+        sampling_frequency=SAMPLING_FREQ,
+        sound_speed=SOUND_SPEED,
+        focus_distances=np.full(1, np.inf, np.float32),
+        polar_angles=np.zeros(1, np.float32),
+        t_peak=np.full(1, t_peak, np.float32),
+        transmit_origins=np.zeros((1, 3), np.float32),
+    )
+
+
+@pytest.mark.parametrize("t_peak", [0.0, 1e-6])
+def test_recorded_depth_single_element(t_peak):
+    """Straight down and back, the last sample n_ax - 1 is reached at
+    z = c ((n_ax - 1) / fs - t_peak) / 2: the pulse peak delay shortens the depth."""
+    n_ax = 200
+    depth = recorded_depth(n_ax=n_ax, **_single_element_inputs(t_peak))
+    expected = SOUND_SPEED * ((n_ax - 1) / SAMPLING_FREQ - t_peak) / 2
+    assert depth == pytest.approx(expected, rel=1e-4)
+
+
+def test_tof_correction_zeroes_samples_after_the_record():
+    """A pixel that needs a sample from after the end of the record reads zero, not the
+    (clamped) last sample."""
+    n_ax = 200
+    inputs = _single_element_inputs()
+    inputs.pop("sampling_frequency")
+    data = np.ones((1, n_ax, 1, 1), np.float32)  # RF, every sample (also the last) is 1
+    last_depth = SOUND_SPEED * (n_ax - 1) / SAMPLING_FREQ / 2
+    flatgrid = np.array([[0, 0, 0.5 * last_depth], [0, 0, 1.5 * last_depth]], np.float32)
+    tof = tof_correction(
+        data,
+        flatgrid,
+        sampling_frequency=SAMPLING_FREQ,
+        demodulation_frequency=DEMOD_FREQ,
+        f_number=0.0,
+        **inputs,
+    )
+    tof = keras.ops.convert_to_numpy(tof)[0, :, 0, 0]
+    np.testing.assert_allclose(tof, [1.0, 0.0])

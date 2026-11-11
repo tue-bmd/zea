@@ -157,6 +157,8 @@ def tof_correction(
     phase-rotated to compensate for the demodulation carrier (see
     :func:`complex_rotate`).
 
+    A sample the pixel needs from after the end of the record is zero.
+
     Args:
         data (Tensor): Input RF or IQ data of shape ``(n_tx, n_ax, n_el, n_ch)``.
             Use ``n_ch=1`` for RF data and ``n_ch=2`` for IQ (in-phase /
@@ -318,6 +320,11 @@ def tof_correction(
 
         # Interpolate data at the computed delay positions
         tof_tx = apply_delays(data_tx, delays, clip_min=0, clip_max=n_ax - 1)
+
+        # A sample after the end of the record was not recorded: it contributes zero,
+        # instead of the clamped last sample.
+        recorded = (delays <= n_ax - 1)[..., None]
+        tof_tx = ops.where(recorded, tof_tx, ops.zeros_like(tof_tx))
 
         # Apply f-number mask(s)
         if mask_tx is not None:
@@ -510,6 +517,103 @@ def calculate_delays(
     rx_delays *= sampling_frequency
 
     return tx_delays, rx_delays
+
+
+def recorded_depth(
+    n_ax,
+    sampling_frequency,
+    sound_speed,
+    t0_delays,
+    tx_apodizations,
+    probe_geometry,
+    initial_times,
+    focus_distances,
+    polar_angles,
+    t_peak,
+    transmit_origins,
+    f_number=0.0,
+    apply_lens_correction=False,
+    lens_thickness=None,
+    lens_sound_speed=None,
+    focal_region_length=None,
+    n_depths=257,
+    tx_chunk=32,
+):
+    """The deepest depth [m] on the central axis that the record holds every sample for.
+
+    A pixel at depth ``z`` on the axis ``x = y = 0`` needs, for every transmit and every
+    receive element inside the f-number aperture, the sample at its transmit plus
+    receive delay (as :func:`calculate_delays` computes it, including ``t_peak``,
+    ``initial_times`` and the lens). This returns the largest ``z`` for which all of those
+    lie inside the record, so a grid that stops there reads no unrecorded (zeroed)
+    samples on the axis. It is ``c * n_ax / (2 * fs)`` only when there are no other
+    delays.
+
+    Args:
+        n_ax (int): Number of samples per receive line.
+        sampling_frequency (float): Sampling frequency [Hz].
+        sound_speed (float): Speed of sound [m/s].
+        t0_delays, tx_apodizations, probe_geometry, initial_times, focus_distances,
+            polar_angles, t_peak, transmit_origins: As in :func:`calculate_delays`.
+        f_number (float): Receive f-number; ``0`` uses every element.
+        apply_lens_correction, lens_thickness, lens_sound_speed, focal_region_length:
+            As in :func:`calculate_delays`.
+        n_depths (int): Depths sampled along the axis; the result is interpolated.
+        tx_chunk (int): Transmits per delay computation, to bound memory.
+
+    Returns:
+        float | None: The depth [m], or ``None`` when even ``z = 0`` needs a sample
+        from after the record.
+    """
+    probe_geometry = np.asarray(probe_geometry, dtype=np.float32)
+    initial_times = np.asarray(initial_times, dtype=np.float32)
+    record_end = float(np.max(initial_times)) + n_ax / sampling_frequency
+    depths = np.linspace(0.0, sound_speed / 2 * record_end, n_depths, dtype=np.float32)
+    axis = np.stack([np.zeros_like(depths), np.zeros_like(depths), depths], axis=-1)
+
+    if f_number:
+        aperture = ops.convert_to_numpy(
+            fnumber_mask(axis, probe_geometry, f_number, fnum_window_fn_rect)
+        )[..., 0]
+        aperture = aperture > 0
+    else:
+        aperture = np.ones((n_depths, len(probe_geometry)), dtype=bool)
+
+    n_tx = len(t0_delays)
+    need = np.full(n_depths, -np.inf)
+    for start in range(0, n_tx, tx_chunk):
+        sl = slice(start, start + tx_chunk)
+        tx, rx = calculate_delays(
+            axis,
+            np.asarray(t0_delays[sl], dtype=np.float32),
+            np.asarray(tx_apodizations[sl], dtype=np.float32),
+            probe_geometry,
+            initial_times[sl],
+            sampling_frequency,
+            sound_speed,
+            np.asarray(focus_distances[sl], dtype=np.float32),
+            np.asarray(polar_angles[sl], dtype=np.float32),
+            np.asarray(t_peak[sl], dtype=np.float32),
+            np.asarray(transmit_origins[sl], dtype=np.float32),
+            apply_lens_correction=apply_lens_correction,
+            lens_thickness=lens_thickness,
+            lens_sound_speed=lens_sound_speed,
+            focal_region_length=focal_region_length,
+        )
+        tx = ops.convert_to_numpy(tx)  # (n_depths, n_tx_chunk) in samples
+        rx = np.where(aperture, ops.convert_to_numpy(rx), -np.inf)  # (n_depths, n_el)
+        need = np.maximum(need, np.max(tx, axis=1) + np.max(rx, axis=1))
+
+    last = n_ax - 1
+    beyond = np.flatnonzero(need > last)
+    if len(beyond) == 0:
+        return float(depths[-1])
+    i = int(beyond[0])
+    if i == 0:
+        return None
+    # Interpolate the crossing between the last depth that fits and the first that does not
+    frac = (last - need[i - 1]) / (need[i] - need[i - 1])
+    return float(depths[i - 1] + frac * (depths[i] - depths[i - 1]))
 
 
 def apply_delays(data, delays, clip_min: int = -1, clip_max: int = -1):

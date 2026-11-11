@@ -116,6 +116,7 @@ from zea.beamform.geometry import (
     transmit_apex_distance,
     virtual_apex_distance,
 )
+from zea.beamform.beamformer import recorded_depth
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -1019,13 +1020,87 @@ class Parameters(BaseParameters):
         )
         return ylims
 
-    @cache_with_dependencies("sound_speed", "sampling_frequency", "n_ax")
+    @cache_with_dependencies(
+        "sound_speed",
+        "sampling_frequency",
+        "n_ax",
+        optional=(
+            "t0_delays",
+            "tx_apodizations",
+            "probe_geometry",
+            "focus_distances",
+            "polar_angles",
+            "transmit_origins",
+            "initial_times",
+            "t_peak",
+            "f_number",
+            "apply_lens_correction",
+            "lens_thickness",
+            "lens_sound_speed",
+            "focal_region_length",
+            "selected_transmits",
+        ),
+    )
     def zlims(self):
-        """The z-limits of the beamforming grid [m]."""
+        """The z-limits of the beamforming grid [m].
+
+        If not explicitly provided, from 0 down to the deepest depth on the central axis
+        that the record holds every sample for (see
+        :func:`~zea.beamform.beamformer.recorded_depth`): the beamformer also waits for
+        the transmit delays, the pulse peak (``t_peak``), the lens and the longer paths to
+        the outer elements, so this is less than ``c * n_ax / (2 * fs)``. Without the
+        transmit parameters it falls back to ``c * n_ax / (2 * fs)``. Samples a deeper
+        grid needs from after the end of the record count as zero, so it fades to black.
+        """
         zlims = self._params.get("zlims")
-        if zlims is None:
-            return [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
-        return zlims
+        if zlims is not None:
+            return zlims
+        depth = self.sound_speed * self.n_ax / self.sampling_frequency / 2
+        recorded = self._recorded_depth()
+        if recorded is not None:
+            depth = recorded
+        return [0, depth]
+
+    def _recorded_depth(self):
+        """:func:`~zea.beamform.beamformer.recorded_depth` for these parameters, or
+        ``None`` when the transmit parameters it needs are missing."""
+        needed = ("t0_delays", "tx_apodizations", "probe_geometry", "focus_distances")
+        if any(self._params.get(name) is None for name in needed):
+            return None
+        try:
+            n_tx = self.n_tx
+            polar_angles = (
+                self.polar_angles if self._params.get("polar_angles") is not None else None
+            )
+            initial_times = (
+                self.initial_times if self._params.get("initial_times") is not None else None
+            )
+            depth = recorded_depth(
+                n_ax=int(self.n_ax),
+                sampling_frequency=float(self.sampling_frequency),
+                sound_speed=float(self.sound_speed),
+                t0_delays=self.t0_delays,
+                tx_apodizations=self.tx_apodizations,
+                probe_geometry=self.probe_geometry,
+                initial_times=np.zeros(n_tx) if initial_times is None else initial_times,
+                focus_distances=self.focus_distances,
+                polar_angles=np.zeros(n_tx) if polar_angles is None else polar_angles,
+                t_peak=self.t_peak,
+                transmit_origins=self._transmit_origins_or_zeros(),
+                f_number=float(self.f_number),
+                apply_lens_correction=bool(self.apply_lens_correction),
+                lens_thickness=self._params.get("lens_thickness"),
+                lens_sound_speed=self._params.get("lens_sound_speed"),
+                focal_region_length=self.focal_region_length,
+            )
+        except MissingDependencyError:
+            return None
+        if depth is None:
+            log.warning(
+                "The record is too short for any pixel on the central axis: even z = 0 needs "
+                "samples from after its end. Falling back to zlims = (0, c * n_ax / (2 fs))."
+            )
+        return depth
 
     @cache_with_dependencies(
         "grid", "grid_type", optional=("xlims", "zlims", "radius_of_curvature")

@@ -32,9 +32,11 @@ Changed
 - (Breaking) :class:`zea.ops.ScanConvert` outputs are renamed without aliases: ``rho_range`` / ``theta_range`` / ``phi_range`` / ``d_rho`` / ``d_theta`` / ``d_phi`` become ``rlims`` / ``polar_limits`` / ``elevation_limits`` / ``dr`` / ``d_polar`` / ``d_elevation`` (:gh:`679` by :user:`wesselvannierop`)
 - (Breaking) The default pixel grid follows the probe and transmit geometry, so beamformed images change. ``polar_limits`` cover the region the transmits insonify at ``zlims[1]`` instead of adding a fixed 15 % margin, and ``xlims``, ``grid_size_x`` (λ/4 along the outer arc) and ``extent`` follow the sector or insonified width. Scan conversion fills ``extent`` (:gh:`679` by :user:`wesselvannierop`)
 - (Breaking) The default ``f_number`` is derived from the element's −6 dB directivity, which is 0 (no receive mask) for typical phased arrays (:gh:`679` by :user:`wesselvannierop`)
+- (Breaking) The default ``zlims`` ends at the deepest depth on the central axis that the record holds every sample for, counting the transmit delays, ``t_peak``, the lens and the paths to the outer elements, instead of ``c * n_ax / (2 * fs)``. Images are shorter, without the dark band at the bottom (:gh:`x` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
+- Time-of-flight correction reads a sample from after the end of the record as zero, where it used to repeat the record's last sample (:gh:`x` by :user:`wesselvannierop`)
 - Scanline grids follow the transmit angles from ``grid_apex``, so steered lines are no longer displayed at the wrong angle (:gh:`679` by :user:`wesselvannierop`)
 - The default grid for an unsteered plane wave on a curved array spans the array, instead of a zero-width sector (:gh:`679` by :user:`wesselvannierop`)
 - Conversion of elevation-steered Verasonics data: ``polar_angles`` and ``azimuth_angles`` now hold the spherical transmit angles converted from ``TX.Steer``, where ``azimuth_angles`` used to hold the elevation steering angle (:gh:`679` by :user:`wesselvannierop`)
