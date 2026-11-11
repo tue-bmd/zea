@@ -538,17 +538,17 @@ function resolve(s) {
   if (scanline) { gx = s.n_tx; src.grid_size_x = "scanline: one column per transmit (n_tx)"; }
   else if (s.grid_size_x != null) { gx = s.grid_size_x; src.grid_size_x = "override"; }
   else if (kind === "polar") {
-    gx = Math.max(Math.ceil(((zDeep + d) * Math.abs(polarLimits[1] - polarLimits[0])) / pixel), 1);
-    src.grid_size_x = "default: outer arc length / (wavelength / pixels_per_wavelength)";
+    gx = Math.max(Math.ceil(((zDeep + d) * Math.abs(polarLimits[1] - polarLimits[0])) / pixel) + 1, 1);
+    src.grid_size_x = "default: outer arc length / (wavelength / pixels_per_wavelength) + 1";
   } else {
     const width = s.xlims ? f32(xlims[1] - xlims[0]) : xlims[1] - xlims[0];
-    gx = Math.max(Math.ceil(width / pixel), 1);
-    src.grid_size_x = "default: xlims width / (wavelength / pixels_per_wavelength)";
+    gx = Math.max(Math.ceil(width / pixel) + 1, 1);
+    src.grid_size_x = "default: xlims width / (wavelength / pixels_per_wavelength) + 1";
   }
   if (s.grid_size_z != null) { gz = s.grid_size_z; src.grid_size_z = "override"; }
   else {
-    gz = Math.max(Math.ceil(f32(zlims[1] - zlims[0]) / pixel), 1);
-    src.grid_size_z = "default: zlims depth / (wavelength / pixels_per_wavelength)";
+    gz = Math.max(Math.ceil(f32(zlims[1] - zlims[0]) / pixel) + 1, 1);
+    src.grid_size_z = "default: zlims depth / (wavelength / pixels_per_wavelength) + 1";
   }
 
   // Parameters.grid -> point(i, j) = [x, z] for row i (depth) and column j
