@@ -22,12 +22,23 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+- An interactive beamforming grid viewer in :doc:`config` that shows how the grid parameters relate (:gh:`679` by :user:`wesselvannierop`)
+- ``grid_apex``, derived from the probe and transmits, is the point a polar grid fans out from: where steered focused lines meet, a diverging wave's virtual source, or a curved array's centre of curvature. It replaces ``distance_to_apex`` (:gh:`679` by :user:`wesselvannierop`)
+- ``polar_margin`` and ``elevation_margin`` set a fixed margin around the derived ``polar_limits`` and ``elevation_limits`` (:gh:`679` by :user:`wesselvannierop`)
 
 Changed
 ^^^^^^^
+- (Breaking) Angle parameters use one set of names from the grid through scan conversion, in 2D and 3D: ``rlims``, ``polar_limits`` and ``elevation_limits`` (see :ref:`angle-conventions`). ``rho_range`` / ``theta_range`` / ``phi_range``, ``azimuth_limits``, the ``frustum_convert_*`` functions and the ``phi_`` / ``theta_`` / ``rho_`` arguments of ``plot_frustum_vertices`` are renamed, with deprecated aliases. The polar/cartesian helpers now measure angles toward ``+x``, like the rest of zea (:gh:`679` by :user:`wesselvannierop`)
+- (Breaking) :class:`zea.ops.ScanConvert` outputs are renamed without aliases: ``rho_range`` / ``theta_range`` / ``phi_range`` / ``d_rho`` / ``d_theta`` / ``d_phi`` become ``rlims`` / ``polar_limits`` / ``elevation_limits`` / ``dr`` / ``d_polar`` / ``d_elevation`` (:gh:`679` by :user:`wesselvannierop`)
+- (Breaking) The default pixel grid follows the probe and transmit geometry, so beamformed images change. ``polar_limits`` cover the region the transmits insonify at ``zlims[1]`` instead of adding a fixed 15 % margin, and ``xlims``, ``grid_size_x`` (λ/4 along the outer arc) and ``extent`` follow the sector or insonified width. Scan conversion fills ``extent`` (:gh:`679` by :user:`wesselvannierop`)
+- (Breaking) The default ``f_number`` is derived from the element's −6 dB directivity, which is 0 (no receive mask) for typical phased arrays (:gh:`679` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
+- Scanline grids follow the transmit angles from ``grid_apex``, so steered lines are no longer displayed at the wrong angle (:gh:`679` by :user:`wesselvannierop`)
+- The default grid for an unsteered plane wave on a curved array spans the array, instead of a zero-width sector (:gh:`679` by :user:`wesselvannierop`)
+- Conversion of elevation-steered Verasonics data: ``polar_angles`` and ``azimuth_angles`` now hold the spherical transmit angles converted from ``TX.Steer``, where ``azimuth_angles`` used to hold the elevation steering angle (:gh:`679` by :user:`wesselvannierop`)
+- The default ``elevation_limits`` (and so ``ylims``) of a 3D grid are the transmits' elevation angles, where before the range of the spherical ``azimuth_angles`` φ was used as if it were an elevation angle (:gh:`679` by :user:`wesselvannierop`)
 
 
 v0.1.9 (2026-11-10)
@@ -48,7 +59,6 @@ Changed
 ^^^^^^^
 - Streaming ``hf://`` datasets no longer runs into the Hugging Face rate limit, so you can train on many batches with many workers without downloading the data. The API is unchanged; two new environment variables, ``ZEA_MAX_CONCURRENT_REQUESTS`` and ``ZEA_FIND_H5_SHAPES_WORKERS``, tune it (see :doc:`environment`) (:gh:`671` by :user:`tristan-deep`)
 - Conversion scripts for EchoNet-Dynamic, CAMUS and PICMUS accept the ``.zip`` file itself. EchoNet-Dynamic reproduces the published split by default, and its polar conversion is about 15 times faster (:gh:`676` by :user:`wesselvannierop`)
-- (Breaking) Angle parameters are renamed to one set of names throughout zea (see :ref:`angle-conventions`, and :gh:`679` for the full list). The default pixel grid and ``f_number`` now follow the probe and transmit geometry, so beamformed images change (:gh:`679` by :user:`wesselvannierop`)
 - (Breaking) In :func:`~zea.beamform.pfield.compute_pfield`, ``alpha`` and ``percentile`` also shape the field when ``norm=False``, the unused ``n_el`` argument is removed, and probes other than linear and phased arrays raise ``NotImplementedError`` (:gh:`657` by :user:`wesselvannierop`)
 - (Breaking) :func:`zea.func.vmap` validates axes like ``jax.vmap``, so a list no longer matches a tuple. ``out_axes=None`` only works on the native ``jax.vmap``, and the ``_use_torch_vmap`` argument is removed (:gh:`692` by :user:`wesselvannierop`)
 - ``Parameters.copy()`` and ``set_transmits`` are much faster (:gh:`656` by :user:`wesselvannierop`)
@@ -62,7 +72,6 @@ Fixed
 - The pressure field uses the one-way transmit spectrum, averages over frequencies instead of summing, and takes the element positions from ``probe_geometry`` (:gh:`657` by :user:`wesselvannierop`)
 - ``t_peak`` estimated from ``waveforms_two_way`` uses the envelope peak; values change where the carrier peak differs from it (:gh:`656` by :user:`wesselvannierop`)
 - Conversion of Verasonics ``BS100BW`` and ``BS50BW`` data samples I and Q at the same time instants. Data converted with earlier versions, such as some Open-H-RF data, may be affected (:gh:`672` by :user:`vincentvdschaft`)
-- Conversion of elevation-steered Verasonics data: ``polar_angles`` and ``azimuth_angles`` now hold the spherical transmit angles, where ``azimuth_angles`` used to hold the elevation steering angle. Files converted from such acquisitions with earlier versions need to be reconverted; other data is unaffected (:gh:`679` by :user:`wesselvannierop`)
 - :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`wesselvannierop`)
 - ``waveforms_one_way`` and ``waveforms_two_way`` follow ``selected_transmits``, like the other per-transmit parameters (:gh:`683` by :user:`wesselvannierop`)
 - Operations and pipelines can be deep-copied and pickled, also when not registered with Keras, and copies keep their JIT settings (:gh:`698` by :user:`tristan-deep`)
