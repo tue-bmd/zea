@@ -95,6 +95,7 @@ tests = [
     "ipywidgets",
     "pre-commit",
     "pytest-cov",
+    "httpx>=0.28.1",
     "zea[app]",
 ]
 docs = [

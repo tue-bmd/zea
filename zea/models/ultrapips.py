@@ -118,7 +118,9 @@ def relative_position_index(window_size):
     wh, ww = window_size
     coords = np.stack(np.meshgrid(np.arange(wh), np.arange(ww), indexing="ij"))
     coords = coords.reshape(2, -1)
-    relative = (coords[:, :, None] - coords[:, None, :]).transpose(1, 2, 0)
+    relative = (
+        coords[:, :, None] - coords[:, None, :]  # ty: ignore[unsupported-operator]
+    ).transpose(1, 2, 0)
     relative[:, :, 0] += wh - 1
     relative[:, :, 1] += ww - 1
     relative[:, :, 0] *= 2 * ww - 1
