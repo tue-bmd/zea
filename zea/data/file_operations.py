@@ -188,7 +188,7 @@ def _mean_over_axis(array, axis: int, log_domain: bool = False) -> np.ndarray:
         elif total is None:
             total = partial
         else:
-            total += partial
+            total += partial  # ty: ignore[unsupported-operator]
 
     if total is None and not partial_sums:
         # No slabs at all: the array is empty, which np.mean answers with an empty mean.
