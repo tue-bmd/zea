@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import httpx
+import httpx2
 import keras
 import numpy as np
 import pytest
@@ -35,8 +35,8 @@ REPO_ID = "zeahub/pytest-preset"
 
 def _repo_not_found(message="404 Client Error"):
     """A ``RepositoryNotFoundError`` as huggingface_hub raises it (needs a response)."""
-    request = httpx.Request("GET", "https://huggingface.co")
-    return RepositoryNotFoundError(message, response=httpx.Response(404, request=request))
+    request = httpx2.Request("GET", "https://huggingface.co")
+    return RepositoryNotFoundError(message, response=httpx2.Response(404, request=request))
 
 
 @pytest.fixture(autouse=True)
