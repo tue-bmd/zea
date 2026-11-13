@@ -1,14 +1,222 @@
 """Geometry helpers for beamforming.
 
-Lightweight, backend-agnostic utilities derived purely from probe geometry.
+Lightweight, backend-agnostic utilities derived purely from probe and transmit geometry.
 This is a *leaf* module (only depends on ``keras`` / ``numpy``) so it can be
 imported from :mod:`zea.beamform.beamformer`, :mod:`zea.simulator` and
 :mod:`zea.beamform.pfield` without introducing an import cycle.
+
+The transmit helpers (:func:`transmit_apex_distance`, :func:`insonified_edge_rays`)
+work in the ``x-z`` imaging plane and in zea's transducer frame: ``z = 0`` at the
+middle of the array, ``+z`` into the medium, and angles measured from ``+z``,
+positive toward ``+x``. They back the default beamforming grid of
+:class:`zea.Parameters`.
 """
 
 import keras
 import numpy as np
 from keras import ops
+
+STEERING_TOLERANCE = 1e-6
+"""Polar angles at or below this magnitude [rad] count as unsteered. Converted data
+stores a nominally unsteered scan as float noise rather than exact zeros."""
+
+SINC_HALF_AMPLITUDE = 0.6033545644016143
+"""The argument ``x`` at which ``sinc(x) = sin(pi x) / (pi x)`` drops to 0.5 (-6 dB)."""
+
+
+def element_pitch(probe_geometry):
+    """Median distance between neighbouring elements in metres.
+
+    The distance is measured along the array rather than along ``x``, so this also works
+    for curved arrays. Use :meth:`zea.probes.Probe.get_pitch` to also reject geometries
+    that have no single pitch.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions of shape ``(n_el, 3)``, ordered
+            along the array.
+
+    Returns:
+        float: The median element spacing, or ``nan`` for a single element.
+    """
+    probe_geometry = np.asarray(probe_geometry, dtype=np.float64)
+    if len(probe_geometry) < 2:
+        return float("nan")
+    return float(np.median(np.linalg.norm(np.diff(probe_geometry, axis=0), axis=1)))
+
+
+def transmit_apex_distance(transmit_origins, polar_angles, focus_distances, tol):
+    """Find the point on the central axis that a set of transmits fans out from.
+
+    Two transmit schemes define such a point:
+
+    - **Steered focused transmits** whose axes (from ``transmit_origins`` along
+      ``polar_angles``) cross ``x = 0`` in one point, next to which any unsteered focused
+      transmits start on the central axis. That is the array middle for
+      transmits launched from there, a virtual apex behind the array for transmits spread
+      over a flat array, and the centre of curvature for transmits along a curved array's
+      normals. Steered plane and diverging waves do not fan out from their origin (it
+      only references their delays), so their axes define no point.
+    - **Unsteered diverging waves** that share one virtual source
+      (``transmit_origins + focus_distances`` along ``+z``) on the central axis.
+
+    Args:
+        transmit_origins (np.ndarray): Transmit origins of shape ``(n_tx, 3)`` [m].
+        polar_angles (np.ndarray): Steering angles of shape ``(n_tx,)`` [rad].
+        focus_distances (np.ndarray): Focus distances of shape ``(n_tx,)`` [m]
+            (negative for diverging waves).
+        tol (float): How far apart [m] the crossings may be and still count as one
+            point. :class:`zea.Parameters` uses half the element pitch, the same
+            tolerance as :func:`zea.probes.fit_curved_probe_radius`.
+
+    Returns:
+        float | None: The distance [m] from the middle of the array back to that point
+        (``>= 0``), or ``None`` when the transmits define no single point.
+    """
+    origins = np.asarray(transmit_origins, dtype=np.float64)
+    angles = np.asarray(polar_angles, dtype=np.float64)
+    focus = np.asarray(focus_distances, dtype=np.float64)
+
+    steered = np.abs(angles) > STEERING_TOLERANCE
+    if np.any(steered):
+        lines = steered & is_focused(focus)
+        if not np.any(lines):
+            return None
+        # An unsteered focused axis runs straight down from its origin, so it only passes
+        # through a point on the central axis when it starts there
+        if np.any(np.abs(origins[~steered & is_focused(focus), 0]) > tol):
+            return None
+        # Where each steered focused axis crosses x = 0, as a distance behind the array
+        crossings = origins[lines, 0] / np.tan(angles[lines]) - origins[lines, 2]
+        middle = float(np.median(crossings))
+        if np.ptp(crossings) <= tol and middle >= -tol:
+            return max(middle, 0.0)
+        return None
+
+    if np.all(is_diverging(focus)):
+        source_x = origins[:, 0]
+        source_z = origins[:, 2] + focus
+        if np.max(np.abs(source_x)) <= tol and np.ptp(source_z) <= tol:
+            return float(-np.median(source_z))
+    return None
+
+
+def virtual_apex_distance(probe_geometry, max_angle):
+    """Distance [m] behind the middle of a flat array of the point whose sector edges, at
+    ``+-max_angle``, pass through the ends of the array: ``(aperture / 2) / tan(max_angle)``.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions of shape ``(n_el, 3)``.
+        max_angle (float): Half-angle of the sector [rad].
+
+    Returns:
+        float: The distance, or ``0.0`` (the array middle) for a sector no wider than
+        :data:`STEERING_TOLERANCE`, or of ``pi / 2`` or more.
+    """
+    if not STEERING_TOLERANCE < max_angle < np.pi / 2:
+        return 0.0
+    half_aperture = float(np.ptp(np.asarray(probe_geometry)[:, 0])) / 2
+    return half_aperture / np.tan(max_angle)
+
+
+def insonified_edge_rays(
+    probe_geometry, transmit_origins, polar_angles, focus_distances, element_normals=None
+):
+    """Edge rays bounding the region each transmit insonifies, in the ``x-z`` plane.
+
+    - **Focused** transmit (positive, finite focus): its axis, from its origin along its
+      angle. It insonifies a narrow beam, so it adds no width.
+    - **Plane** wave (``inf`` or ``0`` focus): from the two end elements of the array
+      along the steering angle, tilted with each end element's normal (which makes an
+      unsteered plane wave on a curved array span the array's angular range).
+    - **Diverging** wave (negative focus): from its virtual source through the two end
+      elements of the array.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions of shape ``(n_el, 3)``.
+        transmit_origins (np.ndarray): Transmit origins of shape ``(n_tx, 3)``.
+        polar_angles (np.ndarray): Steering angles of shape ``(n_tx,)`` [rad].
+        focus_distances (np.ndarray): Focus distances of shape ``(n_tx,)`` [m].
+        element_normals (np.ndarray, optional): Unit element normals of shape
+            ``(n_el, 3)``. Defaults to :func:`compute_element_normals`, which estimates
+            the end elements' normals from their last neighbour, half an element short on
+            a curved array; pass the exact normals when they are known.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Start points and unit directions of the rays,
+        both of shape ``(n_rays, 2)`` as ``(x, z)``.
+    """
+    probe_geometry = np.asarray(probe_geometry, dtype=np.float64)
+    origins = np.asarray(transmit_origins, dtype=np.float64)[:, [0, 2]]
+    angles = np.asarray(polar_angles, dtype=np.float64)
+    focus = np.asarray(focus_distances, dtype=np.float64)
+
+    if element_normals is None:
+        element_normals = compute_element_normals(ops.convert_to_tensor(probe_geometry))
+    normals = np.asarray(ops.convert_to_numpy(element_normals), dtype=np.float64)
+    ends = [int(np.argmin(probe_geometry[:, 0])), int(np.argmax(probe_geometry[:, 0]))]
+    end_points = probe_geometry[ends][:, [0, 2]]
+    end_tilts = np.arctan2(normals[ends, 0], normals[ends, 2])
+
+    points, directions = [], []
+    for origin, angle, f in zip(origins, angles, focus):
+        axis = np.array([np.sin(angle), np.cos(angle)])
+        if is_focused(f):
+            points.append(origin)
+            directions.append(axis)
+        elif is_diverging(f):
+            source = origin + f * axis
+            for end in end_points:
+                points.append(end)
+                directions.append((end - source) / np.linalg.norm(end - source))
+        else:
+            for end, tilt in zip(end_points, end_tilts):
+                points.append(end)
+                directions.append(np.array([np.sin(angle + tilt), np.cos(angle + tilt)]))
+    return np.asarray(points), np.asarray(directions)
+
+
+def rays_at_depth(points, directions, depth):
+    """Where rays reach a depth ``z = depth``.
+
+    Rays that start below ``depth`` are evaluated at their start point.
+
+    Args:
+        points (np.ndarray): Ray start points of shape ``(n_rays, 2)`` as ``(x, z)``.
+        directions (np.ndarray): Unit directions of shape ``(n_rays, 2)``.
+        depth (float): The depth [m].
+
+    Returns:
+        np.ndarray: Points of shape ``(n_rays, 2)``; ``nan`` for rays that never reach
+        ``depth`` because they point sideways or backwards.
+    """
+    points = np.asarray(points, dtype=np.float64)
+    directions = np.asarray(directions, dtype=np.float64)
+    reaching = directions[:, 1] > STEERING_TOLERANCE
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = np.maximum((depth - points[:, 1]) / directions[:, 1], 0.0)
+    out = points + t[:, None] * directions
+    out[~reaching] = np.nan
+    return out
+
+
+def element_acceptance_angle(element_width, wavelength):
+    """Half-angle within which a single element receives, at -6 dB.
+
+    Uses the same rigid-baffle directivity model as
+    :func:`zea.func.ultrasound.directivity`, ``sinc(element_width / wavelength *
+    sin(theta))``, which drops to 0.5 at ``sin(theta) = 0.603 * wavelength /
+    element_width``. Elements narrower than about 0.6 wavelength never drop that far
+    and receive over the whole half-space.
+
+    Args:
+        element_width (float): Element width [m].
+        wavelength (float): Wavelength [m].
+
+    Returns:
+        float: The acceptance half-angle [rad], at most ``pi / 2``.
+    """
+    sine = SINC_HALF_AMPLITUDE * wavelength / element_width
+    return float(np.pi / 2 if sine >= 1 else np.arcsin(sine))
 
 
 def is_plane_wave(focus_distances):

@@ -26,7 +26,7 @@ A probe is described by the fields below (all optional — record what you have;
 - ``probe_bandwidth_percent`` -- fractional bandwidth as a percentage,
   ``(f_high - f_low) / f_centre * 100``, using the arithmetic band centre above
   (the standard fractional-bandwidth reference).
-- ``element_width`` -- width of a single element (m), along the array (azimuthal)
+- ``element_width`` -- width of a single element (m), along the array (lateral, x)
   direction.
 - ``element_height`` -- elevation aperture of a single element (m).
 - ``lens_sound_speed`` / ``lens_thickness`` -- acoustic-lens speed of sound (m/s)
@@ -148,6 +148,7 @@ parameters will also work:
 import numpy as np
 from keras import ops
 
+from zea.beamform.geometry import element_pitch
 from zea.data.spec import ProbeSpec
 from zea.internal.core import dict_to_tensor
 from zea.internal.registry import probe_registry
@@ -210,9 +211,8 @@ def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
 
     Inverse of :func:`create_curved_probe_geometry`, for curved probes whose radius is
     only known through ``probe_geometry`` (e.g. read from a converted file) rather than
-    built from an explicit radius. For such a probe the radius is also the polar grid's
-    :attr:`~zea.Parameters.distance_to_apex`, because the centre of curvature is exactly
-    the apex the beams fan out from.
+    built from an explicit radius. :attr:`zea.Parameters.radius_of_curvature` uses it, and
+    the centre of curvature is the default :attr:`zea.Parameters.grid_apex` of such a probe.
 
     Elements are assumed to lie on an arc of radius ``R`` centred at ``(0, 0, -R)``, so
     ``x^2 + (z + R)^2 = R^2``  =>  ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares
@@ -220,9 +220,8 @@ def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
     elements nearest the middle of the array (``z -> 0``).
 
     .. note::
-        The apex is the centre of curvature, at ``(0, 0, -R)``. It is not the middle of
-        the array, which sits at the origin, hence ``distance_to_apex`` for a curved
-        probe is its radius of curvature rather than zero.
+        The centre of curvature sits at ``(0, 0, -R)``, not at the middle of the array,
+        which is the origin.
 
     Args:
         probe_geometry (np.ndarray): Element positions in metres, shape (n_el, 3), in
@@ -250,8 +249,7 @@ def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
     # well as a geometry in a different frame, which would otherwise fit the wrong circle.
     if np.isfinite(radius):
         deviation = np.max(np.abs(np.hypot(x, z + radius) - radius))
-        pitch = np.median(np.linalg.norm(np.diff(probe_geometry, axis=0), axis=1))
-        if deviation <= tol * pitch:
+        if deviation <= tol * element_pitch(probe_geometry):
             return float(radius)
 
     raise ValueError(
@@ -329,34 +327,25 @@ class Probe(ProbeSpec):
         """Compute the pitch (centre-to-centre element spacing) in metres from
         the probe geometry.
 
-        The pitch is always positive, also when the elements are ordered by
-        descending x.
 
-        Raises :class:`ValueError` when the probe has fewer than 2 elements,
-        the geometry is not a 1-D (linear) array, the element positions are
-        not uniformly spaced, or the elements coincide.
+        Raises :class:`ValueError` when the probe has fewer than 2 elements, the
+        neighbouring elements are not uniformly spaced (which includes matrix arrays),
+        or the elements coincide.
         """
 
         n_el = probe_geometry.shape[0]
         if n_el < 2:
             raise ValueError(f"Cannot compute pitch: probe has fewer than 2 elements (n_el={n_el})")
 
-        # Only valid for 1-D (linear) arrangements – all elements must lie on the x-axis
-        # (y == 0 and z == 0 for every element).
-        if not (np.allclose(probe_geometry[:, 1], 0) and np.allclose(probe_geometry[:, 2], 0)):
-            raise ValueError(
-                "Cannot compute pitch: probe geometry is not 1-D (linear array). "
-                "Element positions must have y=0 and z=0 for all elements."
-            )
-
-        spacings = np.diff(probe_geometry[:, 0])
+        steps = np.diff(np.asarray(probe_geometry, dtype=np.float64), axis=0)
+        spacings = np.linalg.norm(steps, axis=1)
         if not np.allclose(spacings, spacings[0], rtol=1e-3):
             raise ValueError(
-                "Cannot compute pitch: element x-positions are not uniformly spaced. "
+                "Cannot compute pitch: elements are not uniformly spaced. "
                 f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
             )
 
-        pitch = abs(float(spacings[0]))
+        pitch = element_pitch(probe_geometry)
         if pitch == 0:
             raise ValueError("Cannot compute pitch: element positions coincide.")
         return pitch
@@ -368,10 +357,10 @@ class Probe(ProbeSpec):
         Raises :class:`ValueError` when:
 
         * :attr:`probe_geometry` is not set,
-        * the probe has fewer than 2 elements, or
-        * the elements are not arranged along a single axis (not a 1-D / linear array).
-        * the spacing is non-uniform (elements are present but clearly not a ULA),
-            to surface likely data errors rather than silently returning ``None``.
+        * the probe has fewer than 2 elements,
+        * the spacing is non-uniform (which includes matrix arrays), to surface likely
+          data errors rather than silently returning ``None``, or
+        * the elements coincide.
 
         """
         if self.probe_geometry is None:
@@ -400,15 +389,14 @@ def _resolve_element_width(probe_geometry, element_width):
             "mode). Please provide `element_width` explicitly in the scan/probe parameters."
         ) from exc
 
-    try:
-        pitch = Probe.get_pitch(geometry)
-    except (ValueError, IndexError, AttributeError) as exc:
+    # Measured along the array, so this also works for curved arrays
+    pitch = element_pitch(geometry)
+    if not pitch > 0:  # nan for a single element, 0 when the elements coincide
         raise ValueError(
             "Element width is not provided and automatic estimation failed from probe "
-            "geometry. Please provide `element_width` explicitly or ensure the probe "
-            "geometry is a 1-D uniformly spaced linear array. "
-            f"Details: {exc}"
-        ) from exc
+            "geometry, which needs at least 2 distinct element positions. Please provide "
+            "`element_width` explicitly."
+        )
     return pitch * 0.9  # 90% of the pitch
 
 

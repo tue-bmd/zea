@@ -22,12 +22,23 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+- An interactive beamforming grid viewer in :doc:`config` that shows how the grid parameters relate (:gh:`679` by :user:`wesselvannierop`)
+- ``grid_apex``, derived from the probe and transmits, is the point a polar grid fans out from: where steered focused lines meet, a diverging wave's virtual source, or a curved array's centre of curvature. It replaces ``distance_to_apex`` (:gh:`679` by :user:`wesselvannierop`)
+- ``polar_margin`` and ``elevation_margin`` set a fixed margin around the derived ``polar_limits`` and ``elevation_limits`` (:gh:`679` by :user:`wesselvannierop`)
 
 Changed
 ^^^^^^^
+- (Breaking) Angle parameters use one set of names from the grid through scan conversion, in 2D and 3D: ``rlims``, ``polar_limits`` and ``elevation_limits`` (see :ref:`angle-conventions`). ``rho_range`` / ``theta_range`` / ``phi_range``, ``azimuth_limits``, the ``frustum_convert_*`` functions and the ``phi_`` / ``theta_`` / ``rho_`` arguments of ``plot_frustum_vertices`` are renamed, with deprecated aliases. The polar/cartesian helpers now measure angles toward ``+x``, like the rest of zea (:gh:`679` by :user:`wesselvannierop`)
+- (Breaking) :class:`zea.ops.ScanConvert` outputs are renamed without aliases: ``rho_range`` / ``theta_range`` / ``phi_range`` / ``d_rho`` / ``d_theta`` / ``d_phi`` become ``rlims`` / ``polar_limits`` / ``elevation_limits`` / ``dr`` / ``d_polar`` / ``d_elevation`` (:gh:`679` by :user:`wesselvannierop`)
+- (Breaking) The default pixel grid follows the probe and transmit geometry, so beamformed images change. ``polar_limits`` cover the region the transmits insonify at ``zlims[1]`` instead of adding a fixed 15 % margin, and ``xlims``, ``grid_size_x`` (λ/4 along the outer arc) and ``extent`` follow the sector or insonified width. Scan conversion fills ``extent`` (:gh:`679` by :user:`wesselvannierop`)
+- (Breaking) The default ``f_number`` is derived from the element's −6 dB directivity, which is 0 (no receive mask) for typical phased arrays (:gh:`679` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
+- Scanline grids follow the transmit angles from ``grid_apex``, so steered lines are no longer displayed at the wrong angle (:gh:`679` by :user:`wesselvannierop`)
+- The default grid for an unsteered plane wave on a curved array spans the array, instead of a zero-width sector (:gh:`679` by :user:`wesselvannierop`)
+- Conversion of elevation-steered Verasonics data: ``polar_angles`` and ``azimuth_angles`` now hold the spherical transmit angles converted from ``TX.Steer``, where ``azimuth_angles`` used to hold the elevation steering angle (:gh:`679` by :user:`wesselvannierop`)
+- The default ``elevation_limits`` (and so ``ylims``) of a 3D grid are the transmits' elevation angles, where before the range of the spherical ``azimuth_angles`` φ was used as if it were an elevation angle (:gh:`679` by :user:`wesselvannierop`)
 
 
 v0.1.9 (2026-11-10)

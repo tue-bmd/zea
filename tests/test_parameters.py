@@ -192,6 +192,21 @@ def test_catch_invalid_dependency():
         DummyInvalidParameters(param1=5)
 
 
+def test_catch_invalid_dependency_of_a_private_property():
+    """Private properties are part of the dependency graph, so their dependencies are
+    checked too, although get_properties leaves them out."""
+
+    class DummyInvalidPrivateParameters(BaseParameters):
+        VALID_PARAMS = {"param1": {"dtype": int}}
+
+        @cache_with_dependencies("non_existing_dependency")
+        def _computed(self):
+            return self.param1
+
+    with pytest.raises(ValueError, match="_computed"):
+        DummyInvalidPrivateParameters(param1=5)
+
+
 def test_type_validation_on_init():
     """Unknown params become custom passthrough; known params are still type-checked."""
     # Unknown parameter is stored as a custom (passthrough) parameter, not rejected.

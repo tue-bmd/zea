@@ -691,12 +691,12 @@ def test_scan_convert_guard_fires_inside_outer_jit():
     ops.Pipeline(operations=[scan_op], jit_options="pipeline", validate=False)
     assert scan_op._is_jitted is True
     with pytest.raises(ValueError, match="coordinates must be provided"):
-        scan_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+        scan_op(data=img, rlims=(0.0, 1.0), polar_limits=(-0.5, 0.5))
 
     # Eager (no JIT anywhere): coordinates are computed on the fly, no error.
     eager_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
     assert eager_op._is_jitted is False
-    out = eager_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+    out = eager_op(data=img, rlims=(0.0, 1.0), polar_limits=(-0.5, 0.5))
     assert "data" in out
 
 
@@ -828,6 +828,100 @@ def test_pipeline_with_parameters():
 
     assert "z" in result
     assert "n_tx" in result  # now we actually need to have n_tx in the result
+
+
+def test_scan_convert_deprecated_inputs_override_the_current_names():
+    """An old config's theta_range reaches ScanConvert next to the polar_limits derived by
+    Parameters, and overrides it instead of raising."""
+    img = keras.ops.ones((4, 8), dtype="float32")
+    scan_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
+    out = scan_op(data=img, rlims=(0.0, 1.0), polar_limits=(-0.3, 0.3), theta_range=(-0.5, 0.5))
+    np.testing.assert_allclose(out["polar_limits"], (-0.5, 0.5))
+
+
+def test_scan_convert_deprecated_distance_to_apex_moves_the_window():
+    """An old config's distance_to_apex reaches ScanConvert as grid_apex=(0, 0, -d)."""
+    img = keras.ops.ones((4, 8), dtype="float32")
+    scan_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
+    limits = {"rlims": (0.0, 1.0), "polar_limits": (-0.3, 0.3)}
+    new = scan_op(data=img, grid_apex=(0.0, 0.0, -0.05), **limits)
+    old = scan_op(data=img, distance_to_apex=0.05, **limits)
+    np.testing.assert_allclose(old["z_lim"], new["z_lim"])
+    np.testing.assert_allclose(old["z_lim"][0], -0.05, atol=1e-6)
+
+
+def _curved_polar_parameters():
+    from zea.probes import create_curved_probe_geometry
+
+    return Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=0.05),
+        grid_type="polar",
+        polar_limits=(-0.3, 0.3),
+        zlims=(0.005, 0.07),
+        grid_size_z=64,
+        grid_size_x=32,
+        center_frequency=3.5e6,
+        sampling_frequency=20e6,
+        n_ax=4096,
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, dropped",
+    [
+        ({"rlims": (0.0, 1.0)}, {"grid_apex", "extent", "coordinates"}),
+        ({"rho_range": (0.0, 1.0)}, {"grid_apex", "extent", "coordinates"}),
+        (
+            {"rlims": (0.0, 1.0), "polar_limits": (-0.6, 0.6)},
+            {"grid_apex", "extent", "coordinates"},
+        ),
+        ({"polar_limits": (-0.6, 0.6)}, {"extent", "coordinates"}),
+        ({"theta_range": (-0.6, 0.6)}, {"extent", "coordinates"}),
+    ],
+)
+def test_prepare_parameters_drops_the_derived_window_for_overridden_limits(overrides, dropped):
+    """Overridden radii (also under their old names) describe a polar image of their own,
+    so the grid_apex, extent and coordinates derived by Parameters are not passed.
+    Overridden angles keep this grid's rows, so only the extent and coordinates go."""
+    parameters = _curved_polar_parameters()
+    pipeline = ops.Pipeline(operations=[ops.ScanConvert(jit_compile=False)])
+    derived = {"grid_apex", "extent", "coordinates"}
+    assert derived <= set(pipeline.prepare_parameters(parameters))
+    inputs = set(pipeline.prepare_parameters(parameters, **overrides))
+    assert not dropped & inputs
+    assert derived - dropped <= inputs
+
+
+def test_prepare_parameters_explicit_rlims_skip_the_grid_window():
+    """Explicit rlims on Parameters describe a polar image of their own (as in
+    Parameters.coordinates_2d), so when ScanConvert computes its own coordinates it must not
+    move that image into this grid's apex frame and output window."""
+    parameters = _curved_polar_parameters()
+    parameters.rlims = (0.0, 0.1)
+    pipeline = ops.Pipeline(operations=[ops.ScanConvert(jit_compile=False)], jit_options=None)
+    inputs = pipeline.prepare_parameters(parameters)
+    assert "coordinates" in inputs
+    assert not {"grid_apex", "extent"} & set(inputs)
+
+    inputs = pipeline.prepare_parameters(parameters, resolution=2e-4)
+    assert not {"grid_apex", "extent", "coordinates"} & set(inputs)
+    data = keras.ops.ones((1, parameters.grid_size_z, parameters.grid_size_x), dtype="float32")
+    out = pipeline(data=data, **inputs)
+    # Up to the half-column the sampled angles miss the central axis by
+    np.testing.assert_allclose(out["z_lim"], (0.0, 0.1), atol=1e-4)
+
+
+def test_prepare_parameters_overridden_angles_keep_the_depth_axis():
+    """The derived rlims are measured from grid_apex, so overriding only the angles must
+    still report depths below the transducer, not radii from the apex."""
+    parameters = _curved_polar_parameters()
+    pipeline = ops.Pipeline(operations=[ops.ScanConvert(jit_compile=False)], jit_options=None)
+    inputs = pipeline.prepare_parameters(parameters, polar_limits=(-0.6, 0.6))
+    data = keras.ops.ones((1, parameters.grid_size_z, parameters.grid_size_x), dtype="float32")
+    out = pipeline(data=data, **inputs)
+    # The deepest point of a sector around 0 lies on the central axis, at zlims[1] (up to
+    # the half-column the sampled angles miss it by), not at the 50 mm deeper apex radius
+    np.testing.assert_allclose(out["z_lim"][1], parameters.zlims[1], atol=1e-4)
 
 
 """Pipeline build from config / json tests"""

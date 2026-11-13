@@ -5,6 +5,7 @@ from keras import ops
 
 from zea import log
 from zea.beamform.geometry import compute_element_normals, is_plane_wave
+from zea.internal.utils import deprecated_distance_to_apex
 
 eps = 1e-10
 
@@ -613,8 +614,9 @@ def radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels=None):
         dr (float): Pixel spacing in radius
         oris (np.ndarray): Origin of each ray in Cartesian coordinates (x, y, z)
             with shape (nrays, 3)
-        dirs (np.ndarray): Steering direction of each ray in azimuth, in units of
-            radians (nrays, 2)
+        dirs (np.ndarray): Direction of each ray [rad], shape (nrays, 2): the polar angle
+            ``atan(x / z)`` in column 0 and the elevation angle ``atan(y / z)`` in column 1
+            (currently ignored).
         num_radial_pixels (int, optional): Number of samples along each ray. Derived from
             ``rlims`` and ``dr`` when not given.
 
@@ -628,7 +630,7 @@ def radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels=None):
     if num_radial_pixels is None:
         num_radial_pixels = int(np.floor((rlims[1] - rlims[0]) / dr + 1e-9)) + 1
     r = rlims[0] + np.arange(num_radial_pixels) * dr  # Depth rho
-    t = dirs[:, 0]  # Use azimuthal angle theta (ignore elevation angle)
+    t = dirs[:, 0]  # Polar angle theta in the x-z plane (ignore elevation)
     tt, rr = np.meshgrid(t, r, indexing="ij")
 
     # Convert the focusing grid to Cartesian coordinates
@@ -644,7 +646,10 @@ def polar_pixel_grid(
     zlims,
     num_radial_pixels: int,
     num_polar_pixels: int,
-    distance_to_apex: float = 0.0,
+    distance_to_apex=None,
+    *,
+    grid_apex=(0.0, 0.0, 0.0),
+    polar_angles=None,
 ):
     """Generate a polar grid.
 
@@ -657,28 +662,39 @@ def polar_pixel_grid(
             transducer surface (``z = 0``) just like for a Cartesian grid.
         num_radial_pixels (int, optional): Number of depth pixels.
         num_polar_pixels (int, optional): Number of polar pixels.
-        distance_to_apex (float, optional): Distance from the transducer surface to the
-            apex of the pixel grid, the point the rays fan out from. For a curved probe
-            that point is the centre of curvature, so this equals the probe's radius of
-            curvature (see :func:`~zea.probes.fit_curved_probe_radius`).
+        grid_apex (array-like, optional): The point ``(x, y, z)`` [m] the rays fan out
+            from, on the central axis at or behind the array (see
+            :attr:`zea.Parameters.grid_apex`). Radii are measured from it, so the rows
+            sit at ``zlims - grid_apex[2]``. Defaults to the middle of the array.
+        polar_angles (array-like, optional): Explicit angle of each column [rad], for
+            example one per transmit for a scanline grid. Overrides ``polar_limits`` and
+            ``num_polar_pixels`` when given.
+        distance_to_apex (float, optional): Deprecated, use
+            ``grid_apex=(0, 0, -distance_to_apex)``.
 
     Returns:
         grid (np.ndarray): Pixel grid of size (num_radial_pixels, num_polar_pixels, 3)
         in Cartesian coordinates (x, y, z)
     """
-    assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
     assert len(zlims) == 2, "zlims must be a tuple of length 2."
+    grid_apex = deprecated_distance_to_apex(distance_to_apex, grid_apex, "polar_pixel_grid")
+
+    if polar_angles is None:
+        assert len(polar_limits) == 2, "polar_limits must be a tuple of length 2."
+        dirs_polar = np.linspace(*polar_limits, num_polar_pixels)  # ty: ignore[no-matching-overload]
+    else:
+        dirs_polar = np.asarray(polar_angles, dtype=np.float64)
+        num_polar_pixels = len(dirs_polar)
 
     # Radii are measured from the apex, depths from the transducer surface.
-    rlims = (zlims[0] + distance_to_apex, zlims[1] + distance_to_apex)
+    apex = np.asarray(grid_apex, dtype=np.float64)
+    rlims = (zlims[0] - apex[2], zlims[1] - apex[2])
     dr = (rlims[1] - rlims[0]) / max(num_radial_pixels - 1, 1)
 
-    oris = np.array([0, 0, -distance_to_apex])
-    oris = np.tile(oris, (num_polar_pixels, 1))
-    dirs_az = np.linspace(*polar_limits, num_polar_pixels)
+    oris = np.tile(apex, (num_polar_pixels, 1))
 
-    dirs_el = np.zeros(num_polar_pixels)
-    dirs = np.vstack((dirs_az, dirs_el)).T
+    dirs_elevation = np.zeros(num_polar_pixels)
+    dirs = np.vstack((dirs_polar, dirs_elevation)).T
 
     return radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels).transpose(1, 0, 2)
 

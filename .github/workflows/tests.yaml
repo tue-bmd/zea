@@ -29,7 +29,15 @@ jobs:
 
       - uses: ./.github/actions/setup-zea
 
+      # tests/test_pixel_grid_explorer.py runs the docs' JavaScript in Node.js.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
       - name: Run Pytest
+        env:
+          # Fail rather than skip the Node.js tests if node is missing.
+          ZEA_REQUIRE_NODE: "1"
         run: |
           pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml \
             -o junit_family=legacy -p no:cacheprovider \
