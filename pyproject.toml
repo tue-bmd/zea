@@ -295,7 +295,7 @@ docstring-code-line-length = "dynamic"
 python-version = "3.11"
 
 [tool.ty.rules]
-unresolved-import = "ignore"
+import-not-found = "ignore"
 
 [tool.ty.src]
 include = ["zea"]

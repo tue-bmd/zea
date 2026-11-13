@@ -22,6 +22,10 @@ updates:
         versions:
           - ">6.0.0"
         # see https://github.com/tue-bmd/zea/issues/329
+      # Skip gradio 7 prereleases until the stable 7.0.0 gets out.
+      - dependency-name: "gradio"
+        versions:
+          - ">=7.0.0.dev0, <7.0.0"
       # The ML backends are pinned by uv.lock (the jax-*/torch-*/tf-* dependency-groups in
       # pyproject.toml). They have to move together -- one shared CUDA runtime, matched to
       # the PyTorch index -- so they are bumped by hand with

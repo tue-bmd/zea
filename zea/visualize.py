@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple, Union, cast
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.ops.image import crop_images
-from matplotlib.axes import Axes as MplAxes
 from matplotlib.patches import PathPatch, Rectangle
 from matplotlib.path import Path as pltPath
 from mpl_toolkits.axes_grid1 import ImageGrid
@@ -175,8 +174,7 @@ def plot_image_grid(
 
     if fig_contents is None:
         fig_contents = [None for _ in range(len(images_padded))]
-    for i, _ax in enumerate(axes):  # ty: ignore[invalid-argument-type]
-        ax = cast(MplAxes, _ax)
+    for i, ax in enumerate(axes):  # ty: ignore[invalid-argument-type]
         image = images_padded[i]
         if image is None:
             ax.set_visible(False)
