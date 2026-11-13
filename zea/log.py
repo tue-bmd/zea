@@ -39,7 +39,7 @@ LEVELS = ["DEBUG", "INFO", "DEPRECATED", "WARNING", "ERROR", "CRITICAL"]
 
 DEPRECATED_LEVEL_NUM = logging.WARNING + 5
 logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
-logging.DEPRECATED = DEPRECATED_LEVEL_NUM  # ty: ignore[unresolved-attribute]
+logging.DEPRECATED = DEPRECATED_LEVEL_NUM  # ty: ignore[missing-attribute]
 
 
 def get_format_fn(name_format):

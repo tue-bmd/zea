@@ -85,7 +85,7 @@ zea = "zea.__main__:main"
 # uv installs `dev` by default; lean envs opt out with --no-default-groups /
 # --only-group (readthedocs: UV_NO_DEFAULT_GROUPS, set in its dashboard).
 [dependency-groups]
-lint = ["ruff==0.17.4", "ty==0.0.99"]
+lint = ["ruff==0.17.4", "ty==0.0.100"]
 tests = [
     "pytest>=9.0.3",
     "papermill>=2.4",
@@ -308,15 +308,15 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 [[tool.ty.overrides]]
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
-invalid-method-override = "ignore"
-invalid-mutable-override = "ignore"
+incompatible-method-override = "ignore"
+incompatible-mutable-override = "ignore"
 
 # torch declares `Module.forward` as a mutable attribute, which subclasses are meant to
 # override with a method. Only reported when torch is installed, so not in CI's typecheck.
 [[tool.ty.overrides]]
 include = ["zea/models/speckle2self.py"]
 [tool.ty.overrides.rules]
-invalid-mutable-override = "ignore"
+incompatible-mutable-override = "ignore"
 
 
 [tool.pytest.ini_options]

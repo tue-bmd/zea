@@ -150,7 +150,7 @@ class TinyBase(BaseModel):
 
             tf = _import_tf(force=True)
 
-            jax_func, jax_params = tf2jax.convert(  # ty: ignore[unresolved-attribute]
+            jax_func, jax_params = tf2jax.convert(  # ty: ignore[missing-attribute]
                 tf.function(self.network), inputs
             )
 
@@ -240,7 +240,7 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
 
     def _resize_nearest_neighbor(proto):
         """Parse a ResizeNearestNeighbor op."""
-        tf2jax._src.ops._check_attrs(proto, {"T", "align_corners", "half_pixel_centers"})  # ty: ignore[unresolved-attribute]  # fmt: skip
+        tf2jax._src.ops._check_attrs(proto, {"T", "align_corners", "half_pixel_centers"})  # ty: ignore[missing-attribute]  # fmt: skip
 
         def _func(images: jnp.ndarray, size: jnp.ndarray) -> jnp.ndarray:
             if len(images.shape) != 4:
@@ -261,7 +261,7 @@ def _fix_tf_to_jax_resize_nearest_neighbor():
         return _func
 
     # hack to allow align_corners=True and half_pixel_centers=True
-    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor  # ty: ignore[unresolved-attribute]  # fmt: skip # noqa: E501
+    tf2jax._src.ops._jax_ops["ResizeNearestNeighbor"] = _resize_nearest_neighbor  # ty: ignore[missing-attribute]  # fmt: skip # noqa: E501
 
 
 register_presets(taesdxl_presets, TinyAutoencoder)

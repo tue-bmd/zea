@@ -6,13 +6,22 @@ loader with a stub so the wiring around it -- fetching the preset files,
 grayscale handling, and encode/decode -- can be tested without a download.
 """
 
+import sys
 import unittest.mock
 from pathlib import Path
+from types import SimpleNamespace
 
 import keras
+import numpy as np
 import pytest
 
-from zea.models.taesd import TinyAutoencoder, TinyBase, TinyDecoder, TinyEncoder
+from zea.models.taesd import (
+    TinyAutoencoder,
+    TinyBase,
+    TinyDecoder,
+    TinyEncoder,
+    _fix_tf_to_jax_resize_nearest_neighbor,
+)
 
 BATCH_SIZE = 2
 
@@ -153,3 +162,30 @@ class TestFromPreset:
         latent = model.encode(x)
         assert latent.shape == (BATCH_SIZE, 32, 32, 4)
         assert model.decode(latent).shape == (BATCH_SIZE, 32, 32, 3)
+
+
+class TestJaxResizePatch:
+    """The ResizeNearestNeighbor override that lets TAESD convert to jax."""
+
+    @pytest.fixture
+    def fake_tf2jax(self, monkeypatch):
+        """A stand-in for ``zea.backend.tf2jax``, which needs the optional tf2jax package."""
+        ops = SimpleNamespace(_check_attrs=unittest.mock.MagicMock(), _jax_ops={})
+        fake = SimpleNamespace(_src=SimpleNamespace(ops=ops))
+        monkeypatch.setitem(sys.modules, "zea.backend.tf2jax", fake)
+        monkeypatch.setattr("zea.backend.tf2jax", fake, raising=False)
+        monkeypatch.setattr("keras.backend.backend", lambda: "jax")
+        return ops
+
+    def test_registers_nearest_neighbor_resize(self, fake_tf2jax):
+        """The patched op checks its attrs and upsamples by repeating pixels."""
+        pytest.importorskip("jax")
+        _fix_tf_to_jax_resize_nearest_neighbor()
+
+        resize = fake_tf2jax._jax_ops["ResizeNearestNeighbor"]("proto")(
+            np.arange(4.0).reshape(1, 2, 2, 1), np.array([4, 4])
+        )
+
+        fake_tf2jax._check_attrs.assert_called_once()
+        expected = np.repeat(np.repeat(np.arange(4.0).reshape(2, 2), 2, 0), 2, 1)
+        np.testing.assert_array_equal(np.asarray(resize)[0, ..., 0], expected)
