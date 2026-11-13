@@ -511,6 +511,31 @@ def _metadata_batch_error(conflicts: dict, batch_size: int) -> ValueError:
     )
 
 
+def _build_once(fn: Callable) -> Callable:
+    """Make the first call to an unbuilt Keras layer safe from several threads.
+
+    Grain maps batches in parallel threads, but Keras builds a layer on its first
+    call without a lock: an unbuilt ``keras.Sequential`` called from two threads at
+    once adds two ``InputLayer`` objects and then fails. Calls wait for each other
+    until one has returned, after which they run in parallel as before.
+    """
+    if not isinstance(fn, keras.layers.Layer) or fn.built:
+        return fn
+    lock = threading.Lock()
+    done = False
+
+    def call(x):
+        nonlocal done
+        if not done:
+            with lock:
+                out = fn(x)
+                done = True
+                return out
+        return fn(x)
+
+    return call
+
+
 class H5DataSource:
     """Thread-safe random-access data source for HDF5 files.
 
@@ -1462,7 +1487,7 @@ class Dataloader:
             ds = _ds_map(ds, lambda x, _a=_ir, _b=_nr: Dataloader._normalize(x, _a, _b))
 
         if cfg["augmentation"] is not None:
-            ds = _ds_map(ds, cfg["augmentation"])
+            ds = _ds_map(ds, _build_once(cfg["augmentation"]))
 
         if cfg["convert_to_tensor"]:
             ds = _ds_map(ds, ops.convert_to_tensor)

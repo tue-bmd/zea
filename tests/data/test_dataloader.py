@@ -3,6 +3,7 @@
 import gc
 import hashlib
 import pickle
+import threading
 from pathlib import Path
 
 import h5py
@@ -627,6 +628,33 @@ def test_ndim_hdf5_dataset(
     )
 
     next(iter(dataset))
+
+
+def test_unbuilt_augmentation_called_from_several_threads():
+    """Grain calls the augmentation from parallel threads; the first call builds it.
+
+    Unguarded, an unbuilt ``Sequential`` called from several threads at once adds an
+    ``InputLayer`` per thread and fails, in about half of these trials.
+    """
+    for _ in range(10):
+        model = keras.Sequential([keras.layers.Rescaling(2.0)])
+        augment = dataloader_module._build_once(model)
+        barrier, errors = threading.Barrier(8), []
+
+        def call():
+            barrier.wait()
+            try:
+                augment(np.ones((4, 8), "float32"))
+            except ValueError as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=call) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert not errors
+        assert sum(isinstance(layer, keras.layers.InputLayer) for layer in model._layers) == 1
 
 
 @pytest.mark.usefixtures("dummy_hdf5")
