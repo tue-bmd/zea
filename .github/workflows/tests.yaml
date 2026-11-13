@@ -13,11 +13,17 @@ env:
   MAIN_REPO: tue-bmd/zea
 
 jobs:
-  tests:
+  # Keep `after_n_builds` in codecov.yml in step with the number of shards.
+  unit-tests:
+    name: unit-tests (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -29,11 +35,20 @@ jobs:
 
       - uses: ./.github/actions/setup-zea
 
+      - name: Cache JAX compilations
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/jax-cache
+          key: jax-cache-${{ hashFiles('uv.lock') }}-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: jax-cache-${{ hashFiles('uv.lock') }}-${{ matrix.shard }}-
+
       - name: Run Pytest
+        env:
+          JAX_COMPILATION_CACHE_DIR: ${{ runner.temp }}/jax-cache
         run: |
           pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml \
             -o junit_family=legacy -p no:cacheprovider \
-            -m 'not heavy and not notebook' ./tests
+            -m 'not heavy and not notebook' --shard ${{ matrix.shard }}/3 ./tests
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -53,6 +68,17 @@ jobs:
           report_type: test_results
           files: ./junit.xml
           verbose: true
+
+  # Gate job: the required `tests` check.
+  tests:
+    if: ${{ !cancelled() }}
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check that all unit-test shards passed
+        run: test "${{ needs.unit-tests.result }}" = success
 
   # Guard against zea accidentally using functionality newer than the dependency
   # floors declared in pyproject.toml. Installs the *lowest* allowed versions of
