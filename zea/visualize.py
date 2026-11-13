@@ -391,8 +391,8 @@ def plot_biplanes(
         ax3d.set_box_aspect(volume.shape)
         # Remove background and axes faces
         ax3d.grid(False)
-        ax3d.xaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
-        ax3d.yaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+        ax3d.xaxis.pane.fill = False  # ty: ignore[missing-attribute]
+        ax3d.yaxis.pane.fill = False  # ty: ignore[missing-union-attribute]
         ax3d.zaxis.pane.fill = False
     else:
         ax3d = cast(Axes3D, ax)
@@ -655,8 +655,8 @@ def plot_frustum_vertices(
     ax3d.set_zlim((z_min, z_max))
     ax3d.set_axis_off()
     ax3d.grid(False)
-    ax3d.xaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
-    ax3d.yaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+    ax3d.xaxis.pane.fill = False  # ty: ignore[missing-attribute]
+    ax3d.yaxis.pane.fill = False  # ty: ignore[missing-union-attribute]
     ax3d.zaxis.pane.fill = False
 
     return fig, ax3d

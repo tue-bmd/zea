@@ -308,15 +308,15 @@ exclude = ["zea/ops/keras_ops.py"] # generated file (see _generate_keras_ops)
 [[tool.ty.overrides]]
 include = ["zea/ops/**/*.py", "zea/models/**/*.py", "zea/data/layers.py"]
 [tool.ty.overrides.rules]
-invalid-method-override = "ignore"
-invalid-mutable-override = "ignore"
+incompatible-method-override = "ignore"
+incompatible-mutable-override = "ignore"
 
 # torch declares `Module.forward` as a mutable attribute, which subclasses are meant to
 # override with a method. Only reported when torch is installed, so not in CI's typecheck.
 [[tool.ty.overrides]]
 include = ["zea/models/speckle2self.py"]
 [tool.ty.overrides.rules]
-invalid-mutable-override = "ignore"
+incompatible-mutable-override = "ignore"
 
 
 [tool.pytest.ini_options]
