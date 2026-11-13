@@ -24,7 +24,6 @@ from zea.ops.imports import import_ops_modules, parent_location
 from zea.ops.tensor import Normalize
 from zea.ops.ultrasound import (
     AlignedApodization,
-    ApplyWindow,
     Demodulate,
     EnvelopeDetect,
     LogCompress,
@@ -342,10 +341,7 @@ class Pipeline:
 
         # Add the demodulate operation
         if not baseband:
-            operations += [
-                ApplyWindow(),
-                Demodulate(),
-            ]
+            operations.append(Demodulate())
 
         # Add beamforming ops
         operations.append(
@@ -447,7 +443,7 @@ class Pipeline:
         Example::
 
             pipeline.keys()
-            # ['apply_window', 'demodulate', 'beamform', ...]
+            # ['demodulate', 'beamform', ...]
         """
         return OperationList(self._pipeline_layers).keys()
 
