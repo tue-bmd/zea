@@ -25,7 +25,7 @@ New Features
 
 Changed
 ^^^^^^^
-- :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (by :user:`wesselvannierop`)
+- :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
