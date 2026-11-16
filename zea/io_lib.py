@@ -241,7 +241,7 @@ def save_to_gif(images, filename, fps=20, shared_color_palette=True, transparent
         pillow_imgs = [
             img.convert("RGB").quantize(
                 palette=global_palette,
-                dither=Image.NONE,  # ty: ignore[unresolved-attribute]
+                dither=Image.NONE,  # ty: ignore[missing-attribute]
             )
             for img in pillow_imgs
         ]
@@ -282,7 +282,7 @@ def _apply_gif_transparency(img, opaque_mask, palette_size, transparent_index):
     if img.mode != "P":
         img = img.convert("RGB").quantize(
             colors=palette_size,
-            dither=Image.NONE,  # ty: ignore[unresolved-attribute]
+            dither=Image.NONE,  # ty: ignore[missing-attribute]
         )
     indices = np.array(img)
     full_palette = np.zeros(768, dtype=np.uint8)
@@ -364,7 +364,7 @@ def save_to_mp4(images, filename, fps=20, shared_color_palette=False):
             for img in pillow_imgs:
                 paletted_img = img.convert("RGB").quantize(
                     palette=global_palette,
-                    dither=Image.NONE,  # ty: ignore[unresolved-attribute]
+                    dither=Image.NONE,  # ty: ignore[missing-attribute]
                 )
                 writer.append_data(np.array(paletted_img.convert("RGB")))
         else:

@@ -106,12 +106,12 @@ class EchoNetDynamic(BaseModel):
 
             inputs = ops.zeros([1, INFERENCE_SIZE, INFERENCE_SIZE, 3])
 
-            jax_func, jax_params = tf2jax.convert(  # ty: ignore[unresolved-attribute]
+            jax_func, jax_params = tf2jax.convert(  # ty: ignore[missing-attribute]
                 tf.function(self.network), inputs
             )
 
             def call_fn(params, state, rng, inputs, training):
-                with tf2jax.override_config(  # ty: ignore[unresolved-attribute]
+                with tf2jax.override_config(  # ty: ignore[missing-attribute]
                     "strict_shape_check", False
                 ):
                     return jax_func(state, inputs)
