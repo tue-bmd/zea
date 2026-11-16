@@ -226,7 +226,8 @@ the array, ``y`` across it, ``+z`` into the medium):
    * - :math:`\operatorname{atan}(y/z)`
      - ``elevation_limits``
      - Elevation angle of the first and last sample of a 3D frustum, signed, positive
-       toward ``+y``. Only in 3D.
+       toward ``+y``. Only in 3D. Defaults to the transmits' elevation angles, widened
+       by 15 % of their range.
 
 To find where a transmit falls on the grid, convert its spherical angles:
 

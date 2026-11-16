@@ -1010,19 +1010,36 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("polar_angles")
+    def _xz_polar_angles(self):
+        """The transmits' polar angles ``atan2(sin(theta) cos(phi), cos(theta))`` [rad]
+        projected onto the x-z plane, of shape (n_tx,), as the grid's polar angles are (see
+        :ref:`angle-conventions`). Equal to :attr:`polar_angles` without
+        ``azimuth_angles``. ``None`` without ``polar_angles``.
+        """
+        polar = self.polar_angles
+        # The presence check uses the raw parameter to avoid triggering the
+        # :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
+        if polar is None or self._params.get("azimuth_angles") is None:
+            return polar
+        polar = np.asarray(polar, dtype=np.float64)
+        azimuth = np.asarray(self.azimuth_angles, dtype=np.float64)
+        return np.arctan2(np.sin(polar) * np.cos(azimuth), np.cos(polar))
+
+    @cache_with_dependencies("polar_angles", optional=("azimuth_angles",))
     def polar_limits(self):
         """The polar angle ``atan(x / z)`` [rad] of the first and last column of a polar grid,
         signed, positive toward +x. In 3D it is the angle of the projection onto the x-z
         plane, next to :attr:`elevation_limits` for the y-z plane. Also used for scan
         conversion, together with :attr:`rlims` for the rows.
 
-        If not explicitly provided, the range of :attr:`polar_angles` with a 15 % margin
-        on each side.
+        If not explicitly provided, the range of the transmit angles (:attr:`polar_angles`,
+        projected onto the x-z plane when :attr:`azimuth_angles` is given), with a 15 %
+        margin on each side.
         """
         value = self._params.get("polar_limits")
-        if value is None and self.polar_angles is not None:
-            value = self.polar_angles.min(), self.polar_angles.max()
+        angles = self._xz_polar_angles()
+        if value is None and angles is not None:
+            value = float(np.min(angles)), float(np.max(angles))
             diff = value[1] - value[0]
             # add 15% margin to the limits
             value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)
@@ -1047,23 +1064,30 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
-    @cache_with_dependencies("selected_transmits", "n_tx")
+    @cache_with_dependencies(
+        "selected_transmits", "n_tx", optional=("polar_angles", "azimuth_angles")
+    )
     def elevation_limits(self):
         """Elevation angle ``atan(y / z)`` [rad] of the first and last sample in elevation,
         shape (2,). Sets the default :attr:`ylims`, and with :attr:`rlims` and
         :attr:`polar_limits` spans a 3D frustum (see :func:`zea.display.scan_convert_3d`).
 
-        If not explicitly provided, the range of :attr:`azimuth_angles` with a 15 % margin
-        on each side. Returns ``None`` if azimuth angles were not provided (e.g. standard
-        2D imaging).
+        If not explicitly provided, the range of the transmits' elevation angles
+        ``atan2(sin(theta) sin(phi), cos(theta))``, from :attr:`polar_angles` and
+        :attr:`azimuth_angles`, with a 15 % margin on each side. Returns ``None`` if
+        azimuth angles were not provided (e.g. standard 2D imaging).
 
         The presence check uses the raw parameter to avoid triggering the
         :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
         """
         value = self._params.get("elevation_limits")
         if value is None and self._params.get("azimuth_angles") is not None:
-            azimuth_angles = self.azimuth_angles
-            value = azimuth_angles.min(), azimuth_angles.max()
+            azimuth = np.asarray(self.azimuth_angles, dtype=np.float64)
+            polar = self.polar_angles
+            polar = np.zeros_like(azimuth) if polar is None else np.asarray(polar, np.float64)
+            # Each transmit's angle in the y-z plane
+            elevation = np.arctan2(np.sin(polar) * np.sin(azimuth), np.cos(polar))
+            value = float(elevation.min()), float(elevation.max())
             diff = value[1] - value[0]
             # add 15% margin to the limits
             value = (value[0] - 0.15 * diff, value[1] + 0.15 * diff)

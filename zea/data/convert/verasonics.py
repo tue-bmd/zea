@@ -130,6 +130,38 @@ def classify_ordered_geometry(geometry, rtol=1e-3):
     return False, "unknown"
 
 
+def steer_to_spherical(theta, alpha):
+    """Convert Verasonics ``TX.Steer`` angles to zea's spherical transmit angles.
+
+    Verasonics steers by ``theta`` in the x-z plane and tilts by ``alpha`` toward
+    ``+y``, giving the direction ``(sin(theta) cos(alpha), sin(alpha),
+    cos(theta) cos(alpha))``. ``alpha`` is not a rotation around ``z``, so it cannot be
+    stored as the azimuth angle directly.
+
+    The result follows the zea standard (see :ref:`angle-conventions`): ``polar`` is
+    signed and ``azimuth`` lies in ``(-pi/2, pi/2]``, so ``alpha = 0`` returns
+    ``(theta, 0)`` unchanged.
+
+    Args:
+        theta (np.ndarray): Verasonics steering angle in the x-z plane [rad].
+        alpha (np.ndarray): Verasonics elevation steering angle, toward ``+y`` [rad].
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: ``(polar_angles, azimuth_angles)`` [rad].
+    """
+    x = np.sin(theta) * np.cos(alpha)
+    y = np.sin(alpha)
+    z = np.cos(theta) * np.cos(alpha)
+    polar = np.arctan2(np.hypot(x, y), z)
+    azimuth = np.arctan2(y, x)
+
+    # Fold azimuth into (-pi/2, pi/2] by flipping the sign of the polar angle
+    flip = (azimuth <= -np.pi / 2) | (azimuth > np.pi / 2)
+    polar = np.where(flip, -polar, polar)
+    azimuth = np.where(flip, azimuth - np.sign(azimuth) * np.pi, azimuth)
+    return polar, azimuth
+
+
 _FRAMES_RANGE_RE = re.compile(r"^\d+(-\d+)?$")
 
 
@@ -634,13 +666,18 @@ class VerasonicsFile(h5py.File):
         )
         return angles
 
+    def read_spherical_angles(self, tx_order):
+        """Read the polar and azimuth angles, each of shape (n_tx,), from the file."""
+        angles = self.read_beamsteering_angles(tx_order)
+        return steer_to_spherical(angles[:, 0], angles[:, 1])
+
     def read_polar_angles(self, tx_order):
-        """Read the polar angles  of shape (n_tx,) from the file."""
-        return self.read_beamsteering_angles(tx_order)[:, 0]
+        """Read the polar angles of shape (n_tx,) from the file."""
+        return self.read_spherical_angles(tx_order)[0]
 
     def read_azimuth_angles(self, tx_order):
         """Read the azimuth angles of shape (n_tx,) from the file."""
-        return self.read_beamsteering_angles(tx_order)[:, 1]
+        return self.read_spherical_angles(tx_order)[1]
 
     @property
     def end_samples(self):
@@ -1131,8 +1168,7 @@ class VerasonicsFile(h5py.File):
         )
         initial_times = self.read_initial_times(rcv_order)
 
-        polar_angles = self.read_polar_angles(tx_order)
-        azimuth_angles = self.read_azimuth_angles(tx_order)
+        polar_angles, azimuth_angles = self.read_spherical_angles(tx_order)
         t0_delays, tx_apodizations = self.read_t0_delays_apod(tx_order)
         focus_distances = self.read_focus_distances(tx_order)
         transmit_origins = self.read_transmit_origins(tx_order)
