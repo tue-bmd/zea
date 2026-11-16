@@ -691,13 +691,22 @@ def test_scan_convert_guard_fires_inside_outer_jit():
     ops.Pipeline(operations=[scan_op], jit_options="pipeline", validate=False)
     assert scan_op._is_jitted is True
     with pytest.raises(ValueError, match="coordinates must be provided"):
-        scan_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+        scan_op(data=img, rlims=(0.0, 1.0), polar_limits=(-0.5, 0.5))
 
     # Eager (no JIT anywhere): coordinates are computed on the fly, no error.
     eager_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
     assert eager_op._is_jitted is False
-    out = eager_op(data=img, rho_range=(0.0, 1.0), theta_range=(-0.5, 0.5))
+    out = eager_op(data=img, rlims=(0.0, 1.0), polar_limits=(-0.5, 0.5))
     assert "data" in out
+
+
+def test_scan_convert_deprecated_inputs_override_the_current_names():
+    """An old config's theta_range reaches ScanConvert next to the polar_limits derived by
+    Parameters, and overrides it instead of raising."""
+    img = keras.ops.ones((4, 8), dtype="float32")
+    scan_op = ops.ScanConvert(order=1, jit_compile=False, with_batch_dim=False)
+    out = scan_op(data=img, rlims=(0.0, 1.0), polar_limits=(-0.3, 0.3), theta_range=(-0.5, 0.5))
+    np.testing.assert_allclose(out["polar_limits"], (-0.5, 0.5))
 
 
 def test_pipeline_set_params():

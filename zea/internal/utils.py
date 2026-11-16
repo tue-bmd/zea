@@ -82,6 +82,30 @@ def first_not_none_item(arr):
     return non_none_items[0] if non_none_items else None
 
 
+def deprecated_alias(value, old_value, old, new, caller):
+    """Map the deprecated keyword argument ``old`` onto its replacement ``new``.
+
+    Args:
+        value: The value passed as ``new``.
+        old_value: The value passed as ``old``.
+        old (str): The deprecated argument name.
+        new (str): The name of its replacement.
+        caller (str): The name of the function, for the messages.
+
+    Returns:
+        ``old_value`` (with a deprecation warning) when given, else ``value``.
+
+    Raises:
+        TypeError: If both ``old`` and ``new`` are given.
+    """
+    if old_value is None:
+        return value
+    if value is not None:
+        raise TypeError(f"{caller}() got both {new!r} and its deprecated alias {old!r}.")
+    log.deprecated(f"{caller}({old}=...) is deprecated, use {new}=... instead.")
+    return old_value
+
+
 def deprecated(replacement=None):
     """Decorator to mark a function, method, or attribute as deprecated.
 

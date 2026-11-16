@@ -29,26 +29,24 @@ def test_scan_conversion(size, resolution, order):
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     data = rng.standard_normal(size).astype(np.float32)
 
-    rho_range = (0, 100)
-    theta_range = (-45, 45)
-    theta_range = np.deg2rad(theta_range)
+    rlims = (0, 100)
+    theta_limits = np.deg2rad((-45, 45))
 
     if len(size) == 3:
-        phi_range = (-20, 20)
-        phi_range = np.deg2rad(phi_range)
+        phi_limits = np.deg2rad((-20, 20))
         out, params = display.scan_convert_3d(
             data,
-            rho_range,
-            theta_range,
-            phi_range,
+            rlims,
+            theta_limits,
+            phi_limits,
             resolution=resolution,
             order=order,
         )
     else:
         out, params = display.scan_convert_2d(
             data,
-            rho_range,
-            theta_range,
+            rlims,
+            theta_limits,
             resolution=resolution,
             order=order,
         )
@@ -79,33 +77,167 @@ def test_scan_convert_in_process_smoke():
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
 
     img2d = rng.standard_normal((32, 16)).astype(np.float32)
-    out2d, params2d = display.scan_convert_2d(img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5))
+    out2d, params2d = display.scan_convert_2d(img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5))
     assert isinstance(params2d, dict)
     assert np.asarray(out2d).ndim == 2
 
     # Exercise the alternative interpolation branches: order > 1 (scipy/CPU path)
     # and vectorize=False (ops.map path), in addition to the default vectorized path.
     out2d_order2, _ = display.scan_convert_2d(
-        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), order=2
+        img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5), order=2
     )
     assert np.asarray(out2d_order2).ndim == 2
     out2d_novec, _ = display.scan_convert_2d(
-        img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5), vectorize=False
+        img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5), vectorize=False
     )
     assert np.asarray(out2d_novec).ndim == 2
 
     # distance_to_apex only relabels z_lim, but keep the branch covered in-process too.
     _, params_apex = display.scan_convert_2d(
-        img2d, rho_range=(0.5, 1), theta_range=(-0.5, 0.5), distance_to_apex=0.25
+        img2d, rlims=(0.5, 1), polar_limits=(-0.5, 0.5), distance_to_apex=0.25
     )
     assert isinstance(params_apex, dict)
 
     vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
     out3d, params3d = display.scan_convert_3d(
-        vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.4, 0.4)
+        vol3d, rlims=(0, 1), polar_limits=(-0.4, 0.4), elevation_limits=(-0.4, 0.4)
     )
     assert isinstance(params3d, dict)
     assert np.asarray(out3d).ndim == 3
+
+
+def test_frustum_conversions():
+    """frustum_to_xyz takes the polar angle atan(x / z) and the elevation angle
+    atan(y / z), and xyz_to_frustum inverts it; the 2D pair is the case elevation = 0."""
+    radius, polar, elevation = np.array([2.0]), np.array([0.3]), np.array([-0.2])
+    x, y, z = display.frustum_to_xyz(radius=radius, polar=polar, elevation=elevation)
+    np.testing.assert_allclose(np.arctan2(x, z), polar)
+    np.testing.assert_allclose(np.arctan2(y, z), elevation)
+    np.testing.assert_allclose(np.sqrt(x**2 + y**2 + z**2), radius)
+    back = display.xyz_to_frustum(x, y, z, polar_limits=(-0.5, 0.5), elevation_limits=(-0.5, 0.5))
+    np.testing.assert_allclose(np.concatenate(back), [2.0, 0.3, -0.2])
+
+    x2, z2 = display.frustum_to_xz(radius=radius, polar=polar)
+    x3, _, z3 = display.frustum_to_xyz(radius, polar, np.zeros(1))
+    np.testing.assert_allclose(np.concatenate([x2, z2]), np.concatenate([x3, z3]))
+    back = display.xz_to_frustum(x2, z2, polar_limits=(-0.5, 0.5))
+    np.testing.assert_allclose(np.concatenate(back), [2.0, 0.3])
+
+
+def test_frustum_convert_deprecated_names():
+    """The old frustum_convert_* functions keep their signatures and call the new ones."""
+    radius, polar, elevation = np.array([2.0]), np.array([0.3]), np.array([-0.2])
+    x, y, z = display.frustum_to_xyz(radius, polar, elevation)
+    old = display.frustum_convert_rtp2xyz(rho=radius, theta=polar, phi=elevation)
+    np.testing.assert_array_equal(np.concatenate(old), np.concatenate([x, y, z]))
+    old = display.frustum_convert_xyz2rtp(x, y, z, theta_limits=(-0.5, 0.5), phi_limits=(-0.5, 0.5))
+    new = display.xyz_to_frustum(x, y, z, (-0.5, 0.5), (-0.5, 0.5))
+    np.testing.assert_array_equal(np.concatenate(old), np.concatenate(new))
+    old = display.frustum_convert_rt2xz(rho=radius, theta=polar)
+    np.testing.assert_array_equal(
+        np.concatenate(old), np.concatenate(display.frustum_to_xz(radius, polar))
+    )
+    old = display.frustum_convert_xz2rt(x, z, theta_limits=(-1, 1))
+    np.testing.assert_array_equal(
+        np.concatenate(old), np.concatenate(display.xz_to_frustum(x, z, (-1, 1)))
+    )
+
+
+def test_scan_convert_deprecated_range_names():
+    """``rho_range``, ``theta_range`` and ``phi_range`` still work as aliases."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+
+    img2d = rng.standard_normal((32, 16)).astype(np.float32)
+    new, _ = display.scan_convert_2d(img2d, rlims=(0, 1), polar_limits=(-0.5, 0.5))
+    old, _ = display.scan_convert_2d(img2d, rho_range=(0, 1), theta_range=(-0.5, 0.5))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+
+    vol3d = rng.standard_normal((16, 10, 10)).astype(np.float32)
+    new, _ = display.scan_convert_3d(
+        vol3d, rlims=(0, 1), polar_limits=(-0.4, 0.4), elevation_limits=(-0.3, 0.3)
+    )
+    old, _ = display.scan_convert(
+        vol3d, rho_range=(0, 1), theta_range=(-0.4, 0.4), phi_range=(-0.3, 0.3)
+    )
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+
+    with pytest.raises(TypeError, match="deprecated alias 'rho_range'"):
+        display.scan_convert_2d(img2d, rlims=(0, 1), rho_range=(0, 1), polar_limits=(-0.5, 0.5))
+
+    # The polar round-trip helpers take the same alias. theta_range measured angles toward
+    # -x, so it maps onto mirrored polar_limits that give the same image.
+    cart = rng.random((40, 50)).astype(np.float32)
+    new = display.cartesian_to_polar_matrix(cart, polar_limits=(-0.6, 0.3))
+    old = display.cartesian_to_polar_matrix(cart, theta_range=(-0.3, 0.6))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.polar_to_cartesian_matrix(cart, (40, 50), polar_limits=(-0.6, 0.3))
+    old = display.polar_to_cartesian_matrix(cart, (40, 50), theta_range=(0.6, -0.3))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    kwargs = dict(output_size=(40, 50), find_scan_cone=False)
+    new = display.inverse_scan_convert_2d(cart, polar_limits=(-0.6, 0.3), **kwargs)
+    old = display.inverse_scan_convert_2d(cart, theta_range=(-0.3, 0.6), **kwargs)
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    with pytest.raises(TypeError, match="deprecated alias 'theta_range'"):
+        display.cartesian_to_polar_matrix(cart, polar_limits=(-0.3, 0.6), theta_range=(-0.3, 0.6))
+
+    # Old code passed theta_range by position; it keeps its slot, so it is still mirrored.
+    new = display.cartesian_to_polar_matrix(cart, polar_limits=(-0.6, 0.3))
+    old = display.cartesian_to_polar_matrix(cart, 0.0, None, None, None, (-0.3, 0.6))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.polar_to_cartesian_matrix(cart, (40, 50), polar_limits=(-0.6, 0.3))
+    old = display.polar_to_cartesian_matrix(cart, (40, 50), None, None, (0.6, -0.3))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.polar_to_cartesian_coordinates((40, 50), 40, 50, polar_limits=(-0.6, 0.3))
+    old = display.polar_to_cartesian_coordinates((40, 50), 40, 50, None, None, (0.6, -0.3))
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+    new = display.inverse_scan_convert_2d(cart, polar_limits=(-0.6, 0.3), **kwargs)
+    old = display.inverse_scan_convert_2d(cart, 0.0, (-0.3, 0.6), **kwargs)
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
+
+
+def test_cartesian_to_polar_matrix_angles_are_positive_toward_plus_x():
+    """Column ``j`` of the polar image samples at the polar angle ``atan(x / z)`` of
+    ``linspace(*polar_limits)[j]``, positive toward +x, as in :func:`scan_convert_2d`."""
+    height, width, apex_x = 120, 241, 120.0
+    xx = np.broadcast_to(np.arange(width, dtype=np.float32), (height, width))
+    lateral = xx - apex_x  # each pixel holds its signed x
+    polar_limits = (-0.2, 0.8)  # asymmetric: wider on the +x side
+    polar = np.asarray(
+        display.cartesian_to_polar_matrix(
+            lateral,
+            tip=(apex_x, 0.0),
+            r_max=100.0,
+            polar_limits=polar_limits,
+            polar_shape=(101, 11),
+        )
+    )
+    r = np.linspace(0, 100, 101)[:, None]
+    theta = np.linspace(*polar_limits, 11)[None, :]
+    np.testing.assert_allclose(polar, r * np.sin(theta), atol=1e-3)
+
+
+def test_cartesian_to_polar_matrix_inverts_scan_convert_2d():
+    """With the same asymmetric polar_limits, cartesian_to_polar_matrix undoes
+    scan_convert_2d: both lay out the columns from polar_limits[0] toward +x."""
+    rlims, polar_limits = (0.0, 100.0), (-0.3, 0.7)
+    n_r, n_polar = 101, 41
+    theta = np.linspace(*polar_limits, n_polar, dtype=np.float32)
+    polar = np.broadcast_to(theta, (n_r, n_polar)).copy()  # each column holds its angle
+
+    cart, info = display.scan_convert_2d(
+        polar, rlims, polar_limits, resolution=0.5, fill_value=np.nan
+    )
+    resolution = float(info["resolution"])
+    apex_column = -float(info["x_lim"][0]) / resolution
+    back = display.cartesian_to_polar_matrix(
+        np.nan_to_num(np.asarray(cart)),
+        tip=(apex_column, 0.0),
+        r_max=rlims[1] / resolution,
+        polar_limits=polar_limits,
+        polar_shape=(n_r, n_polar),
+    )
+    # Away from the apex and the cone edges, where interpolation mixes in the fill value
+    np.testing.assert_allclose(np.asarray(back)[20:90, 2:-2], polar[20:90, 2:-2], atol=0.02)
 
 
 def create_radial_pattern(size):
@@ -155,19 +287,19 @@ def test_scan_conversion_and_inverse(size, pattern_creator, allowed_error, angle
     else:
         raise ValueError("Unknown pattern creator")
 
-    rho_range = (0, 100)
+    rlims = (0, 100)
 
-    theta_range = np.deg2rad((-45, 45))
+    polar_limits = np.deg2rad((-45, 45))
 
     # Scan convert
-    cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, polar_limits)
 
     # Inverse scan convert
     cartesian_data_inv = display.inverse_scan_convert_2d(
         cartesian_data,
         output_size=polar_data.shape,
         find_scan_cone=False,
-        theta_range=theta_range,
+        polar_limits=polar_limits,
     )
     cartesian_data_inv = ops.convert_to_numpy(cartesian_data_inv)
 
@@ -205,10 +337,10 @@ def test_scan_conversion_and_inverse_padded(size, pattern_creator, allowed_error
     else:
         raise ValueError("Unknown pattern creator")
 
-    rho_range = (0, 100)
-    theta_range = np.deg2rad((-45, 45))
+    rlims = (0, 100)
+    polar_limits = np.deg2rad((-45, 45))
 
-    cartesian_data, _ = display.scan_convert_2d(polar_data, rho_range, theta_range)
+    cartesian_data, _ = display.scan_convert_2d(polar_data, rlims, polar_limits)
     cartesian_data = ops.convert_to_numpy(cartesian_data)
 
     # now pad the cartesian image and test with find_scan_cone=True
@@ -233,10 +365,8 @@ def test_polar_to_cartesian_matrix_roundtrip():
 
     Unlike scan_convert_2d (which fits the cone bounding box into the output), it pins the
     apex at ``tip`` on a full-size canvas, so a forward/inverse round-trip reconstructs the
-    original frame at its original position and scale. Uses an *asymmetric* theta_range to
-    guard against an angular shift: the inverse is obtained by passing theta_range in the
-    reversed order (matching cartesian_to_polar_matrix's rot90 column ordering, which is what
-    polar_geometry_from_coords_for_interp returns).
+    original frame at its original position and scale. Uses an *asymmetric* polar_limits to
+    guard against an angular shift or a mirror: both directions take the same polar_limits.
     """
     from keras import ops
 
@@ -245,9 +375,9 @@ def test_polar_to_cartesian_matrix_roundtrip():
     height, width = 220, 300
     yy, xx = np.meshgrid(np.arange(height), np.arange(width), indexing="ij")
     apex_x, apex_y = 170.0, 30.0
-    # cartesian_to_polar_matrix convention: theta = arctan2(-(x - apex_x), y - apex_y).
+    # The polar angle atan(x / z), positive toward +x (increasing column index).
     r = np.sqrt((xx - apex_x) ** 2 + (yy - apex_y) ** 2)
-    theta = np.arctan2(-(xx - apex_x), yy - apex_y)
+    theta = np.arctan2(xx - apex_x, yy - apex_y)
     theta_min, theta_max = -0.3, 0.6  # asymmetric cone
     mask = (theta > theta_min) & (theta < theta_max) & (r < 180)
     blob = np.exp(-(((xx - 150) / 12) ** 2 + ((yy - 150) / 12) ** 2))  # off-centre marker
@@ -257,15 +387,14 @@ def test_polar_to_cartesian_matrix_roundtrip():
         ops.convert_to_tensor(image),
         tip=(apex_x, apex_y),
         r_max=180.0,
-        theta_range=(theta_min, theta_max),
+        polar_limits=(theta_min, theta_max),
     )
-    # Invert: theta_range reversed to match the polar image's column order.
     back = display.polar_to_cartesian_matrix(
         polar,
         (height, width),
         tip=(apex_x, apex_y),
         r_max=180.0,
-        theta_range=(theta_max, theta_min),
+        polar_limits=(theta_min, theta_max),
     )
     back = np.nan_to_num(ops.convert_to_numpy(back))
 
@@ -773,12 +902,12 @@ def test_scan_convert_2d_distance_to_apex_only_relabels_z_lim():
 
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
     img = rng.standard_normal((64, 32)).astype(np.float32)
-    rho_range, theta_range = (0.055, 0.14), (-0.4, 0.4)
+    rlims, polar_limits = (0.055, 0.14), (-0.4, 0.4)
     distance_to_apex = 0.05
 
-    apex, params_apex = display.scan_convert_2d(img, rho_range, theta_range)
+    apex, params_apex = display.scan_convert_2d(img, rlims, polar_limits)
     shifted, params_shifted = display.scan_convert_2d(
-        img, rho_range, theta_range, distance_to_apex=distance_to_apex
+        img, rlims, polar_limits, distance_to_apex=distance_to_apex
     )
 
     np.testing.assert_array_equal(ops.convert_to_numpy(apex), ops.convert_to_numpy(shifted))
@@ -810,9 +939,9 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
     back through ``Parameters.extent_imshow``.
 
     This ties the three places ``distance_to_apex`` is applied — the polar grid, the
-    scan-conversion rho range, and the reported extent — to a single observable, so any
+    scan-conversion ``rlims``, and the reported extent — to a single observable, so any
     one of them drifting into the wrong frame fails here. The deepest indices also pin
-    the radial endpoint: ``rho_range`` must describe the radius of the *last* sample, not
+    the radial endpoint: ``rlims`` must describe the radius of the *last* sample, not
     one sample past it, or the sector stretches with depth.
     """
     from keras import ops
@@ -839,7 +968,7 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
     expected = parameters.grid[i, j]
 
     converted, params = display.scan_convert_2d(
-        polar_image, rho_range=parameters.rho_range, theta_range=parameters.theta_range
+        polar_image, rlims=parameters.rlims, polar_limits=parameters.polar_limits
     )
     converted = ops.convert_to_numpy(converted)
     row, col = np.unravel_index(np.argmax(converted), converted.shape)
@@ -855,3 +984,22 @@ def test_scan_conversion_lands_where_the_grid_says_it_should(i, j):
 
     # Every backend must place the sample in the same output pixel.
     return np.array([x_found, z_found])
+
+
+def test_scan_convert_reports_steps_under_the_limit_names():
+    """The row and column steps are named after the limits they step through."""
+    _, params_2d = display.compute_scan_convert_2d_coordinates(
+        (64, 32), rlims=(0.01, 0.05), polar_limits=(-0.5, 0.5)
+    )
+    _, params_3d = display.compute_scan_convert_3d_coordinates(
+        (16, 8, 8),
+        rlims=(0.01, 0.05),
+        polar_limits=(-0.5, 0.5),
+        elevation_limits=(-0.25, 0.25),
+    )
+
+    np.testing.assert_allclose(float(params_2d["dr"]), 0.04 / 63, rtol=1e-5)
+    np.testing.assert_allclose(float(params_2d["d_polar"]), 1.0 / 31, rtol=1e-5)
+    np.testing.assert_allclose(float(params_3d["d_polar"]), 1.0 / 7, rtol=1e-5)
+    np.testing.assert_allclose(float(params_3d["d_elevation"]), 0.5 / 7, rtol=1e-5)
+    assert not {"d_rho", "d_theta", "d_phi"} & (params_2d.keys() | params_3d.keys())

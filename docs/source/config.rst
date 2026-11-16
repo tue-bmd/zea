@@ -187,6 +187,75 @@ The extent of the final produced image is defined by :attr:`~zea.Parameters.xlim
    </style>
 
 
+.. _angle-conventions:
+
+Angle and radius names
+~~~~~~~~~~~~~~~~~~~~~~
+
+zea uses two kinds of angles, in radians, both in the transducer frame (``x`` along
+the array, ``y`` across it, ``+z`` into the medium):
+
+- **Transmit directions** are `spherical coordinates <https://en.wikipedia.org/wiki/Spherical_coordinate_system>`_, as stored in the file format.
+- **Grid and scan-conversion angles** are projections onto the x-z and y-z planes, so
+  a 3D volume is a frustum that extends the 2D sector in elevation.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 30 56
+
+   * - Symbol
+     - Name
+     - Meaning
+   * - :math:`\theta`
+     - ``polar_angles``
+     - Spherical polar angle of each transmit: the angle between its direction and
+       ``+z``, signed, positive toward ``+x``.
+   * - :math:`\phi`
+     - ``azimuth_angles``
+     - Spherical azimuth angle of each transmit: the rotation of its direction around
+       ``z``, from ``+x``. Zero for 2D imaging.
+   * - :math:`r`, :math:`\rho`
+     - ``rlims``
+     - Radius from the apex of the polar grid, of the first and last row [m]. Not the
+       depth: :attr:`~zea.Parameters.zlims` is measured from the array, so
+       ``rlims = zlims + distance_to_apex``.
+   * - :math:`\operatorname{atan}(x/z)`
+     - ``polar_limits``
+     - Polar angle of the first and last column of a polar grid, signed, positive toward
+       ``+x``. In 3D, the angle of the projection onto the x-z plane.
+   * - :math:`\operatorname{atan}(y/z)`
+     - ``elevation_limits``
+     - Elevation angle of the first and last sample of a 3D frustum, signed, positive
+       toward ``+y``. Only in 3D.
+
+To find where a transmit falls on the grid, convert its spherical angles:
+
+.. math::
+
+   \text{polar} = \operatorname{atan}(\tan\theta\cos\phi), \qquad
+   \text{elevation} = \operatorname{atan}(\tan\theta\sin\phi)
+
+A transmit steered only along the array has a grid polar angle equal to :math:`\theta`.
+Once it is also steered in elevation, the two differ.
+
+**Signed** :math:`\theta`\ **.** :math:`\theta` is stored with a sign, positive toward
+``+x``. 2D data stores :math:`\phi = 0`. 3D data keeps :math:`\phi` in
+:math:`(-\pi/2, \pi/2]`, so the sign of :math:`\theta` still gives the side in ``x``.
+
+.. note::
+
+   **Physics vs. mathematics convention.** zea uses the physics convention (ISO 80000-2):
+   :math:`\theta` is the polar angle from ``+z`` and :math:`\phi` the azimuth around
+   ``z``.
+
+.. note::
+
+   **Ultrasound jargon.** In ultrasound, "azimuth" usually names the *lateral* direction,
+   along the array (``x``). We instead follow the
+   `spherical coordinate system <https://en.wikipedia.org/wiki/Spherical_coordinate_system>`_ where
+   azimuth :math:`\phi` is the rotation around the ``z`` axis.
+
+
 
 ----------------------------
 API reference
