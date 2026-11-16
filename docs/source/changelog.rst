@@ -30,6 +30,8 @@ Changed
 
 Fixed
 ^^^^^
+- Conversion of elevation-steered Verasonics data: ``polar_angles`` and ``azimuth_angles`` now hold the spherical transmit angles converted from ``TX.Steer``, where ``azimuth_angles`` used to hold the elevation steering angle. Files converted from elevation-steered acquisitions need to be reconverted (:gh:`713` by :user:`wesselvannierop`)
+- The default ``elevation_limits`` (and so ``ylims``) of a 3D grid are the transmits' elevation angles, and the default ``polar_limits`` their angles projected onto the x-z plane, where before the spherical ``azimuth_angles`` φ was used as if it were an elevation angle (:gh:`713` by :user:`wesselvannierop`)
 
 
 v0.1.9 (2026-11-10)

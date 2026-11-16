@@ -1460,3 +1460,25 @@ def test_azimuth_limits_is_a_deprecated_alias_of_elevation_limits():
     np.testing.assert_allclose(parameters.elevation_limits, (-0.2, 0.2))
     np.testing.assert_allclose(parameters.azimuth_limits, parameters.elevation_limits)
     assert "azimuth_limits" not in parameters._custom_params
+
+
+def test_default_limits_follow_the_spherical_transmit_angles():
+    """polar_limits and elevation_limits are the transmits' angles projected onto the x-z
+    and y-z planes, from the spherical polar and azimuth angles, widened by 15 %."""
+    # Steered along the array to +-10 deg, then tilted toward +-y (azimuth +-90 deg)
+    polar = np.radians([-10.0, 10.0, 10.0, 10.0])
+    azimuth = np.radians([0.0, 0.0, 90.0, -90.0])
+    parameters = Parameters(polar_angles=polar, azimuth_angles=azimuth)
+    np.testing.assert_allclose(np.degrees(parameters.polar_limits), (-13.0, 13.0), rtol=1e-5)
+    np.testing.assert_allclose(np.degrees(parameters.elevation_limits), (-13.0, 13.0), rtol=1e-5)
+
+    # Steered only in elevation: no polar sector
+    parameters = Parameters(polar_angles=np.radians([10.0, 10.0]), azimuth_angles=azimuth[2:])
+    np.testing.assert_allclose(parameters.polar_limits, (0.0, 0.0), atol=1e-7)
+
+
+def test_default_polar_limits_without_azimuth_angles():
+    """2D data (no azimuth angles) keeps polar_limits from the polar angles alone."""
+    parameters = Parameters(polar_angles=np.array([-0.2, 0.2]))
+    np.testing.assert_allclose(parameters.polar_limits, (-0.26, 0.26), rtol=1e-6)
+    assert parameters.elevation_limits is None
