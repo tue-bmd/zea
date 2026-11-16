@@ -143,6 +143,21 @@ def test_frustum_convert_deprecated_names():
     )
 
 
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"polar_limits": (0.4, -0.4), "elevation_limits": (-0.3, 0.3)},
+        {"polar_limits": (-0.4, 0.4), "elevation_limits": (0.3, -0.3)},
+    ],
+)
+def test_scan_convert_3d_rejects_descending_angles(limits):
+    """3D scan conversion only supports ascending angles, so descending ones raise
+    instead of masking out the whole volume."""
+    vol3d = np.ones((16, 10, 10), dtype=np.float32)
+    with pytest.raises(AssertionError, match="should be less than"):
+        display.scan_convert_3d(vol3d, rlims=(0, 1), **limits)
+
+
 def test_scan_convert_deprecated_range_names():
     """``rho_range``, ``theta_range`` and ``phi_range`` still work as aliases."""
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
@@ -188,6 +203,16 @@ def test_scan_convert_deprecated_range_names():
     old = display.polar_to_cartesian_matrix(cart, (40, 50), None, None, (0.6, -0.3))
     np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
     new = display.polar_to_cartesian_coordinates((40, 50), 40, 50, polar_limits=(-0.6, 0.3))
+    by_keyword = display.polar_to_cartesian_coordinates(
+        (40, 50), n_r=40, n_polar=50, polar_limits=(-0.6, 0.3)
+    )
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(by_keyword))
+    old_keywords = display.polar_to_cartesian_coordinates(
+        (40, 50), n_rho=40, n_theta=50, polar_limits=(-0.6, 0.3)
+    )
+    np.testing.assert_array_equal(np.asarray(new), np.asarray(old_keywords))
+    with pytest.raises(TypeError, match="deprecated alias 'n_rho'"):
+        display.polar_to_cartesian_coordinates((40, 50), 40, 50, n_rho=40)
     old = display.polar_to_cartesian_coordinates((40, 50), 40, 50, None, None, (0.6, -0.3))
     np.testing.assert_array_equal(np.asarray(new), np.asarray(old))
     new = display.inverse_scan_convert_2d(cart, polar_limits=(-0.6, 0.3), **kwargs)

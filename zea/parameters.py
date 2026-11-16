@@ -386,6 +386,16 @@ class Parameters(BaseParameters):
         }
         super().update(merged, force=force)
 
+    @classmethod
+    def standardize_params(cls, **kwargs) -> dict:
+        """Return a dict with only valid parameters set, mapping deprecated names first.
+
+        See :meth:`zea.internal.parameters.BaseParameters.standardize_params`.
+        """
+        return super().standardize_params(
+            **{cls._renamed(key): value for key, value in kwargs.items()}
+        )
+
     @cache_with_dependencies("probe_geometry")
     def distance_to_apex(self):
         """The distance from the transducer surface to the apex of the polar pixel grid.

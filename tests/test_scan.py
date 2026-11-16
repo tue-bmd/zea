@@ -1448,6 +1448,10 @@ def test_renamed_scan_conversion_parameters():
     np.testing.assert_allclose(parameters["rlims"], (0.0, 0.2))
     assert not {"rho_range", "theta_range", "phi_range"} & set(parameters._custom_params)
 
+    parameters = Parameters.safe_initialize(rho_range=(0.01, 0.1), theta_range=(-0.3, 0.3))
+    np.testing.assert_allclose(parameters.rlims, (0.01, 0.1))
+    np.testing.assert_allclose(parameters.polar_limits, (-0.3, 0.3))
+
 
 def test_azimuth_limits_is_a_deprecated_alias_of_elevation_limits():
     """``azimuth_limits`` set ylims as an elevation angle, so it now maps onto

@@ -638,9 +638,9 @@ def compute_scan_convert_3d_coordinates(
         image_shape (tuple): Shape of the volume, ``(..., n_radius, n_polar, n_elevation)``.
         rlims (tuple): Radius of the first and last sample along the radius axis.
         polar_limits (tuple): Polar angle ``atan(x / z)`` of the first and last sample
-            along the polar axis [rad].
+            along the polar axis [rad], ascending.
         elevation_limits (tuple): Elevation angle ``atan(y / z)`` of the first and last
-            sample along the elevation axis [rad].
+            sample along the elevation axis [rad], ascending.
         resolution (float, optional): Output voxel size. Derived from the volume when
             not given.
         dtype (str, optional): Dtype of the coordinates. Defaults to ``"float32"``.
@@ -662,6 +662,11 @@ def compute_scan_convert_3d_coordinates(
     assert len(polar_limits) == 2, "polar_limits should be a tuple of length 2"
     assert len(elevation_limits) == 2, "elevation_limits should be a tuple of length 2"
     assert rlims[0] < rlims[1], "rlims[0] should be less than rlims[1]"
+    # Unlike 2D, the 3D masking and indexing assume ascending angles
+    assert polar_limits[0] < polar_limits[1], "polar_limits[0] should be less than [1]"
+    assert elevation_limits[0] < elevation_limits[1], (
+        "elevation_limits[0] should be less than elevation_limits[1]"
+    )
 
     rho = ops.linspace(rlims[0], rlims[1], image_shape[-3], dtype=dtype)
     theta = ops.linspace(polar_limits[0], polar_limits[1], image_shape[-2], dtype=dtype)
@@ -1090,8 +1095,8 @@ def polar_to_cartesian_matrix(
 
 def polar_to_cartesian_coordinates(
     cartesian_shape: Tuple[int, int],
-    n_r: int,
-    n_polar: int,
+    n_r: int | None = None,
+    n_polar: int | None = None,
     tip: Union[Tuple[float, float], None] = None,
     r_max: Union[float, None] = None,
     theta_range=None,
@@ -1099,6 +1104,8 @@ def polar_to_cartesian_coordinates(
     dtype: str = "float32",
     *,
     polar_limits: Union[Tuple[float, float], None] = None,
+    n_rho: int | None = None,
+    n_theta: int | None = None,
 ):
     """(radius, polar angle) sampling grid that pins a polar cone's apex at pixel ``tip``.
 
@@ -1126,10 +1133,18 @@ def polar_to_cartesian_coordinates(
         dtype (str, optional): Compute dtype for the axes. Defaults to ``"float32"``.
         theta_range (tuple, optional): Deprecated, use ``polar_limits``. It measured angles
             toward -x, so ``theta_range=(a, b)`` is ``polar_limits=(-a, -b)``.
+        n_rho (int, optional): Deprecated, use ``n_r``.
+        n_theta (int, optional): Deprecated, use ``n_polar``.
 
     Returns:
         coords (Array): ``(2, cols, rows)`` stack of ``[rho_idx, theta_idx]`` sampling indices.
     """
+    caller = "polar_to_cartesian_coordinates"
+    n_r = deprecated_alias(n_r, n_rho, "n_rho", "n_r", caller)
+    n_polar = deprecated_alias(n_polar, n_theta, "n_theta", "n_polar", caller)
+    if n_r is None or n_polar is None:
+        raise TypeError(f"{caller}() requires n_r and n_polar.")
+
     cart_rows, cart_cols = cartesian_shape
     if tip is None:
         tip = (cart_cols / 2, 0.0)
