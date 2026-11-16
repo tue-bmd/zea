@@ -467,9 +467,9 @@ class _SAToVirtualFocus:
     output_path: tyro.conf.Positional[Path]
     """Output HDF5 file or folder."""
     polar_angle_deg: float = 0.0
-    """Polar angle for the virtual focus."""
+    """Polar angle theta for the virtual focus, from +z (signed, positive toward +x)."""
     azimuth_angle_deg: float = 0.0
-    """Azimuth angle for the virtual focus."""
+    """Azimuth angle phi for the virtual focus: the spherical azimuth around z, from +x."""
     focus_distance: float = float("inf")
     """Focus distance for the virtual focus."""
     transmit_origin: tuple[float, float, float] = (0.0, 0.0, 0.0)

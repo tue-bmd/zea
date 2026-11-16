@@ -17,8 +17,8 @@ data:
 # parameter names — see the spec reference in data-acquisition. Arbitrary custom
 # parameters are forwarded to the pipeline unchanged.
 parameters:
-  theta_range: [-0.78, 0.78]
-  rho_range: [0, 1]
+  polar_limits: [-0.78, 0.78]
+  rlims: [0, 1]
   fill_value: -60
 
 # This section contains the necessary parameters for building the pipeline.

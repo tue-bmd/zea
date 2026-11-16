@@ -25,6 +25,8 @@ New Features
 
 Changed
 ^^^^^^^
+- (Breaking) Angle parameters use one set of names from the grid through scan conversion, in 2D and 3D: ``rlims``, ``polar_limits`` and ``elevation_limits`` (see :ref:`angle-conventions`). ``rho_range`` / ``theta_range`` / ``phi_range``, ``azimuth_limits``, the ``frustum_convert_*`` functions and the ``phi_`` / ``theta_`` / ``rho_`` arguments of ``plot_frustum_vertices`` are renamed, with deprecated aliases. The polar/cartesian helpers now measure angles toward ``+x``, like the rest of zea (:gh:`712` by :user:`wesselvannierop`)
+- (Breaking) :class:`zea.ops.ScanConvert` outputs are renamed without aliases: ``rho_range`` / ``theta_range`` / ``phi_range`` / ``d_rho`` / ``d_theta`` / ``d_phi`` become ``rlims`` / ``polar_limits`` / ``elevation_limits`` / ``dr`` / ``d_polar`` / ``d_elevation`` (:gh:`712` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^

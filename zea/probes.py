@@ -26,7 +26,7 @@ A probe is described by the fields below (all optional — record what you have;
 - ``probe_bandwidth_percent`` -- fractional bandwidth as a percentage,
   ``(f_high - f_low) / f_centre * 100``, using the arithmetic band centre above
   (the standard fractional-bandwidth reference).
-- ``element_width`` -- width of a single element (m), along the array (azimuthal)
+- ``element_width`` -- width of a single element (m), along the array (lateral, x)
   direction.
 - ``element_height`` -- elevation aperture of a single element (m).
 - ``lens_sound_speed`` / ``lens_thickness`` -- acoustic-lens speed of sound (m/s)

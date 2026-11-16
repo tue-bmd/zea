@@ -421,12 +421,12 @@ class ScanConvert(Operation):
         "x_lim",
         "y_lim",
         "z_lim",
-        "rho_range",
-        "theta_range",
-        "phi_range",
-        "d_rho",
-        "d_theta",
-        "d_phi",
+        "rlims",
+        "polar_limits",
+        "elevation_limits",
+        "dr",
+        "d_polar",
+        "d_elevation",
     ]
 
     def __init__(self, order=1, **kwargs):
@@ -454,9 +454,9 @@ class ScanConvert(Operation):
 
     def call(
         self,
-        rho_range=None,
-        theta_range=None,
-        phi_range=None,
+        rlims=None,
+        polar_limits=None,
+        elevation_limits=None,
         resolution=None,
         coordinates=None,
         fill_value=None,
@@ -466,16 +466,16 @@ class ScanConvert(Operation):
         """Scan convert images to cartesian coordinates.
 
         Args:
-            rho_range (Tuple): Range of the rho axis in the polar coordinate system.
-                Defined in meters.
-            theta_range (Tuple): Range of the theta axis in the polar coordinate system.
-                Defined in radians.
-            phi_range (Tuple): Range of the phi axis in the polar coordinate system.
-                Defined in radians.
+            rlims (Tuple): Radius of the first and last row of the polar image, measured
+                from the apex of the polar grid. Defined in meters.
+            polar_limits (Tuple): Polar angle ``atan(x / z)`` of the first and last column
+                of the polar image (2D) or frustum (3D). Defined in radians.
+            elevation_limits (Tuple): Elevation angle ``atan(y / z)`` of the first and last
+                sample of a 3D frustum. Defined in radians.
             resolution (float): Resolution of the output image in meters per pixel.
                 if None, the resolution is computed based on the input data.
             coordinates (Tensor): Coordinates for scan convertion. If None, will be computed
-                based on rho_range, theta_range, phi_range and resolution. If provided, this
+                based on the limits above and resolution. If provided, this
                 operation can be jitted.
             fill_value (float): Value to fill the image with outside the defined region.
             distance_to_apex (float): Distance from the apex of the polar grid to the
@@ -497,11 +497,27 @@ class ScanConvert(Operation):
                 "Pre-compute coordinates and pass them explicitly, or disable JIT."
             )
 
+        # The deprecated names only come from explicit inputs (e.g. an old config), which
+        # override the values Parameters derives under the current names, as they used to.
+        limits = {
+            "rlims": rlims,
+            "polar_limits": polar_limits,
+            "elevation_limits": elevation_limits,
+        }
+        for old, new in (
+            ("rho_range", "rlims"),
+            ("theta_range", "polar_limits"),
+            ("phi_range", "elevation_limits"),
+        ):
+            if kwargs.get(old) is not None:
+                log.deprecated(f"ScanConvert input `{old}` is deprecated, use `{new}` instead.")
+                limits[new] = kwargs[old]
+
         data_out, parameters = scan_convert(
             data,
-            rho_range,
-            theta_range,
-            phi_range,
+            limits["rlims"],
+            limits["polar_limits"],
+            limits["elevation_limits"],
             resolution,
             coordinates,
             fill_value,

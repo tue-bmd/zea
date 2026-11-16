@@ -1426,6 +1426,37 @@ def test_polar_grid_uses_the_fitted_apex():
         n_ax=4096,
     )
     assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
-    assert parameters.rho_range[0] == pytest.approx(0.005 + radius, rel=1e-5)
+    assert parameters.rlims[0] == pytest.approx(0.005 + radius, rel=1e-5)
     # Centre ray starts at zlims[0] below the transducer, not at the apex.
     assert parameters.grid[0, 64, 2] == pytest.approx(0.005, abs=1e-6)
+
+
+def test_renamed_scan_conversion_parameters():
+    """The former scan-conversion names map onto rlims, polar_limits and
+    elevation_limits."""
+    parameters = Parameters(rho_range=(0.0, 0.1), theta_range=(-0.5, 0.5))
+    np.testing.assert_allclose(parameters.rlims, (0.0, 0.1))
+    np.testing.assert_allclose(parameters.polar_limits, (-0.5, 0.5))
+    np.testing.assert_allclose(parameters.rho_range, parameters.rlims)
+    np.testing.assert_allclose(parameters.theta_range, parameters.polar_limits)
+
+    parameters.update(phi_range=(-0.2, 0.2))
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.2, 0.2))
+    parameters.phi_range = (-0.3, 0.3)
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.3, 0.3))
+    parameters["rho_range"] = (0.0, 0.2)
+    np.testing.assert_allclose(parameters["rlims"], (0.0, 0.2))
+    assert not {"rho_range", "theta_range", "phi_range"} & set(parameters._custom_params)
+
+    parameters = Parameters.safe_initialize(rho_range=(0.01, 0.1), theta_range=(-0.3, 0.3))
+    np.testing.assert_allclose(parameters.rlims, (0.01, 0.1))
+    np.testing.assert_allclose(parameters.polar_limits, (-0.3, 0.3))
+
+
+def test_azimuth_limits_is_a_deprecated_alias_of_elevation_limits():
+    """``azimuth_limits`` set ylims as an elevation angle, so it now maps onto
+    elevation_limits."""
+    parameters = Parameters(azimuth_limits=(-0.2, 0.2))
+    np.testing.assert_allclose(parameters.elevation_limits, (-0.2, 0.2))
+    np.testing.assert_allclose(parameters.azimuth_limits, parameters.elevation_limits)
+    assert "azimuth_limits" not in parameters._custom_params

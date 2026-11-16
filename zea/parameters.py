@@ -244,9 +244,6 @@ class Parameters(BaseParameters):
     lens_sound_speed: float
     """Speed of sound in the lens material [m/s]."""
 
-    phi_range: tuple | np.ndarray
-    """Range of phi angles for 3D imaging [rad], shape (2,)."""
-
     pfield_kwargs: dict
     """Extra keyword arguments for the pressure-field computation.
 
@@ -326,13 +323,30 @@ class Parameters(BaseParameters):
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
-        "theta_range": {"dtype": np.float32, "shape": (2,)},
-        "phi_range": {"dtype": np.float32, "shape": (2,)},
-        "rho_range": {"dtype": np.float32, "shape": (2,)},
+        "elevation_limits": {"dtype": np.float32, "shape": (2,)},
+        "rlims": {"dtype": np.float32, "shape": (2,)},
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
         "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
     }
+
+    # Former names of parameters, mapped onto the current name with a deprecation warning.
+    _RENAMED_PARAMS: ClassVar[dict[str, str]] = {
+        "rho_range": "rlims",
+        "theta_range": "polar_limits",
+        "phi_range": "elevation_limits",
+        # azimuth_limits fed ylims as an elevation angle, which is what elevation_limits is
+        "azimuth_limits": "elevation_limits",
+    }
+
+    @classmethod
+    def _renamed(cls, name):
+        """The current name of ``name``, warning when it is a deprecated one."""
+        if name not in cls._RENAMED_PARAMS:
+            return name
+        new = cls._RENAMED_PARAMS[name]
+        log.deprecated(f"Parameter `{name}` is deprecated, use `{new}` instead.")
+        return new
 
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
@@ -355,6 +369,32 @@ class Parameters(BaseParameters):
             aperture_depth = z_coords.max() - z_coords.min()
             return np.array([aperture_width, aperture_height, aperture_depth])
         return None
+
+    def __getattr__(self, item):
+        if item in Parameters._RENAMED_PARAMS:
+            return getattr(self, Parameters._renamed(item))
+        return super().__getattr__(item)
+
+    def update(self, params=None, *, force=False, **kwargs):
+        """Update parameters from a mapping and/or keyword arguments.
+
+        See :meth:`zea.internal.parameters.BaseParameters.update`.
+        """
+        merged = {
+            self._renamed(key): value
+            for key, value in {**(dict(params) if params else {}), **kwargs}.items()
+        }
+        super().update(merged, force=force)
+
+    @classmethod
+    def standardize_params(cls, **kwargs) -> dict:
+        """Return a dict with only valid parameters set, mapping deprecated names first.
+
+        See :meth:`zea.internal.parameters.BaseParameters.standardize_params`.
+        """
+        return super().standardize_params(
+            **{cls._renamed(key): value for key, value in kwargs.items()}
+        )
 
     @cache_with_dependencies("probe_geometry")
     def distance_to_apex(self):
@@ -686,30 +726,31 @@ class Parameters(BaseParameters):
         return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
 
     @cache_with_dependencies(
-        "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
+        "zlims", "grid_type", "elevation_limits", "probe_geometry", "distance_to_apex"
     )
     def ylims(self):
         """The y-limits of the beamforming grid [m]. If not explicitly set, it is computed based
-        on the azimuth limits and probe geometry.
+        on the :attr:`elevation_limits` and probe geometry.
         """
         ylims = self._params.get("ylims")
         if ylims is not None:
             return ylims
 
-        # If ylims not set, compute based on azimuth limits and probe geometry
+        # If ylims not set, compute based on elevation limits and probe geometry
         radius = max(self.zlims) + self.distance_to_apex
-        ylims_azimuth = (
+        limits = self.elevation_limits
+        ylims_elevation = (
             (0.0, 0.0)  # avoid numerical imprecision with np.cos(np.pi/2)
-            if self.azimuth_limits is None or self.azimuth_limits[0] == self.azimuth_limits[1]
+            if limits is None or limits[0] == limits[1]
             else (
-                radius * np.cos(-np.pi / 2 + self.azimuth_limits[0]),
-                radius * np.cos(-np.pi / 2 + self.azimuth_limits[1]),
+                radius * np.cos(-np.pi / 2 + limits[0]),
+                radius * np.cos(-np.pi / 2 + limits[1]),
             )
         )
         ylims_plane = (min(self.probe_geometry[:, 1]), max(self.probe_geometry[:, 1]))
         ylims = (
-            min(ylims_azimuth[0], ylims_plane[0]),
-            max(ylims_azimuth[1], ylims_plane[1]),
+            min(ylims_elevation[0], ylims_plane[0]),
+            max(ylims_elevation[1], ylims_plane[1]),
         )
         return ylims
 
@@ -955,8 +996,14 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
-        """Polar angles for each transmit event in radians of shape (n_tx,).
-        These angles are often used in 2D imaging."""
+        """Polar angle ``theta`` [rad] of each transmit, of shape (n_tx,).
+
+        The spherical polar angle (physics convention): the angle between the transmit
+        direction and +z. Together with :attr:`azimuth_angles` it gives the direction
+        ``(sin(theta) cos(phi), sin(theta) sin(phi), cos(theta))``. In 2D imaging
+        ``phi = 0`` and ``theta`` is signed, positive toward +x, so it equals the polar
+        angle ``atan(x / z)`` of the grid (see :attr:`polar_limits`).
+        """
         value = self._params.get("polar_angles")
         if value is None:
             return None
@@ -965,7 +1012,14 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("polar_angles")
     def polar_limits(self):
-        """The limits of the polar angles, used for polar grids."""
+        """The polar angle ``atan(x / z)`` [rad] of the first and last column of a polar grid,
+        signed, positive toward +x. In 3D it is the angle of the projection onto the x-z
+        plane, next to :attr:`elevation_limits` for the y-z plane. Also used for scan
+        conversion, together with :attr:`rlims` for the rows.
+
+        If not explicitly provided, the range of :attr:`polar_angles` with a 15 % margin
+        on each side.
+        """
         value = self._params.get("polar_limits")
         if value is None and self.polar_angles is not None:
             value = self.polar_angles.min(), self.polar_angles.max()
@@ -976,8 +1030,13 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("selected_transmits", "n_tx")
     def azimuth_angles(self):
-        """Azimuth angles for each transmit event in radians
-        of shape (n_tx,). These angles are often used in 3D imaging."""
+        """Azimuth angle ``phi`` [rad] of each transmit, of shape (n_tx,).
+
+        The spherical azimuth angle (physics convention): the rotation of the transmit
+        direction around the z axis, from +x. Zero for 2D imaging. This is not the
+        ultrasound "azimuth" (lateral, along the array) direction; the transmit's angle in
+        the y-z plane is its elevation angle (see :attr:`elevation_limits`).
+        """
         value = self._params.get("azimuth_angles")
         if value is None:
             log.warning_once(
@@ -989,16 +1048,19 @@ class Parameters(BaseParameters):
         return value[self.selected_transmits]
 
     @cache_with_dependencies("selected_transmits", "n_tx")
-    def azimuth_limits(self):
-        """The limits of the azimuth angles.
+    def elevation_limits(self):
+        """Elevation angle ``atan(y / z)`` [rad] of the first and last sample in elevation,
+        shape (2,). Sets the default :attr:`ylims`, and with :attr:`rlims` and
+        :attr:`polar_limits` spans a 3D frustum (see :func:`zea.display.scan_convert_3d`).
 
-        Returns ``None`` if azimuth angles were
-        not provided (e.g. standard 2D imaging).
+        If not explicitly provided, the range of :attr:`azimuth_angles` with a 15 % margin
+        on each side. Returns ``None`` if azimuth angles were not provided (e.g. standard
+        2D imaging).
 
         The presence check uses the raw parameter to avoid triggering the
         :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
         """
-        value = self._params.get("azimuth_limits")
+        value = self._params.get("elevation_limits")
         if value is None and self._params.get("azimuth_angles") is not None:
             azimuth_angles = self.azimuth_angles
             value = azimuth_angles.min(), azimuth_angles.max()
@@ -1228,13 +1290,14 @@ class Parameters(BaseParameters):
         return self.pfield.reshape(self.n_tx, -1).swapaxes(0, 1)
 
     @cache_with_dependencies("zlims", "distance_to_apex")
-    def rho_range(self):
-        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in meters.
-        Used for scan conversion. Rho is measured from the apex of the polar grid, so
-        :attr:`zlims` (depths below the transducer) are shifted by
-        :attr:`distance_to_apex`, matching the ``rlims`` of
-        :func:`~zea.beamform.pixelgrid.polar_pixel_grid`."""
-        value = self._params.get("rho_range")
+    def rlims(self):
+        """Radius ``(rho_min, rho_max)`` [m] of the first and last row of a polar grid.
+
+        Rho is measured from the apex of the polar grid, so :attr:`zlims` (depths below
+        the transducer) are shifted by :attr:`distance_to_apex`, matching the rows of
+        :func:`~zea.beamform.pixelgrid.polar_pixel_grid`. Used for scan conversion,
+        together with :attr:`polar_limits` for the columns."""
+        value = self._params.get("rlims")
         if value is None:
             return (
                 self.zlims[0] + self.distance_to_apex,
@@ -1242,18 +1305,9 @@ class Parameters(BaseParameters):
             )
         return value
 
-    @cache_with_dependencies("polar_limits")
-    def theta_range(self):
-        """A tuple specifying the range of theta values (min_theta, max_theta).
-        Defined in radians. Used for scan conversion."""
-        value = self._params.get("theta_range")
-        if value is None and self.polar_limits is not None:
-            return self.polar_limits
-        return value
-
     @cache_with_dependencies(
-        "rho_range",
-        "theta_range",
+        "rlims",
+        "polar_limits",
         "resolution",
         "grid_size_z",
         "grid_size_x",
@@ -1262,12 +1316,12 @@ class Parameters(BaseParameters):
         """The coordinates for scan conversion.
 
         These index the polar image, so they live in the apex frame and need no
-        ``distance_to_apex`` correction; :attr:`rho_range` already carries it.
+        ``distance_to_apex`` correction; :attr:`rlims` already carries it.
         """
         coords, _ = compute_scan_convert_2d_coordinates(
             (self.grid_size_z, self.grid_size_x),
-            self.rho_range,
-            self.theta_range,
+            self.rlims,
+            self.polar_limits,
             self.resolution,
         )
         return coords
@@ -1374,6 +1428,7 @@ class Parameters(BaseParameters):
         }
 
     def __setattr__(self, name: str, value):
+        name = self._renamed(name)
         if name == "selected_transmits":
             # If setting selected_transmits, call set_transmits to handle logic
             self.set_transmits(value)

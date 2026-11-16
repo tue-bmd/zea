@@ -904,7 +904,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - (n_tx)
            - rad
-           - Polar angles of transmit beams.
+           - Polar angle theta of each transmit beam: the angle from the +z axis (physics convention). Signed in 2D, positive toward +x.
            - |badge-req|
          * - ``time_to_next_transmit``
            - ``float32``
@@ -916,7 +916,7 @@ Fields marked :bdg-secondary:`optional` may be absent; all others are
            - ``float32``
            - (n_tx)
            - rad
-           - Azimuthal angles of transmit beams.
+           - Azimuth angle phi of each transmit beam: the rotation around the z axis from +x (physics convention), zero for 2D imaging. Not the ultrasound "azimuth" (lateral) direction.
            - |badge-opt|
          * - ``rx_aperture_indices``
            - ``int16`` | ``int32`` | ``int64``

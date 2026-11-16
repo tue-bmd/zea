@@ -613,8 +613,9 @@ def radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels=None):
         dr (float): Pixel spacing in radius
         oris (np.ndarray): Origin of each ray in Cartesian coordinates (x, y, z)
             with shape (nrays, 3)
-        dirs (np.ndarray): Steering direction of each ray in azimuth, in units of
-            radians (nrays, 2)
+        dirs (np.ndarray): Direction of each ray [rad], shape (nrays, 2): the polar angle
+            ``atan(x / z)`` in column 0 and the elevation angle ``atan(y / z)`` in column 1
+            (currently ignored).
         num_radial_pixels (int, optional): Number of samples along each ray. Derived from
             ``rlims`` and ``dr`` when not given.
 
@@ -628,7 +629,7 @@ def radial_pixel_grid(rlims, dr, oris, dirs, num_radial_pixels=None):
     if num_radial_pixels is None:
         num_radial_pixels = int(np.floor((rlims[1] - rlims[0]) / dr + 1e-9)) + 1
     r = rlims[0] + np.arange(num_radial_pixels) * dr  # Depth rho
-    t = dirs[:, 0]  # Use azimuthal angle theta (ignore elevation angle)
+    t = dirs[:, 0]  # Polar angle theta in the x-z plane (ignore elevation)
     tt, rr = np.meshgrid(t, r, indexing="ij")
 
     # Convert the focusing grid to Cartesian coordinates

@@ -118,32 +118,39 @@ def test_plot_quadrants_variants(coord, cmap, kwargs):
 
 
 _frustum_args = dict(
-    rho_range=[0.1, 10],
-    theta_range=[-0.6, 0.6],
-    phi_range=[-0.6, 0.6],
+    rlims=[0.1, 10],
+    polar_limits=[-0.6, 0.6],
+    elevation_limits=[-0.6, 0.6],
 )
 
 
 @pytest.mark.parametrize(
     "kwargs,lines_min",
     [
-        ({"phi_plane": 0}, 1),
-        ({"theta_plane": 0.2}, 1),
-        ({"rho_plane": 5.0}, 1),
-        ({"phi_plane": [0, 0.3], "theta_plane": [0.2, -0.2], "rho_plane": [2.0, 5.0, 8.0]}, 1),
+        ({"elevation_plane": 0}, 1),
+        ({"polar_plane": 0.2}, 1),
+        ({"radius_plane": 5.0}, 1),
         (
             {
-                "phi_plane": 0,
-                "theta_plane": 0.2,
-                "rho_plane": 5.0,
+                "elevation_plane": [0, 0.3],
+                "polar_plane": [0.2, -0.2],
+                "radius_plane": [2.0, 5.0, 8.0],
+            },
+            1,
+        ),
+        (
+            {
+                "elevation_plane": 0,
+                "polar_plane": 0.2,
+                "radius_plane": 5.0,
                 "frustum_style": {"color": "blue", "linewidth": 1.5, "alpha": 0.6},
-                "phi_style": {"color": "red", "linestyle": "--", "linewidth": 2},
-                "theta_style": {"color": "green", "linestyle": ":", "alpha": 0.7},
-                "rho_style": {"color": "yellow", "linestyle": "-.", "linewidth": 2.5},
+                "elevation_style": {"color": "red", "linestyle": "--", "linewidth": 2},
+                "polar_style": {"color": "green", "linestyle": ":", "alpha": 0.7},
+                "radius_style": {"color": "yellow", "linestyle": "-.", "linewidth": 2.5},
             },
             10,
         ),
-        ({"phi_plane": 0, "num_points": 50}, 1),
+        ({"elevation_plane": 0, "num_points": 50}, 1),
     ],
 )
 def test_plot_frustum_vertices_variants(kwargs, lines_min):
@@ -161,10 +168,36 @@ def test_plot_frustum_no_plane_raises():
         plot_frustum_vertices(**_frustum_args)
 
 
+def test_plot_frustum_deprecated_plane_names():
+    """``phi_plane`` / ``theta_plane`` / ``rho_plane`` and their styles still work."""
+    new_fig, new_ax = plot_frustum_vertices(
+        **_frustum_args,
+        elevation_plane=0.1,
+        polar_plane=0.2,
+        radius_plane=5.0,
+        polar_style={"color": "red"},
+    )
+    old_fig, old_ax = plot_frustum_vertices(
+        **_frustum_args,
+        phi_plane=0.1,
+        theta_plane=0.2,
+        rho_plane=5.0,
+        theta_style={"color": "red"},
+    )
+    assert len(old_ax.lines) == len(new_ax.lines)
+    for old, new in zip(old_ax.lines, new_ax.lines):
+        np.testing.assert_allclose(old.get_data_3d(), new.get_data_3d())
+        assert old.get_color() == new.get_color()
+    with pytest.raises(TypeError, match="deprecated alias 'phi_plane'"):
+        plot_frustum_vertices(**_frustum_args, elevation_plane=0, phi_plane=0)
+    plt.close(new_fig)
+    plt.close(old_fig)
+
+
 def test_plot_frustum_reuse_fig_ax():
     fig, ax = make_3d_ax()
     args = dict(_frustum_args)
-    args["phi_plane"] = 0
+    args["elevation_plane"] = 0
     fig_out, ax_out = plot_frustum_vertices(**args, fig=fig, ax=ax)
     assert fig_out is fig
     assert ax_out is ax
