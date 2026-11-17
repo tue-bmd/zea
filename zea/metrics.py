@@ -376,6 +376,9 @@ class Metrics:
             {'psnr': ..., 'lpips': ...}
     """
 
+    #: Range all images are translated to (from ``image_range``) before the metrics are computed.
+    METRIC_RANGE = (0, 255)
+
     def __init__(
         self,
         metrics: List[str],
@@ -400,9 +403,9 @@ class Metrics:
                 f"Metric {m} is not a paired metric."
             )
 
-        # Inputs are translated from `image_range` to [0, 255] in `_preprocess`, so metrics that
-        # need the image range (e.g. LPIPS) receive data in [0, 255]
-        kwargs["image_range"] = [0, 255]
+        # Metrics that take an `image_range` (LPIPS, UltraPIPS) receive the preprocessed images,
+        # which are in METRIC_RANGE, not in the user's `image_range`.
+        kwargs["image_range"] = self.METRIC_RANGE
         self.image_range = image_range
 
         # Initialize all metrics
@@ -466,9 +469,9 @@ class Metrics:
         return out
 
     def _preprocess(self, tensor):
-        tensor = translate(tensor, self.image_range, [0, 255])
+        tensor = translate(tensor, self.image_range, self.METRIC_RANGE)
         if self.clip:
-            tensor = ops.clip(tensor, 0, 255)
+            tensor = ops.clip(tensor, *self.METRIC_RANGE)
         if self.quantize:
             tensor = ops.cast(tensor, "uint8")
         tensor = ops.cast(tensor, "float32")  # Some metrics require float32
