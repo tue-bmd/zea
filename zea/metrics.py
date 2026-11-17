@@ -400,8 +400,9 @@ class Metrics:
                 f"Metric {m} is not a paired metric."
             )
 
-        # Add image_range to kwargs for metrics that require it
-        kwargs["image_range"] = image_range
+        # Inputs are translated from `image_range` to [0, 255] in `_preprocess`, so metrics that
+        # need the image range (e.g. LPIPS) receive data in [0, 255]
+        kwargs["image_range"] = [0, 255]
         self.image_range = image_range
 
         # Initialize all metrics
