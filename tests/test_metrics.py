@@ -130,7 +130,10 @@ def test_metrics_class_image_range():
     y_pred = np.clip(y_true + 0.2 * rng.normal(size=y_true.shape), -1, 1).astype(np.float32)
 
     METRIC_NAMES = ["mse", "psnr", "lpips"]
-    results = metrics.Metrics(METRIC_NAMES, [-1, 1])(y_true, y_pred, average_batches=False)
+    # clip=True is a no-op here (data within range), but also covers the clipping branch
+    results = metrics.Metrics(METRIC_NAMES, [-1, 1], clip=True)(
+        y_true, y_pred, average_batches=False
+    )
     results_255 = metrics.Metrics(METRIC_NAMES, [0, 255])(
         (y_true + 1) * 127.5, (y_pred + 1) * 127.5, average_batches=False
     )
