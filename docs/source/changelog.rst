@@ -29,6 +29,7 @@ Changed
 
 Fixed
 ^^^^^
+- :func:`zea.func.ultrasound.upmix` and :class:`zea.ops.UpMix` now upsample with FFT by default, which removes the spectral copies that linear interpolation left next to the RF signal. The envelope also no longer drifts up to 2/3 of an IQ sample behind the carrier. Pass ``method="linear"`` for the cheaper interpolation, which now uses the corrected time grid as well (:gh:`718` by :user:`tristan-deep`)
 
 
 v0.1.9 (2026-11-10)
