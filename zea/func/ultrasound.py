@@ -7,7 +7,6 @@ from zea import log
 from zea.func import split_seed
 from zea.func.tensor import (
     extend_n_dims,
-    resample,
     split_into_windows,
 )
 from zea.internal.utils import deprecated
@@ -140,8 +139,62 @@ def demodulate_not_jitable(
     return iq_data
 
 
-def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6):
+def _upsample_fft(x, upsampling_rate):
+    """Upsample complex ``x`` along the last axis by zero-padding its spectrum.
+
+    This is an ideal low-pass interpolator: the spectral copies at multiples of the input
+    sampling frequency are removed entirely. The signal is treated as periodic, so a trace
+    that does not decay to zero at its ends can ring slightly near the edges.
+    """
+    n = x.shape[-1]
+    n_up = n * upsampling_rate
+    real, imag = ops.fft((ops.real(x), ops.imag(x)))
+    spectrum = ops.cast(real, "complex64") + 1j * ops.cast(imag, "complex64")
+
+    n_pos = (n + 1) // 2  # DC and positive frequencies
+    n_neg = n // 2  # negative frequencies (incl. Nyquist for even n)
+    positive = spectrum[..., :n_pos]
+    negative = spectrum[..., n - n_neg :]
+    zeros = ops.zeros((*spectrum.shape[:-1], n_up - n), dtype="complex64")
+    if n % 2 == 0:
+        # Split the Nyquist bin over both sides so the result stays symmetric.
+        nyquist = negative[..., :1] / 2
+        positive = ops.concatenate([positive, nyquist], axis=-1)
+        negative = ops.concatenate([nyquist, negative[..., 1:]], axis=-1)
+        zeros = zeros[..., 1:]
+    spectrum = ops.concatenate([positive, zeros, negative], axis=-1)
+
+    # keras.ops has no ifft: ifft(X) = conj(fft(conj(X))) / n_up
+    real, imag = ops.fft((ops.real(spectrum), -ops.imag(spectrum)))
+    upsampled = ops.cast(real, "complex64") - 1j * ops.cast(imag, "complex64")
+    return upsampled * (upsampling_rate / n_up)
+
+
+def _upsample_linear(x, upsampling_rate):
+    """Upsample complex ``x`` along the last axis with linear interpolation.
+
+    New sample ``k`` is taken at ``k / upsampling_rate`` input samples, the same time grid
+    as the carrier in :func:`upmix`. The last ``upsampling_rate - 1`` samples lie past the
+    final input sample and hold its value.
+    """
+    n = x.shape[-1]
+    n_up = n * upsampling_rate
+    position = ops.arange(n_up, dtype="float32") / upsampling_rate
+    index = ops.cast(ops.floor(position), "int32")
+    next_index = ops.minimum(index + 1, n - 1)
+    weight = ops.cast(position - ops.cast(index, "float32"), "complex64")
+    left = ops.take(x, index, axis=-1)
+    right = ops.take(x, next_index, axis=-1)
+    return left + weight * (right - left)
+
+
+def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6, method="fft"):
     """Upsamples and upmixes complex base-band signals (IQ) to RF.
+
+    The IQ data is first upsampled by ``upsampling_rate`` and then multiplied with a
+    carrier at ``demodulation_frequency``. Upsampling is a low-pass filter that has to
+    remove the copies of the IQ spectrum at multiples of ``sampling_frequency``; whatever
+    it leaves behind ends up next to the RF signal after mixing.
 
     Args:
         iq_data (ndarray): complex valued input array of size [..., n_ax, n_el]. second
@@ -149,6 +202,11 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
         sampling_frequency (float): the sampling frequency of the input IQ signal (in Hz).
             resulting sampling_frequency of RF data is upsampling_rate times higher.
         demodulation_frequency (float, optional): modulation frequency (in Hz).
+        upsampling_rate (int): integer upsampling factor. Defaults to 6.
+        method (str): how to upsample the IQ data. ``"fft"`` (default) zero-pads the
+            spectrum, an ideal low-pass filter that removes the spectral copies entirely.
+            ``"linear"`` interpolates linearly, which is cheaper but only damps the copies
+            (to roughly -25 dB for typical bandwidths).
 
     Returns:
         rf_data (ndarray): output real valued rf data.
@@ -157,6 +215,8 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
         "complex64",
         "complex128",
     ], "IQ must contain all complex signals."
+    if method not in ("fft", "linear"):
+        raise ValueError(f"method must be 'fft' or 'linear', got {method!r}.")
 
     input_shape = iq_data.shape
     n_dim = len(input_shape)
@@ -170,15 +230,18 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     sampling_frequency_up = sampling_frequency * upsampling_rate
 
     t = ops.arange(n_ax_up, dtype="float32") / sampling_frequency_up
-    t0 = 0
-    t = t + t0
 
-    iq_data_upsampled = resample(
-        iq_data,
-        n_samples=n_ax_up,
-        axis=-2,
-        order=1,
-    )
+    # Upsample along fast time, which is moved to the last axis for the FFT
+    iq_data = ops.cast(iq_data, "complex64")
+    if upsampling_rate == 1:
+        iq_data_upsampled = iq_data
+    else:
+        iq_data_upsampled = ops.swapaxes(iq_data, -2, -1)
+        if method == "fft":
+            iq_data_upsampled = _upsample_fft(iq_data_upsampled, upsampling_rate)
+        else:
+            iq_data_upsampled = _upsample_linear(iq_data_upsampled, upsampling_rate)
+        iq_data_upsampled = ops.swapaxes(iq_data_upsampled, -2, -1)
 
     # Up-mixing of the IQ signals
     t = ops.cast(t, dtype="complex64")

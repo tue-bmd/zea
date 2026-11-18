@@ -1186,17 +1186,26 @@ class EnvelopeDetect(Operation):
 
 @ops_registry("upmix")
 class UpMix(Operation):
-    """Upmix IQ data to RF data."""
+    """Upmix IQ data to RF data. See :func:`zea.func.ultrasound.upmix`."""
 
     def __init__(
         self,
         upsampling_rate=1,
+        method="fft",
         **kwargs,
     ):
+        """
+        Args:
+            upsampling_rate (int): Integer factor to upsample the IQ data by before mixing.
+                Defaults to 1.
+            method (str): How to upsample, ``"fft"`` (default) or ``"linear"``. See
+                :func:`zea.func.ultrasound.upmix`.
+        """
         super().__init__(
             **kwargs,
         )
         self.upsampling_rate = upsampling_rate
+        self.method = method
 
     def call(self, sampling_frequency=None, demodulation_frequency=None, **kwargs):
         data = kwargs[self.key]
@@ -1207,7 +1216,13 @@ class UpMix(Operation):
         elif data.shape[-1] == 2:
             data = ops.view_as_complex(data)
 
-        data = upmix(data, sampling_frequency, demodulation_frequency, self.upsampling_rate)
+        data = upmix(
+            data,
+            sampling_frequency,
+            demodulation_frequency,
+            self.upsampling_rate,
+            method=self.method,
+        )
         data = ops.expand_dims(data, axis=-1)
         return {self.output_key: data}
 

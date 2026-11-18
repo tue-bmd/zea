@@ -438,7 +438,7 @@ def test_up_and_down_conversion(factor, batch_size):
     Tolerance dependent on downsampling factor (no anti-alias filter in downsample, so quite lossy
     at high factors). Tolerance is defined relative to the RF peak.
     """
-    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+    tolerance = {1: 1e-3, 2: 0.01, 4: 0.05}[factor]
 
     n_el = 128
     n_scat = 3
@@ -551,7 +551,7 @@ def test_demodulate_upmix_roundtrip(factor):
 
     from zea import ops
 
-    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+    tolerance = 1e-3
 
     n_ax, n_el = 256, 8
     sampling_frequency, center_frequency = 12.5e6, 3.125e6
@@ -584,6 +584,40 @@ def test_demodulate_upmix_roundtrip(factor):
     )
 
     return output
+
+
+@pytest.mark.parametrize("method", ["fft", "linear"])
+def test_upmix_tone(method):
+    """Upmixing an IQ tone gives the RF tone, on the same time grid as the carrier.
+
+    FFT upsampling is exact for a tone with a whole number of cycles. Linear interpolation is
+    not, but it passes through the input samples, so every ``factor``-th RF sample is exact.
+    """
+    from zea.func.ultrasound import upmix
+
+    n_ax, factor = 128, 3
+    sampling_frequency, demodulation_frequency = 5e6, 3.4e6
+    tone_frequency = 10 * sampling_frequency / n_ax  # whole number of cycles
+
+    iq = np.exp(2j * np.pi * tone_frequency * np.arange(n_ax) / sampling_frequency)
+    iq = iq[:, None].astype("complex64")
+    rf = upmix(iq, sampling_frequency, demodulation_frequency, factor, method=method)
+    rf = np.asarray(rf)[:, 0]
+
+    t = np.arange(n_ax * factor) / (sampling_frequency * factor)
+    expected = np.cos(2 * np.pi * (demodulation_frequency + tone_frequency) * t)
+    if method == "linear":
+        rf, expected = rf[::factor], expected[::factor]
+    np.testing.assert_allclose(rf, expected, atol=1e-3)
+
+
+def test_upmix_invalid_method():
+    """An unknown upsampling method raises."""
+    from zea.func.ultrasound import upmix
+
+    iq = np.ones((8, 1), dtype="complex64")
+    with pytest.raises(ValueError, match="method"):
+        upmix(iq, 5e6, 3e6, 2, method="cubic")
 
 
 @pytest.mark.parametrize(
