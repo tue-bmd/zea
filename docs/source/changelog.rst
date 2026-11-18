@@ -29,6 +29,7 @@ Changed
 
 Fixed
 ^^^^^
+- :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
 
 
 v0.1.9 (2026-11-10)
