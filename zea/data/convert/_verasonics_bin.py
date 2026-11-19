@@ -55,6 +55,11 @@ def available_buffers(file):
     return [i for i in range(n_buffers) if _binary_path(file, i).is_file()]
 
 
+def frame_count(file, buffer_index):
+    """Number of frames saved in ``RF_data_{buffer_index + 1}.bin``."""
+    return _read_dimension(file, "RF_frames", buffer_index)
+
+
 def read_buffer(file, buffer_index):
     """Read one buffer as ``(n_frames, n_hardware_channels, n_samples)`` int16, like ``RcvData``.
 

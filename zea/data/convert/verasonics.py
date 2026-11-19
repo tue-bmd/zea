@@ -940,10 +940,18 @@ class VerasonicsFile(h5py.File):
         return {}
 
     def get_frame_count(self, buffer_index=0):
-        """Get the total number of frames in the RcvBuffer buffer."""
+        """Get the total number of frames stored for an RF buffer.
+
+        For a binary workspace this is ``RF_frames``, the number of frames saved in
+        ``RF_data_k.bin``, which can be fewer than ``Resource.RcvBuffer.numFrames``.
+        """
+        if _verasonics_bin.is_binary_workspace(self):
+            return _verasonics_bin.frame_count(self, buffer_index)
+        return self._rcvbuffer_frame_count(buffer_index)
+
+    def _rcvbuffer_frame_count(self, buffer_index):
         n_frames = self.dereference_index(self["Resource"]["RcvBuffer"]["numFrames"], buffer_index)
-        n_frames = self.cast_to_integer(n_frames)
-        return n_frames
+        return self.cast_to_integer(n_frames)
 
     def get_indices_to_reorder(self, first_frame: int, n_frames: int):
         return (np.arange(n_frames) + first_frame) % n_frames
@@ -956,6 +964,20 @@ class VerasonicsFile(h5py.File):
         correct order of frames.
         """
         n_frames = self.get_frame_count(buffer_index)
+        if _verasonics_bin.is_binary_workspace(self):
+            # lastFrame indexes the full circular buffer, so it only applies when the
+            # binary holds every frame of it.
+            try:
+                n_buffer_frames = self._rcvbuffer_frame_count(buffer_index)
+            except KeyError:
+                n_buffer_frames = None
+            if n_buffer_frames != n_frames:
+                log.warning(
+                    f"RF_data_{buffer_index + 1}.bin holds {n_frames} frames, but "
+                    f"RcvBuffer({buffer_index + 1}).numFrames is {n_buffer_frames}. "
+                    "Assuming the saved frames are already in order."
+                )
+                return np.arange(n_frames)
         try:
             last_frame = self.dereference_index(
                 self["Resource"]["RcvBuffer"]["lastFrame"], buffer_index

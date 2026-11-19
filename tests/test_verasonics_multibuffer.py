@@ -163,6 +163,23 @@ def test_binary_only_saved_buffers_are_available(tmp_path):
             vf.read_raw_buffer_array(1)
 
 
+@pytest.mark.parametrize("num_frames, expected_order", [(3, [2, 0, 1]), (5, [0, 1, 2])])
+def test_binary_frame_count_and_order(tmp_path, num_frames, expected_order):
+    """A binary buffer uses RF_frames, and lastFrame only when every frame was saved."""
+    n_frames, n_channels, n_samples = 3, 2, 4
+    full = [np.zeros((n_frames, n_channels, n_samples), np.int16)]
+    mat = tmp_path / "Parameters.mat"
+    _write_binary_workspace(mat, full, [np.ones(n_channels, bool)], saved=[True])
+    with h5py.File(mat, "a") as f:
+        rcv_buffer = f.create_group("Resource/RcvBuffer")
+        rcv_buffer.create_dataset("numFrames", data=np.array([[num_frames]], np.float64))
+        rcv_buffer.create_dataset("lastFrame", data=np.array([[2]], np.float64))
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        assert vf.get_frame_count(0) == n_frames
+        np.testing.assert_array_equal(vf.get_raw_data_order(0), expected_order)
+
+
 def test_binary_dimension_mismatch_raises(tmp_path):
     """A ``.bin`` whose size disagrees with the stored dimensions is rejected."""
     n_frames, n_channels, n_samples = 2, 4, 4
