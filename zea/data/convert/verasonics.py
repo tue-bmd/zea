@@ -448,22 +448,6 @@ class VerasonicsFile(h5py.File):
             dereferenced_data.append(element)
         return dereferenced_data
 
-    # Number of Receive entries read to verify that a per-buffer constant field
-    # (e.g. sampleMode) is indeed constant. 0 checks every entry (slow).
-    CONSTANT_FIELD_CHECK_SAMPLES = 32
-
-    @staticmethod
-    def _subset_indices(indices, n_samples):
-        """Evenly-spread subset of ``indices``, always including first and last.
-
-        Returns all indices when ``n_samples`` is 0 or exceeds the number available.
-        """
-        indices = np.asarray(indices).reshape(-1)
-        if n_samples <= 0 or indices.size <= n_samples:
-            return indices
-        picks = np.unique(np.linspace(0, indices.size - 1, n_samples).round().astype(int))
-        return indices[picks]
-
     def _read_scalar_field(self, group_name, field_name):
         """Read every entry of a scalar struct-array field (e.g. ``Receive.mode``) as
         one numpy array. The result is cached per field.
@@ -494,8 +478,8 @@ class VerasonicsFile(h5py.File):
     def _read_constant_receive_field(self, field_name, buffer_index, decode, description):
         """Read a ``Receive`` field that is constant within a buffer (e.g. ``sampleMode``).
 
-        Only a subset of the entries is read and checked to be equal (see
-        :attr:`CONSTANT_FIELD_CHECK_SAMPLES`). The result is cached per field and buffer.
+        Every entry is read and checked to be equal. The result is cached per field and
+        buffer.
 
         Args:
             field_name (str): The ``Receive`` field to read.
@@ -514,8 +498,9 @@ class VerasonicsFile(h5py.File):
         else:
             indices = np.arange(self.get_reference_size(dataset))
 
-        subset = self._subset_indices(indices, self.CONSTANT_FIELD_CHECK_SAMPLES)
-        values = {decode(self.dereference_index(dataset, int(i))) for i in subset}
+        # Each entry is a separate HDF5 object (about 0.1 ms per read), so this is the
+        # slow part for large sequences, but a partial check could miss a mixed buffer.
+        values = {decode(self.dereference_index(dataset, int(i))) for i in indices}
         assert len(values) == 1, (
             f"Multiple {description} found in file: {values}. We do not support this case."
         )
@@ -1883,13 +1868,10 @@ class VerasonicsFile(h5py.File):
             "ASSUMPTION: all receives within an RF buffer are assumed to share the "
             "same acquisition settings - sample mode, demodulation frequency, "
             "sampling rate (decimSampleRate / quadDecim) and start/end depth. "
-            "These are read from, or spot-checked on, a subset of the buffer's "
-            "receives rather than every one, because they are stored per-receive "
-            "but are constant by construction. If a sequence varies any of these "
-            "*within* a single buffer, the converted parameters will be wrong. "
-            f"(Constancy is verified on up to {self.CONSTANT_FIELD_CHECK_SAMPLES} "
-            "receives per buffer; set VerasonicsFile.CONSTANT_FIELD_CHECK_SAMPLES = 0 "
-            "to check every receive exhaustively.)"
+            "Sample mode and demodulation frequency are checked on every receive; "
+            "the sampling rate is read from the buffer's first receive. If a sequence "
+            "varies the sampling rate *within* a single buffer, the converted "
+            "parameters will be wrong."
         )
         tracks, probe_dict, custom_elements = self.read_verasonics_file(
             frames=frames,

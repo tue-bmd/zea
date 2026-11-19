@@ -351,11 +351,18 @@ def test_missing_file_is_reported_as_missing(tmp_path):
         VerasonicsFile(str(tmp_path / "typo.mat"), "r")
 
 
-def test_subset_indices_spreads_and_keeps_ends():
-    """The constancy spot-check uses an evenly spread subset including both ends."""
-    picks = VerasonicsFile._subset_indices(np.arange(100, 200), 5)
-    np.testing.assert_array_equal(picks, [100, 125, 150, 174, 199])
-    np.testing.assert_array_equal(VerasonicsFile._subset_indices(np.arange(3), 0), [0, 1, 2])
+def test_constant_receive_field_checks_every_receive(tmp_path):
+    """A single differing receive in the middle of a buffer is detected."""
+    n = 101
+    modes = ["NS200BW"] * n
+    modes[37] = "BS100BW"
+    mat = tmp_path / "raw_data.mat"
+    with h5py.File(mat, "w") as f:
+        _write_struct(f, "Receive", {"bufnum": [1] * n, "sampleMode": modes})
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        with pytest.raises(AssertionError, match="Multiple sample modes"):
+            vf.get_sample_mode(0)
 
 
 def test_bufnums_fall_back_to_buffer_zero(tmp_path):
