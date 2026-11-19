@@ -597,14 +597,14 @@ def test_missing_rcvdata_and_image_buffer(tmp_path):
 
 
 @pytest.mark.parametrize("probe_type", [None, 99])
-def test_probe_type_falls_back_to_unknown(tmp_path, probe_type):
-    """A missing or unrecognized ``Trans.type`` gives probe type 'unknown'."""
+def test_probe_type_none_when_missing_or_unknown(tmp_path, probe_type):
+    """A missing or unrecognized ``Trans.type`` gives probe type ``None``."""
     mat = tmp_path / "raw_data.mat"
     with h5py.File(mat, "w") as f:
         _write_trans(f, 2, probe_type=probe_type)
 
     with VerasonicsFile(str(mat), "r") as vf:
-        assert vf.probe.type == "unknown"
+        assert vf.probe.type is None
         assert vf.probe.connector is None
 
 

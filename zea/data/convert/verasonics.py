@@ -1968,7 +1968,7 @@ class VerasonicsProbe:
     def type(self):
         """The type of the probe from the file.
 
-        Falls back to ``"unknown"`` if the type is missing or not recognized.
+        ``None`` if the type is missing or not recognized.
         """
         _id_to_str = {
             0: "linear",
@@ -1977,19 +1977,16 @@ class VerasonicsProbe:
             3: "annular",
             4: "row-column",
         }
-        # Never return None: the zea format stores the probe type as a string.
         if "type" not in self.trans_obj.keys():
-            log.warning("Trans.type not found in file; falling back to probe type 'unknown'.")
-            return "unknown"
+            return None
 
         probe_type_id = int(self.trans_obj["type"][:].item())
         probe_type = _id_to_str.get(probe_type_id)
         if probe_type is None:
             log.warning(
                 f"Unrecognized Trans.type id {probe_type_id}; expected one of "
-                f"{sorted(_id_to_str)}. Falling back to probe type 'unknown'."
+                f"{sorted(_id_to_str)}. Leaving the probe type unset."
             )
-            return "unknown"
         return probe_type
 
     @property
