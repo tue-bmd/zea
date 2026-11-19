@@ -65,6 +65,29 @@ def frame_count(file, buffer_index):
     return _read_dimension(file, "RF_frames", buffer_index)
 
 
+def holds_full_rcvbuffer(file, buffer_index):
+    """Whether ``RF_data_{buffer_index + 1}.bin`` holds every frame of its ``RcvBuffer``.
+
+    ``Resource.RcvBuffer.lastFrame`` indexes the full circular buffer, so it can only
+    be used to reorder the saved frames when this is true. Otherwise this warns that
+    the saved frames are assumed to be in order.
+    """
+    n_frames = frame_count(file, buffer_index)
+    try:
+        n_buffer_frames = file._rcvbuffer_frame_count(buffer_index)
+    except (KeyError, IndexError):  # no RcvBuffer, or fewer entries than .bin files
+        n_buffer_frames = None
+    if n_buffer_frames == n_frames:
+        return True
+    log.warning(
+        f"RF_data_{buffer_index + 1}.bin ({rf_buffer_name(buffer_index)}) "
+        f"holds {n_frames} frames, but Resource.RcvBuffer({buffer_index + 1})"
+        f".numFrames is {n_buffer_frames}. "
+        "Assuming the saved frames are already in order."
+    )
+    return False
+
+
 def read_buffer(file, buffer_index):
     """Read one buffer as ``(n_frames, n_hardware_channels, n_samples)`` int16, like ``RcvData``.
 

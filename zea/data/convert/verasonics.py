@@ -400,7 +400,8 @@ class VerasonicsFile(h5py.File):
         This function dereferences the dataset if it is a reference. Otherwise, it returns
         the dataset.
 
-        For a regular dataset, only ``index == 0`` is valid.
+        If the struct array has a single element, it is stored directly rather than
+        as references, so only ``index == 0`` is valid.
 
         Args:
             dataset (h5py.Dataset): The dataset to read the element from.
@@ -1005,21 +1006,10 @@ class VerasonicsFile(h5py.File):
         correct order of frames.
         """
         n_frames = self.get_frame_count(buffer_index)
-        if _verasonics_bin.is_binary_workspace(self):
-            # lastFrame indexes the full circular buffer, so it only applies when the
-            # binary holds every frame of it.
-            try:
-                n_buffer_frames = self._rcvbuffer_frame_count(buffer_index)
-            except (KeyError, IndexError):  # no RcvBuffer, or fewer entries than .bin files
-                n_buffer_frames = None
-            if n_buffer_frames != n_frames:
-                log.warning(
-                    f"RF_data_{buffer_index + 1}.bin ({rf_buffer_name(buffer_index)}) "
-                    f"holds {n_frames} frames, but Resource.RcvBuffer({buffer_index + 1})"
-                    f".numFrames is {n_buffer_frames}. "
-                    "Assuming the saved frames are already in order."
-                )
-                return np.arange(n_frames)
+        if _verasonics_bin.is_binary_workspace(self) and not _verasonics_bin.holds_full_rcvbuffer(
+            self, buffer_index
+        ):
+            return np.arange(n_frames)
         try:
             last_frame = self.dereference_index(
                 self["Resource"]["RcvBuffer"]["lastFrame"], buffer_index
@@ -1054,6 +1044,25 @@ class VerasonicsFile(h5py.File):
             if k not in used:
                 log.warning(f"Skipping {rf_buffer_name(k)}: no Receive entry stores data in it.")
         return [k for k in stored if k in used]
+
+    def _select_buffers(self, buffers):
+        # Validate the requested 0-based buffers (None = all available) and return them as a list.
+        available = self.available_buffers()
+        buffers = available if buffers is None else list(buffers)
+        repeated = sorted({k for k in buffers if buffers.count(k) > 1})
+        if repeated:
+            # Each buffer becomes the track rf_buffer_{k}, so a repeat would duplicate a label.
+            raise ValueError(f"RF buffers {repeated} (0-based) are selected more than once.")
+        missing = sorted(set(buffers) - set(available))
+        if missing:
+            names = ", ".join(rf_buffer_name(k) for k in available) or "none"
+            raise ValueError(
+                f"RF buffers {missing} (0-based) are not in this file or have no Receive "
+                f"entries. Available: {names}."
+            )
+        if not buffers:
+            raise ValueError("No RF buffers to convert.")
+        return buffers
 
     def _rcvdata(self):
         if "RcvData" not in self:
@@ -1399,34 +1408,38 @@ class VerasonicsFile(h5py.File):
 
         # Multiple TGC structs: pick the one this buffer's receives reference.
         n_tgc = self.get_reference_size(waveform_ds)
-        tgc_index = 0
-        if "TGC" in self["Receive"]:
-            if buffer_index is not None:
-                recv_idx = self.receive_indices_for_buffer(buffer_index)
-            else:
-                recv_idx = np.arange(self.get_reference_size(self["Receive"]["TGC"]))
-            tgc_values = np.unique(
-                np.round(self._read_scalar_field("Receive", "TGC")[recv_idx]).astype(int)
-            )
-            if tgc_values.size != 1 and buffer_index is not None:
-                # A track stores a single tgc_gain_curve, so a mixed buffer cannot be stored.
-                raise ValueError(
-                    f"The receives of {rf_buffer_name(buffer_index)} reference several TGC "
-                    f"waveforms {tgc_values.tolist()}. We do not support this case yet."
-                )
-            if tgc_values.size != 1:
-                log.warning(
-                    f"Receives for buffer_index={buffer_index} reference multiple TGC "
-                    f"waveforms {tgc_values.tolist()}; using the first."
-                )
-            tgc_index = int(tgc_values[0]) - 1  # Verasonics TGC numbers are 1-based
-        if tgc_index < 0 or tgc_index >= n_tgc:
+        tgc_index = self._receive_tgc_index(buffer_index)
+        if not 0 <= tgc_index < n_tgc:
             log.warning(
                 f"TGC index {tgc_index} is out of range for {n_tgc} TGC waveform(s); "
                 "using the first."
             )
             tgc_index = 0
         return np.asarray(self.dereference_index(waveform_ds, tgc_index)).reshape(-1)
+
+    def _receive_tgc_index(self, buffer_index=None):
+        """0-based index of the TGC waveform referenced by the selected buffer's receives."""
+        if "TGC" not in self["Receive"]:
+            return 0
+        if buffer_index is None:
+            recv_idx = np.arange(self.get_reference_size(self["Receive"]["TGC"]))
+        else:
+            recv_idx = self.receive_indices_for_buffer(buffer_index)
+        tgc_values = np.unique(
+            np.round(self._read_scalar_field("Receive", "TGC")[recv_idx]).astype(int)
+        )
+        if tgc_values.size != 1 and buffer_index is not None:
+            # A track stores a single tgc_gain_curve, so a mixed buffer cannot be stored.
+            raise ValueError(
+                f"The receives of {rf_buffer_name(buffer_index)} reference several TGC "
+                f"waveforms {tgc_values.tolist()}. We do not support this case yet."
+            )
+        if tgc_values.size != 1:
+            log.warning(
+                f"Receives for buffer_index={buffer_index} reference multiple TGC "
+                f"waveforms {tgc_values.tolist()}; using the first."
+            )
+        return int(tgc_values[0]) - 1  # Verasonics TGC numbers are 1-based
 
     def get_tgc_gain_curve(self, buffer_index=None):
         """The TGC gain curve interpolated to the number of axial samples (n_ax,).
@@ -1667,22 +1680,7 @@ class VerasonicsFile(h5py.File):
         if buffers is None:
             buffers = convert_config.get("buffers", None)
 
-        available = self.available_buffers()
-        buffers = available if buffers is None else list(buffers)
-        repeated = sorted({k for k in buffers if buffers.count(k) > 1})
-        if repeated:
-            # Each buffer becomes the track rf_buffer_{k}, so a repeat would duplicate a label.
-            raise ValueError(f"RF buffers {repeated} (0-based) are selected more than once.")
-        missing = sorted(set(buffers) - set(available))
-        if missing:
-            names = ", ".join(rf_buffer_name(k) for k in available) or "none"
-            raise ValueError(
-                f"RF buffers {missing} (0-based) are not in this file or have no Receive "
-                f"entries. Available: {names}."
-            )
-        if not buffers:
-            raise ValueError("No RF buffers to convert.")
-
+        buffers = self._select_buffers(buffers)
         if len(buffers) > 1 and (not _is_all_frames(frames) or first_frame is not None):
             raise NotImplementedError(
                 "Selecting frames ('frames' / 'first_frame') is not supported for files "
