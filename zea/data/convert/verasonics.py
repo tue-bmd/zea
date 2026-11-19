@@ -381,14 +381,15 @@ class VerasonicsFile(h5py.File):
             index (int): The index of the element to read.
         """
         if _is_reference_dataset(dataset):
-            # Flatten to handle both (N, 1) and (1, N) (e.g. RcvData) layouts.
-            references = np.asarray(dataset[:]).reshape(-1)
-            if index < 0 or index >= references.size:
+            if index < 0 or index >= dataset.size:
                 raise IndexError(
                     f"index {index} is out of range for a reference dataset with "
-                    f"{references.size} element(s)."
+                    f"{dataset.size} element(s)."
                 )
-            return self[references[index]][:]
+            # Read only this reference, not the whole dataset: callers loop over every
+            # transmit or receive. unravel_index handles both (N, 1) and (1, N) layouts.
+            reference = dataset[np.unravel_index(int(index), dataset.shape)]
+            return self[reference][:]
         else:
             # A non-reference dataset is a single stored element.
             if index != 0:
@@ -472,7 +473,7 @@ class VerasonicsFile(h5py.File):
         """
         if _is_reference_dataset(dataset):
             # Not len(): cell arrays such as RcvData are stored as (1, N) row vectors.
-            return int(np.asarray(dataset[:]).size)
+            return int(dataset.size)
         else:
             return 1
 
