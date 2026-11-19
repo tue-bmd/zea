@@ -379,6 +379,9 @@ class VerasonicsFile(h5py.File):
     """
 
     def __init__(self, name, mode="r", **kwargs):
+        # Checked up front: h5py reports a missing file as the OSError caught below.
+        if mode == "r" and isinstance(name, (str, os.PathLike)) and not Path(name).is_file():
+            raise FileNotFoundError(f"Verasonics file '{name}' does not exist.")
         try:
             super().__init__(name, mode, **kwargs)
         except OSError as e:

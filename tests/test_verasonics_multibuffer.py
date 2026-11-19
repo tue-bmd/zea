@@ -343,6 +343,12 @@ def test_dereference_index_out_of_range(tmp_path):
             vf.dereference_index(vf["Plain"], 1)
 
 
+def test_missing_file_is_reported_as_missing(tmp_path):
+    """A path that does not exist is not reported as a non-HDF5 (-v7.3) file."""
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        VerasonicsFile(str(tmp_path / "typo.mat"), "r")
+
+
 def test_subset_indices_spreads_and_keeps_ends():
     """The constancy spot-check uses an evenly spread subset including both ends."""
     picks = VerasonicsFile._subset_indices(np.arange(100, 200), 5)
