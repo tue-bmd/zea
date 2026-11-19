@@ -31,6 +31,11 @@ from zea import log
 _BINARY_TEMPLATE = "RF_data_{k}.bin"
 
 
+def rf_buffer_name(buffer_index) -> str:
+    """Name a 0-based RF buffer together with its MATLAB cell, e.g. 'RF buffer 0 (RcvData{1})'."""
+    return f"RF buffer {buffer_index} (RcvData{{{buffer_index + 1}}})"
+
+
 def is_binary_workspace(file):
     """Whether an open ``VerasonicsFile`` stores its RF in external ``.bin`` files."""
     return "RcvData" not in file and "RF_frames" in file
@@ -69,7 +74,7 @@ def read_buffer(file, buffer_index):
     if not path.is_file():
         saved = available_buffers(file)
         raise FileNotFoundError(
-            f"RF buffer {buffer_index} (RcvData{{{buffer_index + 1}}}) was not saved: "
+            f"{rf_buffer_name(buffer_index)} was not saved: "
             f"{path.name} does not exist. Saved buffers (0-based): {saved}."
         )
 
@@ -97,7 +102,7 @@ def read_buffer(file, buffer_index):
     mask = mask.reshape(-1).astype(bool)
     if int(mask.sum()) != cols:
         raise ValueError(
-            f"NonzeroRFcolumns{{{buffer_index + 1}}} (RF buffer {buffer_index}) marks "
+            f"NonzeroRFcolumns{{{buffer_index + 1}}} ({rf_buffer_name(buffer_index)}) marks "
             f"{int(mask.sum())} channels, but RF_cols={cols}."
         )
     full = np.zeros((n_frames, mask.size, rows), dtype=np.int16)

@@ -71,6 +71,7 @@ from keras import ops
 
 from zea import log
 from zea.data.convert import _verasonics_bin
+from zea.data.convert._verasonics_bin import rf_buffer_name
 from zea.data.convert.utils import (
     require_output_dir_ownership,
     upload_dataset_to_hf,
@@ -333,11 +334,6 @@ def _validate_convert_config(data):
             ):
                 raise ValueError(f"'buffers' must be a list of non-negative ints, got {bu!r}")
     return data
-
-
-def _rf_buffer_name(buffer_index) -> str:
-    """Name a 0-based RF buffer together with its MATLAB cell, e.g. 'RF buffer 0 (RcvData{1})'."""
-    return f"RF buffer {buffer_index} (RcvData{{{buffer_index + 1}}})"
 
 
 def _is_all_frames(frames) -> bool:
@@ -1015,7 +1011,7 @@ class VerasonicsFile(h5py.File):
                 n_buffer_frames = None
             if n_buffer_frames != n_frames:
                 log.warning(
-                    f"RF_data_{buffer_index + 1}.bin ({_rf_buffer_name(buffer_index)}) "
+                    f"RF_data_{buffer_index + 1}.bin ({rf_buffer_name(buffer_index)}) "
                     f"holds {n_frames} frames, but Resource.RcvBuffer({buffer_index + 1})"
                     f".numFrames is {n_buffer_frames}. "
                     "Assuming the saved frames are already in order."
@@ -1053,7 +1049,7 @@ class VerasonicsFile(h5py.File):
         used = set(np.unique(self.read_receive_bufnums()).tolist())
         for k in stored:
             if k not in used:
-                log.warning(f"Skipping {_rf_buffer_name(k)}: no Receive entry stores data in it.")
+                log.warning(f"Skipping {rf_buffer_name(k)}: no Receive entry stores data in it.")
         return [k for k in stored if k in used]
 
     def _rcvdata(self):
@@ -1670,7 +1666,7 @@ class VerasonicsFile(h5py.File):
             raise ValueError(f"RF buffers {repeated} (0-based) are selected more than once.")
         missing = sorted(set(buffers) - set(available))
         if missing:
-            names = ", ".join(_rf_buffer_name(k) for k in available) or "none"
+            names = ", ".join(rf_buffer_name(k) for k in available) or "none"
             raise ValueError(
                 f"RF buffers {missing} (0-based) are not in this file or have no Receive "
                 f"entries. Available: {names}."
@@ -1688,7 +1684,7 @@ class VerasonicsFile(h5py.File):
 
         tracks = []
         for buffer_index in buffers:
-            log.info(f"Reading {_rf_buffer_name(buffer_index)}...")
+            log.info(f"Reading {rf_buffer_name(buffer_index)}...")
             try:
                 scan_dict = self.read_scan(
                     frames=frames,
@@ -1701,7 +1697,7 @@ class VerasonicsFile(h5py.File):
                     first_frame_idx=first_frame,
                 )
             except Exception as e:
-                e.add_note(f"While reading {_rf_buffer_name(buffer_index)} of {self.filename}.")
+                e.add_note(f"While reading {rf_buffer_name(buffer_index)} of {self.filename}.")
                 raise
             tracks.append(
                 {
