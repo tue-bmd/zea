@@ -341,6 +341,25 @@ def _validate_convert_config(data):
     return data
 
 
+def _time_to_next_acq_per_frame(values, n_events, n_tx, frame_indices):
+    # Reshape per-event timing to (n_frames, n_tx) and select frame_indices. Returns
+    # (timing, None), or (None, reason) when the values do not map one-to-one onto the
+    # transmits, so the timing is dropped rather than assigned to the wrong transmits.
+    if values.size != n_events:
+        return None, (
+            f"found {values.size} timeToNextAcq values for {n_events} events, "
+            "expected exactly one per event"
+        )
+    if n_tx == 0 or n_events % n_tx != 0:
+        return None, f"the {n_events} events do not split into frames of {n_tx} transmits"
+    values = np.reshape(values, (-1, n_tx))
+    if frame_indices.size and frame_indices.max() >= values.shape[0]:
+        return None, (
+            f"the events cover {values.shape[0]} frame(s), fewer than the requested frames"
+        )
+    return values[frame_indices], None
+
+
 def _is_all_frames(frames) -> bool:
     # True for "all", or a list/tuple of only "all" (the CLI passes frames as a list).
     if isinstance(frames, str):
@@ -678,21 +697,15 @@ class VerasonicsFile(h5py.File):
             )
             time_to_next_acq = None
 
-        # Reshape to (n_frames, n_tx); dropped if the transmit structure is not
-        # uniform across frames.
         if time_to_next_acq is not None:
-            n_tx = tx_order.size
-            if n_tx > 0 and time_to_next_acq.size % n_tx == 0:
-                time_to_next_acq = np.reshape(time_to_next_acq, (-1, n_tx))
-                time_to_next_acq = time_to_next_acq[frame_indices]
-            else:
+            time_to_next_acq, problem = _time_to_next_acq_per_frame(
+                time_to_next_acq, event_indices.size, tx_order.size, frame_indices
+            )
+            if problem is not None:
                 log.warning(
-                    "Could not reshape time_to_next_acq "
-                    f"({time_to_next_acq.size} values) into frames of {n_tx} "
-                    "transmits; the transmit structure is not uniform across "
-                    "frames for this buffer. Dropping time-to-next-acquisition."
+                    f"Dropping time-to-next-acquisition for {rf_buffer_name(buffer_index)}: "
+                    f"{problem}."
                 )
-                time_to_next_acq = None
 
         return tx_order, rcv_order, time_to_next_acq
 

@@ -19,7 +19,11 @@ import h5py
 import numpy as np
 import pytest
 
-from zea.data.convert.verasonics import VerasonicsFile, _validate_convert_config
+from zea.data.convert.verasonics import (
+    VerasonicsFile,
+    _time_to_next_acq_per_frame,
+    _validate_convert_config,
+)
 
 _REF_DTYPE = h5py.special_dtype(ref=h5py.Reference)
 
@@ -475,11 +479,11 @@ def test_tgc_index_out_of_range_uses_first_waveform(tmp_path):
         np.testing.assert_array_equal(vf._read_tgc_waveform(0), [7.0] * 4)
 
 
-def _write_event_workspace(path, modes, framenums, seq_control_refs=True):
+def _write_event_workspace(path, modes, framenums, seq_control_refs=True, ttna_events=None):
     """Events ``i`` transmit ``TX(i)`` and receive into ``Receive(i)`` (buffer 1).
 
-    A trailing event transmits without a receive. Every event's SeqControl points
-    to a ``timeToNextAcq`` of 10 us.
+    A trailing event transmits without a receive. The events in ``ttna_events``
+    (default: all) have a SeqControl ``timeToNextAcq`` of 10 us, the others none.
     """
     n = len(modes)
     with h5py.File(path, "w") as f:
@@ -490,7 +494,10 @@ def _write_event_workspace(path, modes, framenums, seq_control_refs=True):
         )
         _write_struct(f, "Event", {"tx": list(range(1, n + 1)) + [1], "rcv": [*range(1, n + 1), 0]})
         if seq_control_refs:
-            _write_struct_field(f, "Event", "seqControl", [[0, 1]] * (n + 1))
+            seq_controls = [
+                [0, 1] if ttna_events is None or i in ttna_events else [0, 0] for i in range(n + 1)
+            ]
+            _write_struct_field(f, "Event", "seqControl", seq_controls)
         else:
             # A single event's seqControl stored as a plain index vector.
             f["Event"].create_dataset("seqControl", data=np.array([[0.0], [1.0]]))
@@ -521,6 +528,44 @@ def test_transmit_events_non_uniform_frames_drop_timing(tmp_path):
         tx_order, _, time_to_next_acq = vf.read_transmit_events()
     np.testing.assert_array_equal(tx_order, [0, 1])
     assert time_to_next_acq is None
+
+
+def test_transmit_events_timing_per_frame_dropped(tmp_path):
+    """Timing only on the last event of each frame cannot be mapped and is dropped."""
+    mat = tmp_path / "raw_data.mat"
+    _write_event_workspace(mat, modes=[0, 0, 0, 0], framenums=[1, 1, 2, 2], ttna_events=[1, 3])
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        tx_order, _, time_to_next_acq = vf.read_transmit_events()
+    np.testing.assert_array_equal(tx_order, [0, 1])
+    assert time_to_next_acq is None
+
+
+def test_time_to_next_acq_per_frame():
+    """Per-event timing is reshaped to (n_frames, n_tx) and the frames are selected."""
+    values = np.arange(6.0)
+    timing, problem = _time_to_next_acq_per_frame(values, 6, 2, np.array([0, 2]))
+    assert problem is None
+    np.testing.assert_array_equal(timing, [[0, 1], [4, 5]])
+
+
+@pytest.mark.parametrize(
+    "n_values, n_events, n_tx, frame_indices, reason",
+    [
+        (0, 4, 2, [0, 1], "found 0 timeToNextAcq values"),  # no timeToNextAcq at all
+        (2, 4, 2, [0, 1], "expected exactly one per event"),  # one per frame
+        (3, 3, 2, [0], "do not split into frames"),
+        (0, 0, 0, [0], "do not split into frames"),  # no events in the buffer
+        (4, 4, 2, [0, 2], "fewer than the requested frames"),
+    ],
+)
+def test_time_to_next_acq_per_frame_dropped(n_values, n_events, n_tx, frame_indices, reason):
+    """Timing that does not map one-to-one onto the requested transmits is dropped."""
+    timing, problem = _time_to_next_acq_per_frame(
+        np.zeros(n_values), n_events, n_tx, np.array(frame_indices)
+    )
+    assert timing is None
+    assert reason in problem
 
 
 def test_transmit_events_accumulate_drop_timing(tmp_path):
