@@ -163,10 +163,11 @@ class _ShardSelector:
     # trylast: after `-m`/`-k` deselection.
     @pytest.hookimpl(trylast=True)
     def pytest_collection_modifyitems(self, config, items):
-        keep = items[self.index - 1 :: self.count]
-        kept = set(map(id, keep))
-        config.hook.pytest_deselected(items=[item for item in items if id(item) not in kept])
-        items[:] = keep
+        # Assign by sorted nodeid so shards don't depend on collection order.
+        ordered = sorted(item.nodeid for item in items)
+        kept = set(ordered[self.index - 1 :: self.count])
+        config.hook.pytest_deselected(items=[item for item in items if item.nodeid not in kept])
+        items[:] = [item for item in items if item.nodeid in kept]
 
 
 def _register_shard_selector(config):
