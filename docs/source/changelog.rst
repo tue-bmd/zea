@@ -29,6 +29,7 @@ Changed
 
 Fixed
 ^^^^^
+- :func:`zea.func.ultrasound.upmix` and :class:`zea.ops.UpMix` now upsample with FFT by default, which removes the spectral copies that linear interpolation left next to the RF signal. Pass ``method="linear"`` for the cheaper interpolation, which now uses the corrected time grid as well (:gh:`718` by :user:`tristan-deep`)
 - :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
 
 

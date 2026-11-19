@@ -32,7 +32,7 @@ from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
 from zea.simulator import simulate_rf
 
-from . import DEFAULT_TEST_SEED, backend_equality_check
+from . import DEFAULT_TEST_SEED, backend_equality_check, run_in_backend
 from .helpers import is_on_gpu
 
 
@@ -438,7 +438,7 @@ def test_up_and_down_conversion(factor, batch_size):
     Tolerance dependent on downsampling factor (no anti-alias filter in downsample, so quite lossy
     at high factors). Tolerance is defined relative to the RF peak.
     """
-    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+    tolerance = {1: 1e-3, 2: 0.01, 4: 0.05}[factor]
 
     n_el = 128
     n_scat = 3
@@ -551,7 +551,7 @@ def test_demodulate_upmix_roundtrip(factor):
 
     from zea import ops
 
-    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+    tolerance = 1e-3
 
     n_ax, n_el = 256, 8
     sampling_frequency, center_frequency = 12.5e6, 3.125e6
@@ -584,6 +584,70 @@ def test_demodulate_upmix_roundtrip(factor):
     )
 
     return output
+
+
+@pytest.mark.parametrize("method", ["fft", "linear"])
+def test_upmix_tone(method):
+    """Upmixing an IQ tone gives the RF tone, on the same time grid as the carrier.
+
+    FFT upsampling is exact for a tone with a whole number of cycles. Linear interpolation is
+    not, but it passes through the input samples, so every ``factor``-th RF sample is exact.
+    """
+    from zea.func.ultrasound import upmix
+
+    n_ax, factor = 128, 3
+    sampling_frequency, demodulation_frequency = 5e6, 3.4e6
+    tone_frequency = 10 * sampling_frequency / n_ax  # whole number of cycles
+
+    iq = np.exp(2j * np.pi * tone_frequency * np.arange(n_ax) / sampling_frequency)
+    iq = iq[:, None].astype("complex64")
+    rf = upmix(iq, sampling_frequency, demodulation_frequency, factor, method=method)
+    rf = np.asarray(rf)[:, 0]
+
+    t = np.arange(n_ax * factor) / (sampling_frequency * factor)
+    expected = np.cos(2 * np.pi * (demodulation_frequency + tone_frequency) * t)
+    if method == "linear":
+        rf, expected = rf[::factor], expected[::factor]
+    np.testing.assert_allclose(rf, expected, atol=1e-3)
+
+
+def test_upmix_linear_midpoints():
+    """Linear upsampling interpolates between samples and holds the last one."""
+    from zea.func.ultrasound import upmix
+
+    iq = np.array([[0], [2], [-2]], dtype="complex64")
+    rf = upmix(iq, 1.0, 0.0, 2, method="linear")  # zero carrier: RF is the real part
+    np.testing.assert_allclose(np.asarray(rf)[:, 0], [0, 1, 2, 0, -2, -2], atol=1e-6)
+
+
+@run_in_backend("tensorflow")
+@pytest.mark.parametrize("method", ["fft", "linear"])
+def test_upmix_symbolic_batch(method):
+    """upmix traces with an unknown batch size and runs for different batch sizes."""
+    import tensorflow as tf
+
+    from zea.func.ultrasound import upmix
+
+    n_ax, n_el, factor = 16, 2, 2
+
+    @tf.function(input_signature=[tf.TensorSpec(shape=(None, n_ax, n_el), dtype=tf.complex64)])
+    def run(iq):
+        return upmix(iq, 5e6, 3e6, factor, method=method)
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    for batch in (1, 3):
+        iq = (rng.standard_normal((batch, n_ax, n_el)) + 1j).astype("complex64")
+        rf = run(tf.constant(iq))
+        np.testing.assert_allclose(rf, upmix(iq, 5e6, 3e6, factor, method=method), atol=1e-5)
+
+
+def test_upmix_invalid_method():
+    """An unknown upsampling method raises."""
+    from zea.func.ultrasound import upmix
+
+    iq = np.ones((8, 1), dtype="complex64")
+    with pytest.raises(ValueError, match="method"):
+        upmix(iq, 5e6, 3e6, 2, method="cubic")
 
 
 @pytest.mark.parametrize(
