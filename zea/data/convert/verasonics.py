@@ -1743,12 +1743,9 @@ class VerasonicsFile(h5py.File):
         if n_image_buffers == 0:
             log.info("No ImgDataP image buffer found in file; skipping.")
         for image_buffer_index in range(n_image_buffers):
-            name = "verasonics_image_buffer"
-            if n_image_buffers > 1:
-                name += f"_{image_buffer_index + 1}"
             custom_elements.append(
                 CustomElement(
-                    name=name,
+                    name=f"verasonics_image_buffer_{image_buffer_index + 1}",
                     data=self.read_image_data_p(
                         frames=frames, image_buffer_index=image_buffer_index
                     ),

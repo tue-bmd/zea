@@ -1912,9 +1912,9 @@ def test_verasonics_read_with_one_image_buffer(tmp_path):
         _, _, custom_elements = verasonics_file.read_verasonics_file()
 
     element_names = [element.name for element in custom_elements]
-    assert "verasonics_image_buffer" in element_names
+    assert "verasonics_image_buffer_1" in element_names
 
-    image_buffer = custom_elements[element_names.index("verasonics_image_buffer")]
+    image_buffer = custom_elements[element_names.index("verasonics_image_buffer_1")]
     assert image_buffer.data.shape == image_data.shape
 
 
