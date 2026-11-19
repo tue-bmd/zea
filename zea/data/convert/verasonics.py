@@ -470,9 +470,41 @@ class VerasonicsFile(h5py.File):
         cache[key] = values
         return values
 
-    def _clear_scalar_field_cache(self):
-        """Clear the memoized scalar-field arrays (e.g. after reopening)."""
-        self.__dict__.pop("_scalar_field_cache", None)
+    def _read_constant_receive_field(self, field_name, buffer_index, decode, description):
+        """Read a ``Receive`` field that is constant within a buffer (e.g. ``sampleMode``).
+
+        Only a subset of the entries is read and checked to be equal (see
+        :attr:`CONSTANT_FIELD_CHECK_SAMPLES`). The result is cached per field and buffer.
+
+        Args:
+            field_name (str): The ``Receive`` field to read.
+            buffer_index (int or None): The 0-based RF buffer, or None for all receives.
+            decode (callable): Turns one dereferenced entry into a hashable value.
+            description (str): Plural name of the values, for the error message.
+        """
+        cache = self.__dict__.setdefault("_constant_field_cache", {})
+        key = (field_name, buffer_index)
+        if key in cache:
+            return cache[key]
+
+        dataset = self["Receive"][field_name]
+        if buffer_index is not None:
+            indices = self.receive_indices_for_buffer(buffer_index)
+        else:
+            indices = np.arange(self.get_reference_size(dataset))
+
+        subset = self._subset_indices(indices, self.CONSTANT_FIELD_CHECK_SAMPLES)
+        values = {decode(self.dereference_index(dataset, int(i))) for i in subset}
+        assert len(values) == 1, (
+            f"Multiple {description} found in file: {values}. We do not support this case."
+        )
+        cache[key] = values.pop()
+        return cache[key]
+
+    def _clear_caches(self):
+        """Clear every memoized value (e.g. after reopening)."""
+        for name in ("_scalar_field_cache", "_constant_field_cache", "_probe"):
+            self.__dict__.pop(name, None)
 
     @staticmethod
     def get_reference_size(dataset):
@@ -1158,40 +1190,13 @@ class VerasonicsFile(h5py.File):
                 belonging to this (0-based) RF buffer. If ``None`` (default), all
                 receive events are considered.
         """
-        result_cache = self.__dict__.setdefault("_demod_freq_result_cache", {})
-        if buffer_index in result_cache:
-            return result_cache[buffer_index]
-
-        dataset = self["Receive"]["demodFrequency"]
-        if buffer_index is not None:
-            indices = np.asarray(self.receive_indices_for_buffer(buffer_index))
-        else:
-            indices = np.arange(self.get_reference_size(dataset))
-
-        if indices.size == 0:
-            raise ValueError(
-                f"No Receive entries found for buffer_index={buffer_index}; cannot "
-                "determine the demodulation frequency."
-            )
-
-        # demodFrequency is constant within a buffer, so only check a subset.
-        probe = self._subset_indices(indices, self.CONSTANT_FIELD_CHECK_SAMPLES)
-        values = np.array(
-            [
-                float(np.asarray(self.dereference_index(dataset, int(i))).reshape(-1)[0])
-                for i in probe
-            ]
+        demod_freq = self._read_constant_receive_field(
+            "demodFrequency",
+            buffer_index,
+            lambda value: float(np.asarray(value).reshape(-1)[0]),
+            "demodulation frequencies",
         )
-
-        demod_freq = np.unique(values)
-        assert demod_freq.size == 1, (
-            f"Multiple demodulation frequencies found in file: {demod_freq}. "
-            "We do not support this case."
-        )
-
-        result = demod_freq.item() * 1e6
-        result_cache[buffer_index] = result
-        return result
+        return demod_freq * 1e6
 
     @property
     def demodulation_frequency(self):
@@ -1338,44 +1343,16 @@ class VerasonicsFile(h5py.File):
         """
         SUPPORTED_SAMPLE_MODES = ["NS200BW", "BS100BW", "BS67BW", "BS50BW"]
 
-        # Decoding sampleMode is slow, so memoize per buffer.
-        result_cache = self.__dict__.setdefault("_sample_mode_result_cache", {})
-        if buffer_index in result_cache:
-            return result_cache[buffer_index]
-
-        sample_mode_dataset = self["Receive"]["sampleMode"]
-        if buffer_index is not None:
-            indices = np.asarray(self.receive_indices_for_buffer(buffer_index))
-        else:
-            indices = np.arange(self.get_reference_size(sample_mode_dataset))
-
-        if indices.size == 0:
-            raise ValueError(
-                f"No Receive entries found for buffer_index={buffer_index}; cannot "
-                "determine the sample mode."
-            )
-
-        # sampleMode is constant within a buffer, so only check a subset.
-        probe = self._subset_indices(indices, self.CONSTANT_FIELD_CHECK_SAMPLES)
-
-        sample_mode = set()
-        for i in probe:
-            sample_mode.add(self.decode_string(self.dereference_index(sample_mode_dataset, int(i))))
-
-        # Ensure only a single sample mode is used
-        assert len(sample_mode) == 1, (
-            f"Multiple sample modes found in file: {sample_mode}. We do not support this case."
+        sample_mode = self._read_constant_receive_field(
+            "sampleMode", buffer_index, self.decode_string, "sample modes"
         )
-        sample_mode = sample_mode.pop()
 
         # Check if the sample mode is supported, and extract the percentage
         assert sample_mode in SUPPORTED_SAMPLE_MODES, (
             f"Unexpected sample mode '{sample_mode}' in file."
             f"Expected one of {SUPPORTED_SAMPLE_MODES}"
         )
-        result = int(sample_mode[2:-2])
-        result_cache[buffer_index] = result
-        return result
+        return int(sample_mode[2:-2])
 
     @property
     def sample_mode(self):

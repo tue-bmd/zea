@@ -367,8 +367,9 @@ def test_receive_metadata_per_buffer(tmp_path):
         # Over all buffers the receives disagree; the first referenced TGC is used.
         np.testing.assert_allclose(vf.tgc_gain_curve, 1.0)
 
-        vf._clear_scalar_field_cache()
+        vf._clear_caches()
         assert "_scalar_field_cache" not in vf.__dict__
+        assert "_constant_field_cache" not in vf.__dict__
 
 
 def test_tgc_index_out_of_range_uses_first_waveform(tmp_path):
