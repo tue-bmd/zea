@@ -606,21 +606,16 @@ See :mod:`zea.data.convert.verasonics` for details.
 
 *Multiple RF buffers.*  A Verasonics acquisition may fill several RF buffers
 (``RcvData{1}``, ``RcvData{2}``, …) — for example a wide-beam B-mode buffer and
-a Doppler / shear-wave buffer, or subsequent measurements (imaging, then
-Doppler). Each buffer is converted to its own zea file: the CLI above writes
-``<name>_buffer{k}.hdf5`` per buffer. From Python:
+a Doppler / shear-wave buffer. Each buffer becomes a track, labelled
+``rf_buffer_{k}``, in the same zea file:
 
 .. code-block:: python
 
-    from zea.data.convert.verasonics import VerasonicsFile
+    from zea import File
 
-    with VerasonicsFile("raw_data.mat") as vf:
-        vf.to_zea("buffer1.hdf5", buffer_index=0)   # one specific RF buffer
-        vf.to_zea_all("out_dir")                     # every buffer -> out_dir/*_buffer{k}.hdf5
-
-The RF buffer and the image buffer (``ImgDataP`` / ``Resource.ImageBuffer``) are
-indexed independently, so ``to_zea(buffer_index=1, image_buffer_index=3)`` pairs
-RF buffer 2 with image buffer 4.
+    with File("raw_data.hdf5") as f:
+        print(f.track_labels)                     # ['rf_buffer_1', 'rf_buffer_2']
+        raw = f.get_track("rf_buffer_2").data.raw_data[:]
 
 **us4us**
 

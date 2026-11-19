@@ -180,26 +180,28 @@ def test_binary_dimension_mismatch_raises(tmp_path):
             vf.read_raw_buffer_array(0)
 
 
-@pytest.mark.parametrize("n_buffers", [1, 2])
-def test_cli_helper_writes_one_file_per_buffer(tmp_path, monkeypatch, n_buffers):
-    """The CLI keeps one output for a single buffer and writes ``_buffer{k}`` otherwise."""
-    from zea.data.convert import verasonics
-
-    buffers = [np.zeros((1, 2, 4), np.int16) for _ in range(n_buffers)]
+@pytest.mark.parametrize("frames", ["0-1", [0]])
+def test_frame_selection_with_several_buffers_is_not_implemented(tmp_path, frames):
+    """Frame selection is ambiguous when buffers hold different numbers of frames."""
+    buffers = [np.zeros((2, 2, 4), np.int16), np.zeros((3, 2, 4), np.int16)]
     mat = tmp_path / "raw_data.mat"
-    _write_rcvdata_workspace(mat, buffers, bufnums=list(range(1, n_buffers + 1)))
+    _write_rcvdata_workspace(mat, buffers, bufnums=[1, 2])
 
-    def fake_to_zea(self, output_path, buffer_index=0, **kwargs):
-        Path(output_path).write_text(str(buffer_index))
+    with VerasonicsFile(str(mat), "r") as vf:
+        with pytest.raises(NotImplementedError):
+            vf.read_verasonics_file(frames=frames)
+        # Selecting a single buffer lifts the restriction (it then fails later on the
+        # missing metadata of this synthetic file, not on the frame selection).
+        with pytest.raises(Exception) as excinfo:
+            vf.read_verasonics_file(frames=frames, buffers=[0])
+        assert not isinstance(excinfo.value, NotImplementedError)
 
-    monkeypatch.setattr(VerasonicsFile, "to_zea", fake_to_zea)
 
-    out = tmp_path / "out" / "raw_data.hdf5"
-    written = verasonics._zea_from_verasonics_workspace(mat, out)
+def test_unknown_buffer_is_rejected(tmp_path):
+    """Requesting an RF buffer that is not in the file raises."""
+    mat = tmp_path / "raw_data.mat"
+    _write_rcvdata_workspace(mat, [np.zeros((1, 2, 4), np.int16)], bufnums=[1])
 
-    if n_buffers == 1:
-        assert written == [out]
-    else:
-        assert [p.name for p in written] == ["raw_data_buffer1.hdf5", "raw_data_buffer2.hdf5"]
-        assert [p.read_text() for p in written] == ["0", "1"]
-    assert verasonics._buffer_output_paths(out) == written
+    with VerasonicsFile(str(mat), "r") as vf:
+        with pytest.raises(ValueError, match="not in this file"):
+            vf.read_verasonics_file(buffers=[1])

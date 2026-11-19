@@ -25,12 +25,7 @@ Then convert the saved `raw_data.mat` file to zea format using the following cod
 
         from zea.data.convert.verasonics import VerasonicsFile
 
-        # A single-buffer file -> one zea .hdf5:
         VerasonicsFile("C:/path/to/raw_data.mat").to_zea("C:/path/to/output.hdf5")
-
-        # A multi-buffer file -> one zea .hdf5 per RF buffer:
-        with VerasonicsFile("C:/path/to/raw_data.mat") as vf:
-            vf.to_zea_all("C:/path/to/output_dir")
 
 Or alternatively, use the CLI to convert all .mat files in a directory:
 
@@ -39,8 +34,8 @@ Or alternatively, use the CLI to convert all .mat files in a directory:
         zea convert verasonics "C:/path/to/source" "C:/path/to/output"
 
 A ``.mat`` with several RF buffers (``RcvData{1}``, ``RcvData{2}``, ...) is written
-to one file per buffer, named ``<name>_buffer{k}.hdf5`` with ``k`` the MATLAB
-buffer number.
+to one zea file with one track per buffer, labelled ``rf_buffer_{k}``. Read them with
+``File(path).tracks`` or ``File(path).get_track("rf_buffer_2")``.
 
 ---------------
 
@@ -56,7 +51,6 @@ By default the zea dataformat saves all the data to an hdf5 file with the follow
 The data is stored in the ``data`` group and the scan parameters are stored in the ``scan``.
 """  # noqa: E501
 
-import glob
 import os
 import re
 import sys
@@ -1731,10 +1725,9 @@ class VerasonicsFile(h5py.File):
         self,
         frames=None,
         allow_accumulate=False,
-        buffer_index=0,
+        buffers=None,
         additional_functions=None,
         lens_sound_speed: float = 1000.0,
-        image_buffer_index: int = 0,
     ):
         """Reads data from a .mat Verasonics output file.
 
@@ -1742,13 +1735,14 @@ class VerasonicsFile(h5py.File):
             frames (str or list of int, optional): The frames to add to the file. This can be
                 a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
                 None, which means all frames, unless specified in a `convert.yaml` file.
+                Selecting frames is only supported for a single RF buffer.
             allow_accumulate (bool, optional): Sometimes, some transmits are already accumulated
                 on the Verasonics system (e.g. harmonic imaging through pulse inversion).
                 In this case, the mode in the Receive structure is set to 1 (accumulate).
                 If this flag is set to False, an error is raised when such a mode is detected.
-            buffer_index (int, optional): The 0-based RF buffer (``RcvData`` /
-                ``Resource.RcvBuffer``) to read the raw data and scan parameters
-                from. Defaults to 0.
+            buffers (list[int], optional): 0-based RF buffers (``RcvData{k + 1}``) to read,
+                one track each. Defaults to every buffer in the file
+                (see :meth:`available_buffers`).
             additional_functions (list, optional): A list of functions that read additional
                 data from the file. Each function should take the `VerasonicsFile` as input
                 and return a `CustomElement`. Defaults to None.
@@ -1757,31 +1751,58 @@ class VerasonicsFile(h5py.File):
                 wavelengths) into ``lens_thickness`` and ``lens_sound_speed`` fields on the
                 probe dict.  Only applied when the file contains a ``lensCorrection`` field.
                 Defaults to 1000.0.
-            image_buffer_index (int, optional): The 0-based image buffer
-                (``ImgDataP`` / ``Resource.ImageBuffer``) to store as the
-                ``verasonics_image_buffer`` reference element. This is indexed
-                independently from ``buffer_index``. Defaults to 0.
+
+        Returns:
+            tuple: ``(tracks, probe_dict, custom_elements)`` with one track dict
+            (``data``, ``scan``, ``label``) per RF buffer.
         """
 
         if additional_functions is None:
             additional_functions = []
 
-        convert_config = self.load_convert_config()
+        available = self.available_buffers()
+        buffers = available if buffers is None else list(buffers)
+        missing = sorted(set(buffers) - set(available))
+        if missing:
+            raise ValueError(
+                f"RF buffers (0-based) {missing} are not in this file. Available: {available}."
+            )
+        if not buffers:
+            raise ValueError("No RF buffers to convert.")
 
+        convert_config = self.load_convert_config()
+        first_frame = convert_config.get("first_frame", None)
         if frames is None:
             frames = convert_config.get("frames", "all")
 
-        scan_dict = self.read_scan(
-            frames=frames,
-            allow_accumulate=allow_accumulate,
-            buffer_index=buffer_index,
-        )
+        if len(buffers) > 1 and (frames not in ("all", ["all"]) or first_frame is not None):
+            raise NotImplementedError(
+                "Selecting frames ('frames' / 'first_frame') is not supported for files "
+                f"with several RF buffers ({len(buffers)} buffers): the buffers generally "
+                "hold different numbers of frames."
+            )
 
-        raw_data = self.read_raw_data(
-            frames=frames,
-            buffer_index=buffer_index,
-            first_frame_idx=convert_config.get("first_frame", None),
-        )
+        tracks = []
+        for buffer_index in buffers:
+            k = buffer_index + 1
+            log.info(f"Reading RF buffer {k} (RcvData{{{k}}})...")
+            try:
+                scan_dict = self.read_scan(
+                    frames=frames,
+                    allow_accumulate=allow_accumulate,
+                    buffer_index=buffer_index,
+                )
+                raw_data = self.read_raw_data(
+                    frames=frames,
+                    buffer_index=buffer_index,
+                    first_frame_idx=first_frame,
+                )
+            except Exception as e:
+                e.add_note(f"While reading RF buffer {k} (RcvData{{{k}}}) of {self.filename}.")
+                raise
+            tracks.append(
+                {"data": {"raw_data": raw_data}, "scan": scan_dict, "label": f"rf_buffer_{k}"}
+            )
 
         custom_elements = []
 
@@ -1805,23 +1826,23 @@ class VerasonicsFile(h5py.File):
         for additional_function in additional_functions:
             custom_elements.append(additional_function(self))
 
-        # Add Verasonics ImgDataP buffer to additional elements. This buffer is
-        # optional: files that were not reconstructed on the Verasonics system
-        # (or reduced/exported workspaces) may not contain ImgDataP at all, in
-        # which case read_image_data_p returns None and we simply skip it rather
-        # than store an empty (None) custom element.
-        verasonics_image_buffer = self.read_image_data_p(
-            frames=frames, image_buffer_index=image_buffer_index
-        )
-        if verasonics_image_buffer is None:
+        # ImgDataP holds the images reconstructed on the Verasonics system. It is optional
+        # and its buffers are independent of the RF buffers, so all of them are stored.
+        n_image_buffers = self.get_reference_size(self["ImgDataP"]) if "ImgDataP" in self else 0
+        if n_image_buffers == 0:
             log.info("No ImgDataP image buffer found in file; skipping.")
-        else:
+        for image_buffer_index in range(n_image_buffers):
+            name = "verasonics_image_buffer"
+            if n_image_buffers > 1:
+                name += f"_{image_buffer_index + 1}"
             custom_elements.append(
                 CustomElement(
-                    name="verasonics_image_buffer",
-                    data=verasonics_image_buffer,
+                    name=name,
+                    data=self.read_image_data_p(
+                        frames=frames, image_buffer_index=image_buffer_index
+                    ),
                     description=(
-                        "The Verasonics ImgDataP buffer. "
+                        f"The Verasonics ImgDataP{{{image_buffer_index + 1}}} buffer. "
                         "WARNING: This buffer may skip frames compared to the raw data! "
                         "Use only for reference."
                     ),
@@ -1835,7 +1856,7 @@ class VerasonicsFile(h5py.File):
             estimate_lens_probe_params(self.probe.lens_correction, f_c, lens_sound_speed)
         )
 
-        return {"raw_data": raw_data}, scan_dict, probe_dict, custom_elements
+        return tracks, probe_dict, custom_elements
 
     def _parse_frames_argument(self, frames, n_frames):
         value_error = ValueError(
@@ -1912,17 +1933,19 @@ class VerasonicsFile(h5py.File):
         allow_accumulate=False,
         additional_functions=None,
         lens_sound_speed: float = 1000.0,
-        buffer_index: int = 0,
-        image_buffer_index: int = 0,
+        buffers=None,
     ):
         """Converts the Verasonics file to the zea format.
+
+        Every RF buffer (``RcvData{k}``) becomes one track, labelled ``rf_buffer_{k}``,
+        in a single zea file. A file with one RF buffer gives a single-track file.
 
         Args:
             output_path (str): The path to the output file (.hdf5 file).
             frames (str or list of int, optional): The frames to add to the file. This can be
                 a list of integers, a range of integers (e.g. 4-8), or 'all'. Defaults to
                 None, which means all frames are used, unless specified otherwise in a
-                `convert.yaml` file.
+                `convert.yaml` file. Only supported for a single RF buffer.
             allow_accumulate (bool, optional): Sometimes, some transmits are already accumulated
                 on the Verasonics system (e.g. harmonic imaging through pulse inversion).
                 In this case, the mode in the Receive structure is set to 1 (accumulate).
@@ -1935,21 +1958,9 @@ class VerasonicsFile(h5py.File):
                 Used to convert ``Trans.lensCorrection`` (wavelengths) into
                 ``lens_thickness`` and ``lens_sound_speed`` fields on the probe. Defaults
                 to 1000.0.
-            buffer_index (int, optional): The 0-based RF buffer to convert. Files that
-                define multiple RF buffers (e.g. ``RcvData{1}`` and ``RcvData{2}``) store
-                one buffer per index; only the transmit, receive, and seq_control entries
-                belonging to this buffer are used. Defaults to 0 (the first buffer).
-            image_buffer_index (int, optional): The 0-based Verasonics image buffer
-                (``ImgDataP`` / ``Resource.ImageBuffer``) to store as the
-                ``verasonics_image_buffer`` reference element. The image buffer is
-                indexed independently from the RF ``buffer_index``, so e.g. RF
-                buffer 2 can be paired with image buffer 4. Defaults to 0.
+            buffers (list[int], optional): 0-based RF buffers to convert. Defaults to every
+                buffer in the file (see :meth:`available_buffers`).
         """
-        # Here we call all the functions to read the data from the file
-        log.info(
-            f"Reading Verasonics file (RF buffer index {buffer_index}, "
-            f"image buffer index {image_buffer_index})..."
-        )
         log.warning(
             "ASSUMPTION: all receives within an RF buffer are assumed to share the "
             "same acquisition settings - sample mode, demodulation frequency, "
@@ -1962,103 +1973,22 @@ class VerasonicsFile(h5py.File):
             "receives per buffer; set VerasonicsFile.CONSTANT_FIELD_CHECK_SAMPLES = 0 "
             "to check every receive exhaustively.)"
         )
-        data_dict, scan_dict, probe_dict, custom_elements = self.read_verasonics_file(
+        tracks, probe_dict, custom_elements = self.read_verasonics_file(
             frames=frames,
             allow_accumulate=allow_accumulate,
-            buffer_index=buffer_index,
+            buffers=buffers,
             additional_functions=additional_functions,
             lens_sound_speed=lens_sound_speed,
-            image_buffer_index=image_buffer_index,
         )
 
-        # Generate the zea dataset
         log.info("Generating zea dataset...")
         File.create(
             path=output_path,
-            data=data_dict,
-            scan=scan_dict,
+            tracks=tracks,
             probe=probe_dict,
             description="Verasonics data",
             custom=custom_elements,
         )
-
-    def to_zea_all(
-        self,
-        output_dir,
-        buffers=None,
-        stem=None,
-        overwrite=False,
-        on_error="warn",
-        **to_zea_kwargs,
-    ):
-        """Convert several RF buffers of this file, one zea HDF5 per buffer.
-
-        Prefer this over calling :meth:`to_zea` in a loop over freshly-opened
-        files. The bulk of a conversion's cost is reading the shared
-        ``Receive``/``Event`` structures, which can hold tens of thousands of
-        entries; those reads are memoised on the instance. Converting every
-        buffer from a single open file therefore pays that cost once, whereas
-        re-opening the file per buffer repeats it every time.
-
-        Args:
-            output_dir (str | Path): Directory to write the HDF5 files into.
-            buffers (list[int], optional): 0-based buffer indices to convert.
-                Defaults to every buffer present (see :meth:`available_buffers`).
-            stem (str, optional): Base name for the outputs. Defaults to the
-                ``.mat`` file's stem. Files are named ``{stem}_buffer{k}.hdf5``
-                with ``k`` the 1-based MATLAB buffer number, so they line up with
-                ``RcvData{k}``.
-            overwrite (bool): Re-convert buffers whose output already exists.
-            on_error ({"warn", "raise"}): Whether a failure on one buffer should
-                abort the whole run or be logged and skipped. Defaults to
-                ``"warn"``, so that one bad buffer does not lose the others.
-            **to_zea_kwargs: Passed through to :meth:`to_zea` (e.g.
-                ``allow_accumulate``, ``image_buffer_index``).
-
-        Returns:
-            dict[int, Path | None]: Output path per 0-based buffer index;
-            ``None`` for buffers that failed.
-        """
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        stem = stem or Path(self.filename).stem
-
-        present = self.available_buffers()
-        wanted = present if buffers is None else list(buffers)
-
-        log.info(
-            f"Converting buffers (MATLAB) {[b + 1 for b in wanted]} of "
-            f"{[b + 1 for b in present]} present in {Path(self.filename).name}"
-        )
-
-        results = {}
-        for buffer_index in wanted:
-            k = buffer_index + 1
-            out = output_dir / f"{stem}_buffer{k}.hdf5"
-
-            if buffer_index not in present:
-                log.warning(f"  buffer {k}: not present / not saved - skipping")
-                results[buffer_index] = None
-                continue
-
-            if out.is_file() and not overwrite:
-                log.info(f"  buffer {k}: already converted -> {out.name}")
-                results[buffer_index] = out
-                continue
-
-            if out.is_file():
-                out.unlink()
-
-            try:
-                self.to_zea(str(out), buffer_index=buffer_index, **to_zea_kwargs)
-                results[buffer_index] = out
-            except Exception as exc:
-                if on_error == "raise":
-                    raise
-                log.error(f"  buffer {k}: FAILED - {type(exc).__name__}: {exc}")
-                results[buffer_index] = None
-
-        return results
 
 
 class VerasonicsProbe:
@@ -2241,40 +2171,16 @@ class VerasonicsProbe:
         }
 
 
-def _buffer_output_paths(output_path):
-    """Existing outputs of one ``.mat``: ``output_path`` and its per-buffer siblings."""
-    output_path = Path(output_path)
-    pattern = re.compile(rf"{re.escape(output_path.stem)}_buffer\d+\.hdf5")
-    siblings = output_path.parent.glob(f"{glob.escape(output_path.stem)}_buffer*.hdf5")
-    siblings = sorted(p for p in siblings if pattern.fullmatch(p.name))
-    return [p for p in [output_path, *siblings] if p.is_file()]
-
-
 def _zea_from_verasonics_workspace(input_path, output_path, **kwargs):
-    """Convert one ``.mat`` and return the written paths.
-
-    A file with only the first RF buffer is written to ``output_path``. A file with
-    several RF buffers is written to ``{output_path.stem}_buffer{k}.hdf5`` (``k`` is
-    the 1-based MATLAB buffer number) next to ``output_path``.
-    """
+    """Helper function around ``VerasonicsFile.to_zea``"""
     input_path = Path(input_path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with VerasonicsFile(input_path, "r") as file:
-        buffers = file.available_buffers()
-        if buffers == [0]:
-            file.to_zea(output_path, **kwargs)
-            written = [output_path]
-        else:
-            results = file.to_zea_all(output_path.parent, stem=output_path.stem, **kwargs)
-            written = [out for out in results.values() if out is not None]
-            if not written:
-                raise RuntimeError(f"None of the RF buffers in {input_path.name} converted.")
+        file.to_zea(output_path, **kwargs)
 
-    for out in written:
-        log.success(f"Converted {log.yellow(input_path)} to {log.yellow(out)}")
-    return written
+    log.success(f"Converted {log.yellow(input_path)} to {log.yellow(output_path)}")
 
 
 def get_answer(prompt, additional_options=None):
@@ -2382,13 +2288,11 @@ def convert_verasonics(args):
         file_pairs = [(selected_path, output_path)]
 
     for full_path, file_output_path in file_pairs:
-        existing = _buffer_output_paths(file_output_path)
-        if existing:
+        if file_output_path.is_file():
             answer = None
             if existing_file_policy is None:
                 answer = get_answer(
-                    f"Output for {log.yellow(full_path.name)} exists "
-                    f"({', '.join(p.name for p in existing)}). Overwrite?"
+                    f"File {log.yellow(file_output_path)} exists. Overwrite?"
                     "\n\ty\t - Overwrite"
                     "\n\tn\t - Skip"
                     "\n\tya\t - Overwrite all existing files"
@@ -2405,18 +2309,17 @@ def convert_verasonics(args):
                 log.info("Skipping...")
                 continue
 
-            for path in existing:
-                log.warning(f"{log.yellow(path)} exists. Deleting...")
-                path.unlink()
+            log.warning(f"{log.yellow(file_output_path)} exists. Deleting...")
+            file_output_path.unlink()
 
         try:
-            written = _zea_from_verasonics_workspace(
+            _zea_from_verasonics_workspace(
                 full_path,
                 file_output_path,
                 frames=args.frames,
                 allow_accumulate=args.allow_accumulate,
             )
-            num_converted += len(written)
+            num_converted += 1
         except Exception:
             log.error(f"Failed to convert {full_path.name}")
             traceback.print_exc()

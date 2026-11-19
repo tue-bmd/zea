@@ -892,6 +892,11 @@ def verify_converted_verasonics_test_data(src, dst):
         assert "data" in f, f"Missing 'data' in {h5_file}"
         assert "scan" in f, f"Missing 'scan' in {h5_file}"
         f.validate()
+        # One RF buffer -> one track; both ImgDataP buffers are kept.
+        assert f.track_labels == ["rf_buffer_1"]
+        custom_names = [element.name for element in f.custom]
+        assert "verasonics_image_buffer_1" in custom_names
+        assert "verasonics_image_buffer_2" in custom_names
 
 
 def verify_converted_us4us_test_data(src, dst):
@@ -1864,10 +1869,10 @@ def test_verasonics_read_without_img_data_p(tmp_path):
 
     with VerasonicsFile(stripped_file, "r") as verasonics_file:
         assert verasonics_file.read_image_data_p() is None
-        _, _, _, custom_elements = verasonics_file.read_verasonics_file()
+        _, _, custom_elements = verasonics_file.read_verasonics_file()
 
     element_names = [element.name for element in custom_elements]
-    assert "verasonics_image_buffer" not in element_names
+    assert not any(name.startswith("verasonics_image_buffer") for name in element_names)
 
 
 def copy_verasonics_mat_with_one_image_buffer(destination_dir):
@@ -1904,7 +1909,7 @@ def test_verasonics_read_with_one_image_buffer(tmp_path):
     with VerasonicsFile(single_buffer_file, "r") as verasonics_file:
         image_data = verasonics_file.read_image_data_p()
         assert image_data is not None
-        _, _, _, custom_elements = verasonics_file.read_verasonics_file()
+        _, _, custom_elements = verasonics_file.read_verasonics_file()
 
     element_names = [element.name for element in custom_elements]
     assert "verasonics_image_buffer" in element_names
