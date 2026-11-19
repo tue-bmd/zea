@@ -256,12 +256,13 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
 def get_low_pass_iq_filter(num_taps, sampling_frequency, center_frequency, bandwidth):
     """Design complex low-pass filter.
 
-    The filter is a low-pass FIR filter modulated to the center frequency.
+    The filter is a low-pass FIR filter for baseband (IQ) data, centered at 0 Hz.
 
     Args:
         num_taps (int): number of taps in filter.
         sampling_frequency (float): sample frequency.
-        center_frequency (float): center frequency.
+        center_frequency (float): deprecated, pass 0. A non-zero value shifts the passband
+            to that frequency and will be removed.
         bandwidth (float): bandwidth in Hz.
 
     Raises:
@@ -278,10 +279,14 @@ def get_low_pass_iq_filter(num_taps, sampling_frequency, center_frequency, bandw
         )
     # Design real-valued low-pass filter
     lpf = scipy.signal.firwin(num_taps, cutoff, pass_zero=True, fs=sampling_frequency)
-    # Modulate to center frequency to make it complex
-    time_points = np.arange(num_taps) / sampling_frequency
-    lpf_complex = lpf * np.exp(1j * 2 * np.pi * center_frequency * time_points)
-    return lpf_complex
+    if center_frequency:
+        log.deprecated(
+            "The `center_frequency` argument of get_low_pass_iq_filter is deprecated, pass 0. "
+            "IQ data is baseband, so the passband should be centered at 0 Hz."
+        )
+    # Time relative to the middle tap
+    time_points = (np.arange(num_taps) - (num_taps - 1) / 2) / sampling_frequency
+    return lpf * np.exp(1j * 2 * np.pi * center_frequency * time_points)
 
 
 @deprecated(replacement="keras.ops.view_as_real")

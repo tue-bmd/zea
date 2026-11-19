@@ -2363,8 +2363,8 @@ class ADMIRE(Operation):
             sound_speed (float): Speed of sound in m/s.
             center_frequency (float): Transmit center frequency in Hz.
             demodulation_frequency (float): Demodulation frequency in Hz. For IQ
-                data, it stands in for a zero ``center_frequency``, which is what
-                :class:`~zea.ops.Demodulate` leaves behind.
+                data it is used instead of ``center_frequency``, since that is the
+                carrier the aligned IQ data carries.
             f_number (float): F-number of aperture growth.
 
         Returns:
@@ -2399,7 +2399,7 @@ class ADMIRE(Operation):
                 "itself is JIT compiled separately."
             ) from e
         sound_speed, center_frequency, demodulation_frequency, f_number = geometry
-        if n_ch == 2 and not center_frequency:
+        if n_ch == 2 and demodulation_frequency:
             # Aligned IQ data is analytic and carries the carrier again (see tof_correction)
             center_frequency = demodulation_frequency
         if not sound_speed or not center_frequency:

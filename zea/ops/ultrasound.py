@@ -519,7 +519,7 @@ class Demodulate(Operation):
     is removed (0 Hz) and the data is in IQ format stored in two real valued channels.
     """
 
-    ADD_OUTPUT_KEYS = ["center_frequency", "n_ch"]
+    ADD_OUTPUT_KEYS = ["n_ch"]
 
     def __init__(self, axis=-3, pad_fast_time=True, **kwargs):
         """
@@ -553,7 +553,6 @@ class Demodulate(Operation):
 
         return {
             self.output_key: iq_data_two_channel,
-            "center_frequency": 0.0,
             "n_ch": 2,
         }
 
@@ -654,6 +653,8 @@ class LowPassFilterIQ(FirFilter):
     operations. The :class:`LowPassFilterIQ` operation itself is not jittable and is provided
     for convenience only.
 
+    The input is assumed to be baseband, so the passband is centered at 0 Hz.
+
     Uses :func:`get_low_pass_iq_filter` to compute the filter taps. The call-time
     ``bandwidth`` (in Hz) defaults to :attr:`~zea.Parameters.bandwidth` when the parameters are
     prepared with :meth:`~zea.Pipeline.prepare_parameters`.
@@ -692,17 +693,16 @@ class LowPassFilterIQ(FirFilter):
         )
         self.num_taps = num_taps
 
-    def call(self, bandwidth, sampling_frequency, center_frequency, **kwargs):
+    def call(self, bandwidth, sampling_frequency, **kwargs):
         _check_scalar_filter_inputs(
             "LowPassFilterIQ",
             bandwidth=bandwidth,
             sampling_frequency=sampling_frequency,
-            center_frequency=center_frequency,
         )
         lpf = get_low_pass_iq_filter(
             self.num_taps,
             ops.convert_to_numpy(sampling_frequency).item(),
-            ops.convert_to_numpy(center_frequency).item(),
+            0.0,
             ops.convert_to_numpy(bandwidth).item(),
         )
         kwargs[self.filter_key] = lpf
