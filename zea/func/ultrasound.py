@@ -155,13 +155,15 @@ def _upsample_fft(x, upsampling_rate):
     n_neg = n // 2  # negative frequencies (incl. Nyquist for even n)
     positive = spectrum[..., :n_pos]
     negative = spectrum[..., n - n_neg :]
-    zeros = ops.zeros((*spectrum.shape[:-1], n_up - n), dtype="complex64")
+    n_zeros = n_up - n
     if n % 2 == 0:
         # Split the Nyquist bin over both sides so the result stays symmetric.
         nyquist = negative[..., :1] / 2
         positive = ops.concatenate([positive, nyquist], axis=-1)
         negative = ops.concatenate([nyquist, negative[..., 1:]], axis=-1)
-        zeros = zeros[..., 1:]
+        n_zeros -= 1
+    # Shaped from the data rather than spectrum.shape, which may hold None batch dims
+    zeros = ops.repeat(ops.zeros_like(spectrum[..., :1]), n_zeros, axis=-1)
     spectrum = ops.concatenate([positive, zeros, negative], axis=-1)
 
     # keras.ops has no ifft: ifft(X) = conj(fft(conj(X))) / n_up
