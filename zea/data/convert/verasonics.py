@@ -974,11 +974,25 @@ class VerasonicsFile(h5py.File):
     def available_buffers(self):
         """0-based indices of the RF buffers in this file.
 
-        Every ``RcvData`` cell is a buffer. Add 1 for the MATLAB ``RcvData{k}`` number.
+        Every ``RcvData`` cell (or saved ``RF_data_k.bin``) that at least one
+        ``Receive`` entry stores data in is a buffer. Unused cells are left out with a
+        warning. Add 1 for the MATLAB ``RcvData{k}`` number.
         """
         if _verasonics_bin.is_binary_workspace(self):
-            return _verasonics_bin.available_buffers(self)
-        return list(range(self.get_reference_size(self._rcvdata())))
+            stored = _verasonics_bin.available_buffers(self)
+        else:
+            stored = list(range(self.get_reference_size(self._rcvdata())))
+        if "Receive" not in self:
+            return stored
+
+        used = set(np.unique(self.read_receive_bufnums()).tolist())
+        unused = [k + 1 for k in stored if k not in used]
+        if unused:
+            log.warning(
+                f"Skipping RF buffer(s) {unused} (RcvData{{k}}, 1-based): no Receive "
+                "entry stores data in them."
+            )
+        return [k for k in stored if k in used]
 
     def _rcvdata(self):
         if "RcvData" not in self:
@@ -1640,7 +1654,8 @@ class VerasonicsFile(h5py.File):
         missing = sorted(set(buffers) - set(available))
         if missing:
             raise ValueError(
-                f"RF buffers (0-based) {missing} are not in this file. Available: {available}."
+                f"RF buffers (0-based) {missing} are not in this file or have no Receive "
+                f"entries. Available: {available}."
             )
         if not buffers:
             raise ValueError("No RF buffers to convert.")

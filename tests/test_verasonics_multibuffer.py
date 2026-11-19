@@ -212,6 +212,18 @@ def test_all_frames_with_several_buffers_is_allowed(tmp_path, frames):
         assert not isinstance(excinfo.value, NotImplementedError)
 
 
+def test_unused_buffer_is_skipped(tmp_path):
+    """An RcvData cell that no Receive entry points to is not a buffer to convert."""
+    buffers = [np.zeros((1, 2, 4), np.int16), np.zeros((1, 2, 4), np.int16)]
+    mat = tmp_path / "raw_data.mat"
+    _write_rcvdata_workspace(mat, buffers, bufnums=[1, 1])
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        assert vf.available_buffers() == [0]
+        with pytest.raises(ValueError, match="no Receive"):
+            vf.read_verasonics_file(buffers=[1])
+
+
 def test_unknown_buffer_is_rejected(tmp_path):
     """Requesting an RF buffer that is not in the file raises."""
     mat = tmp_path / "raw_data.mat"
