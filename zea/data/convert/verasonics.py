@@ -771,18 +771,22 @@ class VerasonicsFile(h5py.File):
         """The sampling frequency in Hz from the file.
 
         Args:
-            buffer_index (int, optional): The 0-based RF buffer. If ``None``
-                (default), the first receive event overall is used.
+            buffer_index (int, optional): If given, only consider receive events
+                belonging to this (0-based) RF buffer. If ``None`` (default), all
+                receive events are considered.
         """
-        # decimSampleRate and quadDecim are constant within a buffer, so read one receive.
-        rcv_idx = 0
-        if buffer_index is not None:
-            rcv_idx = int(self.receive_indices_for_buffer(buffer_index)[0])
 
-        adc_rate = self.dereference_index(self["Receive"]["decimSampleRate"], rcv_idx)
+        def scalar(value):
+            return float(np.asarray(value).reshape(-1)[0])
+
+        adc_rate = self._read_constant_receive_field(
+            "decimSampleRate", buffer_index, scalar, "decimation sample rates"
+        )
 
         if "quadDecim" in self["Receive"]:
-            quaddecim = self.dereference_index(self["Receive"]["quadDecim"], rcv_idx)
+            quaddecim = self._read_constant_receive_field(
+                "quadDecim", buffer_index, scalar, "quadrature decimation factors"
+            )
         else:
             # TODO: Verify if this is correct.
             # On the Vantage NXT the quadDecim field is missing. It seems that it should be
@@ -790,7 +794,6 @@ class VerasonicsFile(h5py.File):
             quaddecim = 1.0
 
         sampling_frequency = adc_rate / quaddecim * 1e6
-        sampling_frequency = sampling_frequency.item()
 
         if self.get_is_baseband_mode(buffer_index):
             # Two sequential samples are interpreted as a single complex sample
@@ -1858,15 +1861,6 @@ class VerasonicsFile(h5py.File):
                 ``buffers`` in a `convert.yaml` file, or else every buffer in the file
                 (see :meth:`available_buffers`).
         """
-        log.warning(
-            "ASSUMPTION: all receives within an RF buffer are assumed to share the "
-            "same acquisition settings - sample mode, demodulation frequency, "
-            "sampling rate (decimSampleRate / quadDecim) and start/end depth. "
-            "Sample mode and demodulation frequency are checked on every receive; "
-            "the sampling rate is read from the buffer's first receive. If a sequence "
-            "varies the sampling rate *within* a single buffer, the converted "
-            "parameters will be wrong."
-        )
         tracks, probe_dict, custom_elements = self.read_verasonics_file(
             frames=frames,
             allow_accumulate=allow_accumulate,

@@ -378,6 +378,32 @@ def test_constant_receive_field_checks_every_receive(tmp_path):
             vf.get_sample_mode(0)
 
 
+@pytest.mark.parametrize(
+    "rates, quad_decims, message",
+    [
+        ([20.0, 20.0, 40.0, 20.0], [1.0] * 4, "Multiple decimation sample rates"),
+        ([20.0] * 4, [1.0, 2.0, 1.0, 1.0], "Multiple quadrature decimation factors"),
+    ],
+)
+def test_sampling_rate_is_checked_on_every_receive(tmp_path, rates, quad_decims, message):
+    """A buffer that mixes decimSampleRate or quadDecim values is rejected."""
+    mat = tmp_path / "raw_data.mat"
+    with h5py.File(mat, "w") as f:
+        _write_struct(
+            f,
+            "Receive",
+            {
+                "bufnum": [1] * 4,
+                "sampleMode": ["NS200BW"] * 4,
+                "decimSampleRate": rates,
+                "quadDecim": quad_decims,
+            },
+        )
+    with VerasonicsFile(str(mat), "r") as vf:
+        with pytest.raises(AssertionError, match=message):
+            vf.get_sampling_frequency(0)
+
+
 def test_bufnums_fall_back_to_buffer_zero(tmp_path):
     """Without ``Receive.bufnum`` every receive maps to buffer 0."""
     mat = tmp_path / "raw_data.mat"
