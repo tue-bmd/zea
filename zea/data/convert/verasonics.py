@@ -1564,10 +1564,8 @@ class VerasonicsFile(h5py.File):
             buffer_index (int, optional): The buffer index to read from. Defaults to 0.
         """
 
-        convert_config = self.load_convert_config()
-
         if frames is None:
-            frames = convert_config.get("frames", "all")
+            frames = self.load_convert_config().get("frames", "all")
 
         tx_order, rcv_order, time_to_next_transmit = self.read_transmit_events(
             frames=frames, allow_accumulate=allow_accumulate, buffer_index=buffer_index
