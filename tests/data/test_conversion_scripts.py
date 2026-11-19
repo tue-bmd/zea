@@ -893,10 +893,10 @@ def verify_converted_verasonics_test_data(src, dst):
         assert "scan" in f, f"Missing 'scan' in {h5_file}"
         f.validate()
         # One RF buffer -> one track; both ImgDataP buffers are kept.
-        assert f.track_labels == ["rf_buffer_1"]
+        assert f.track_labels == ["rf_buffer_0"]
         custom_names = [element.name for element in f.custom]
+        assert "verasonics_image_buffer_0" in custom_names
         assert "verasonics_image_buffer_1" in custom_names
-        assert "verasonics_image_buffer_2" in custom_names
 
 
 def verify_converted_us4us_test_data(src, dst):
@@ -1908,9 +1908,9 @@ def test_verasonics_read_with_one_image_buffer(tmp_path):
         _, _, custom_elements = verasonics_file.read_verasonics_file()
 
     element_names = [element.name for element in custom_elements]
-    assert "verasonics_image_buffer_1" in element_names
+    assert "verasonics_image_buffer_0" in element_names
 
-    image_buffer = custom_elements[element_names.index("verasonics_image_buffer_1")]
+    image_buffer = custom_elements[element_names.index("verasonics_image_buffer_0")]
     assert image_buffer.data.shape == image_data.shape
 
 

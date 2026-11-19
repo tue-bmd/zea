@@ -818,9 +818,9 @@ class _Verasonics:
     """The frames to add to the file. This can be a list of integers, a range of integers
     (e.g. 4-8), or 'all'. Defaults to 'all', unless specified in a convert.yaml file."""
     buffers: list[int] | None = None
-    """The 0-based RF buffers to convert, e.g. 0 for RcvData{1}. Defaults to every
-    buffer, unless specified in a convert.yaml file. Selecting frames needs a single
-    buffer."""
+    """The RF buffers to convert, counted from 0 like the frames: 0 is MATLAB's
+    RcvData{1} and becomes the track rf_buffer_0. Defaults to every buffer, unless
+    specified in a convert.yaml file. Selecting frames needs a single buffer."""
     allow_accumulate: bool = False
     """Sometimes, some transmits are already accumulated on the Verasonics system (e.g.
     harmonic imaging through pulse inversion). In this case, the mode in the Receive

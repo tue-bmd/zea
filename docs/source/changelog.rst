@@ -22,11 +22,11 @@ Current
 
 New Features
 ^^^^^^^^^^^^
-- The Verasonics converter supports workspaces with several RF buffers (``RcvData{1}``, ``RcvData{2}``, …): each buffer becomes a track labelled ``rf_buffer_{k}`` in one zea file, and every ``ImgDataP`` image buffer is kept (:gh:`538` by :user:`lvknippenberg`)
+- The Verasonics converter supports workspaces with several RF buffers (``RcvData{1}``, ``RcvData{2}``, …): each buffer becomes a track in one zea file, and every ``ImgDataP`` image buffer is kept. Buffers are counted from 0 like the rest of zea, so ``RcvData{1}`` becomes the track ``rf_buffer_0``. Select buffers with ``--buffers`` or ``buffers`` in ``convert.yaml`` (:gh:`538` by :user:`lvknippenberg`)
 
 Changed
 ^^^^^^^
-- (Breaking) The Verasonics converter stores ``ImgDataP{k}`` as the custom element ``verasonics_image_buffer_{k}``, also when there is a single image buffer (previously ``verasonics_image_buffer``) (:gh:`538` by :user:`lvknippenberg`)
+- (Breaking) The Verasonics converter stores each image buffer as a numbered custom element counted from 0, so ``ImgDataP{1}`` becomes ``verasonics_image_buffer_0``, also when there is a single image buffer (previously ``verasonics_image_buffer``) (:gh:`538` by :user:`lvknippenberg`)
 - :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
 
 Fixed

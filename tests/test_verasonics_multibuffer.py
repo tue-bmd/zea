@@ -230,7 +230,7 @@ def test_convert_yaml_selects_buffers(tmp_path):
         with pytest.raises(Exception) as excinfo:
             vf.read_verasonics_file()
         assert not isinstance(excinfo.value, NotImplementedError)
-        assert "RF buffer 2" in "".join(getattr(excinfo.value, "__notes__", []))
+        assert "RF buffer 1 (RcvData{2})" in "".join(getattr(excinfo.value, "__notes__", []))
 
 
 @pytest.mark.parametrize("buffers", [0, [-1], ["0"], [True]])
@@ -273,7 +273,7 @@ def test_unknown_buffer_is_rejected(tmp_path):
     _write_rcvdata_workspace(mat, [np.zeros((1, 2, 4), np.int16)], bufnums=[1])
 
     with VerasonicsFile(str(mat), "r") as vf:
-        with pytest.raises(ValueError, match="not in this file"):
+        with pytest.raises(ValueError, match=r"not in this file.*RF buffer 0 \(RcvData\{1\}\)"):
             vf.read_verasonics_file(buffers=[1])
         with pytest.raises(ValueError, match="No RF buffers"):
             vf.read_verasonics_file(buffers=[])

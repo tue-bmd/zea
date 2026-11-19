@@ -37,7 +37,7 @@ def is_binary_workspace(file):
 
 
 def _binary_path(file, buffer_index):
-    # The files use the 1-based MATLAB buffer number.
+    # The file names keep the MATLAB number: RF_data_1.bin holds 0-based buffer 0.
     directory = Path(file.filename).resolve().parent
     return directory / _BINARY_TEMPLATE.format(k=buffer_index + 1)
 
@@ -67,10 +67,10 @@ def read_buffer(file, buffer_index):
     """
     path = _binary_path(file, buffer_index)
     if not path.is_file():
-        saved = [i + 1 for i in available_buffers(file)]
+        saved = available_buffers(file)
         raise FileNotFoundError(
-            f"RF buffer {buffer_index + 1} was not saved: {path.name} does not exist. "
-            f"Saved buffers (1-based): {saved}."
+            f"RF buffer {buffer_index} (RcvData{{{buffer_index + 1}}}) was not saved: "
+            f"{path.name} does not exist. Saved buffers (0-based): {saved}."
         )
 
     rows = _read_dimension(file, "RF_rows", buffer_index)
@@ -97,8 +97,8 @@ def read_buffer(file, buffer_index):
     mask = mask.reshape(-1).astype(bool)
     if int(mask.sum()) != cols:
         raise ValueError(
-            f"NonzeroRFcolumns for buffer {buffer_index + 1} marks {int(mask.sum())} "
-            f"channels, but RF_cols={cols}."
+            f"NonzeroRFcolumns{{{buffer_index + 1}}} (RF buffer {buffer_index}) marks "
+            f"{int(mask.sum())} channels, but RF_cols={cols}."
         )
     full = np.zeros((n_frames, mask.size, rows), dtype=np.int16)
     full[:, mask, :] = raw

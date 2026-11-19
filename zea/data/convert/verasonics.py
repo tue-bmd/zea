@@ -34,8 +34,14 @@ Or alternatively, use the CLI to convert all .mat files in a directory:
         zea convert verasonics "C:/path/to/source" "C:/path/to/output"
 
 A ``.mat`` with several RF buffers (``RcvData{1}``, ``RcvData{2}``, ...) is written
-to one zea file with one track per buffer, labelled ``rf_buffer_{k}``. Read them with
-``File(path).tracks`` or ``File(path).get_track("rf_buffer_2")``.
+to one zea file with one track per buffer. Read them with ``File(path).tracks`` or
+``File(path).get_track("rf_buffer_1")``.
+
+Like the rest of zea, the converter counts buffers and frames from 0, while MATLAB counts
+from 1. So RF buffer 0 is ``RcvData{1}`` and becomes the track ``rf_buffer_0``, and image
+buffer 0 is ``ImgDataP{1}`` and becomes the custom element ``verasonics_image_buffer_0``.
+Messages name both, e.g. "RF buffer 0 (RcvData{1})". The external ``RF_data_k.bin``
+files keep the MATLAB number: ``RF_data_1.bin`` holds RF buffer 0.
 
 ---------------
 
@@ -327,6 +333,11 @@ def _validate_convert_config(data):
             ):
                 raise ValueError(f"'buffers' must be a list of non-negative ints, got {bu!r}")
     return data
+
+
+def _rf_buffer_name(buffer_index) -> str:
+    """Name a 0-based RF buffer together with its MATLAB cell, e.g. 'RF buffer 0 (RcvData{1})'."""
+    return f"RF buffer {buffer_index} (RcvData{{{buffer_index + 1}}})"
 
 
 def _is_all_frames(frames) -> bool:
@@ -1016,8 +1027,9 @@ class VerasonicsFile(h5py.File):
                 n_buffer_frames = None
             if n_buffer_frames != n_frames:
                 log.warning(
-                    f"RF_data_{buffer_index + 1}.bin holds {n_frames} frames, but "
-                    f"RcvBuffer({buffer_index + 1}).numFrames is {n_buffer_frames}. "
+                    f"RF_data_{buffer_index + 1}.bin ({_rf_buffer_name(buffer_index)}) "
+                    f"holds {n_frames} frames, but Resource.RcvBuffer({buffer_index + 1})"
+                    f".numFrames is {n_buffer_frames}. "
                     "Assuming the saved frames are already in order."
                 )
                 return np.arange(n_frames)
@@ -1041,7 +1053,7 @@ class VerasonicsFile(h5py.File):
 
         Every ``RcvData`` cell (or saved ``RF_data_k.bin``) that at least one
         ``Receive`` entry stores data in is a buffer. Unused cells are left out with a
-        warning. Add 1 for the MATLAB ``RcvData{k}`` number.
+        warning. Buffer ``k`` is the MATLAB cell ``RcvData{k + 1}``.
         """
         if _verasonics_bin.is_binary_workspace(self):
             stored = _verasonics_bin.available_buffers(self)
@@ -1051,12 +1063,9 @@ class VerasonicsFile(h5py.File):
             return stored
 
         used = set(np.unique(self.read_receive_bufnums()).tolist())
-        unused = [k + 1 for k in stored if k not in used]
-        if unused:
-            log.warning(
-                f"Skipping RF buffer(s) {unused} (RcvData{{k}}, 1-based): no Receive "
-                "entry stores data in them."
-            )
+        for k in stored:
+            if k not in used:
+                log.warning(f"Skipping {_rf_buffer_name(k)}: no Receive entry stores data in it.")
         return [k for k in stored if k in used]
 
     def _rcvdata(self):
@@ -1639,9 +1648,10 @@ class VerasonicsFile(h5py.File):
                 on the Verasonics system (e.g. harmonic imaging through pulse inversion).
                 In this case, the mode in the Receive structure is set to 1 (accumulate).
                 If this flag is set to False, an error is raised when such a mode is detected.
-            buffers (list[int], optional): 0-based RF buffers (``RcvData{k + 1}``) to read,
-                one track each. Defaults to the ``buffers`` in a `convert.yaml` file, or
-                else every buffer in the file (see :meth:`available_buffers`).
+            buffers (list[int], optional): 0-based RF buffers to read, so 0 is
+                ``RcvData{1}``. Buffer ``k`` becomes the track ``rf_buffer_{k}``. Defaults
+                to the ``buffers`` in a `convert.yaml` file, or else every buffer in the
+                file (see :meth:`available_buffers`).
             additional_functions (list, optional): A list of functions that read additional
                 data from the file. Each function should take the `VerasonicsFile` as input
                 and return a `CustomElement`. Defaults to None.
@@ -1670,9 +1680,10 @@ class VerasonicsFile(h5py.File):
         buffers = available if buffers is None else list(buffers)
         missing = sorted(set(buffers) - set(available))
         if missing:
+            names = ", ".join(_rf_buffer_name(k) for k in available) or "none"
             raise ValueError(
-                f"RF buffers (0-based) {missing} are not in this file or have no Receive "
-                f"entries. Available: {available}."
+                f"RF buffers {missing} (0-based) are not in this file or have no Receive "
+                f"entries. Available: {names}."
             )
         if not buffers:
             raise ValueError("No RF buffers to convert.")
@@ -1681,14 +1692,13 @@ class VerasonicsFile(h5py.File):
             raise NotImplementedError(
                 "Selecting frames ('frames' / 'first_frame') is not supported for files "
                 f"with several RF buffers ({len(buffers)} buffers): the buffers generally "
-                "hold different numbers of frames. Select one buffer with 'buffers' in "
-                "convert.yaml or with --buffers."
+                "hold different numbers of frames. Select one 0-based buffer with "
+                "'buffers' in convert.yaml or with --buffers, e.g. 0 for RcvData{1}."
             )
 
         tracks = []
         for buffer_index in buffers:
-            k = buffer_index + 1
-            log.info(f"Reading RF buffer {k} (RcvData{{{k}}})...")
+            log.info(f"Reading {_rf_buffer_name(buffer_index)}...")
             try:
                 scan_dict = self.read_scan(
                     frames=frames,
@@ -1701,10 +1711,14 @@ class VerasonicsFile(h5py.File):
                     first_frame_idx=first_frame,
                 )
             except Exception as e:
-                e.add_note(f"While reading RF buffer {k} (RcvData{{{k}}}) of {self.filename}.")
+                e.add_note(f"While reading {_rf_buffer_name(buffer_index)} of {self.filename}.")
                 raise
             tracks.append(
-                {"data": {"raw_data": raw_data}, "scan": scan_dict, "label": f"rf_buffer_{k}"}
+                {
+                    "data": {"raw_data": raw_data},
+                    "scan": scan_dict,
+                    "label": f"rf_buffer_{buffer_index}",
+                }
             )
 
         custom_elements = []
@@ -1736,7 +1750,7 @@ class VerasonicsFile(h5py.File):
         for image_buffer_index in range(n_image_buffers):
             custom_elements.append(
                 CustomElement(
-                    name=f"verasonics_image_buffer_{image_buffer_index + 1}",
+                    name=f"verasonics_image_buffer_{image_buffer_index}",
                     data=self.read_image_data_p(
                         frames=frames, image_buffer_index=image_buffer_index
                     ),
@@ -1831,8 +1845,9 @@ class VerasonicsFile(h5py.File):
     ):
         """Converts the Verasonics file to the zea format.
 
-        Every RF buffer (``RcvData{k}``) becomes one track, labelled ``rf_buffer_{k}``,
-        in a single zea file. A file with one RF buffer gives a single-track file.
+        Every RF buffer becomes one track in a single zea file: 0-based buffer ``k``
+        (``RcvData{k + 1}``) is labelled ``rf_buffer_{k}``. A file with one RF buffer
+        gives a single-track file.
 
         Args:
             output_path (str): The path to the output file (.hdf5 file).
@@ -1852,7 +1867,8 @@ class VerasonicsFile(h5py.File):
                 Used to convert ``Trans.lensCorrection`` (wavelengths) into
                 ``lens_thickness`` and ``lens_sound_speed`` fields on the probe. Defaults
                 to 1000.0.
-            buffers (list[int], optional): 0-based RF buffers to convert. Defaults to the
+            buffers (list[int], optional): 0-based RF buffers to convert, so 0 is
+                ``RcvData{1}``. Defaults to the
                 ``buffers`` in a `convert.yaml` file, or else every buffer in the file
                 (see :meth:`available_buffers`).
         """
