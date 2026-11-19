@@ -6,8 +6,7 @@ converter supports:
 
 * Several RF buffers stored **in** the ``.mat`` as a ``RcvData`` cell array.
 * RF stored in **external** ``RF_data_{k}.bin`` files next to a metadata ``.mat``
-  (with the per-buffer ``RF_rows``/``RF_cols``/``RF_frames`` dimensions and the
-  ``NonzeroRFcolumns`` channel masks).
+  (see :mod:`zea.data.convert._verasonics_bin` for the layout).
 
 Both are read through :meth:`VerasonicsFile.read_raw_buffer_array`, which returns
 one buffer as ``(n_frames, n_channels, n_samples)`` regardless of storage form.
@@ -104,7 +103,6 @@ def test_multibuffer_rcvdata_reads_each_buffer(tmp_path):
     _write_rcvdata_workspace(mat, buffers, bufnums)
 
     with VerasonicsFile(str(mat), "r") as vf:
-        assert vf.has_rcvdata is True
         assert vf.available_buffers() == [0, 1]
 
         # Receive -> buffer mapping (0-based).
@@ -138,7 +136,6 @@ def test_binary_buffer_reconstruction(tmp_path):
     _write_binary_workspace(mat, full_buffers, masks, saved=[True, True])
 
     with VerasonicsFile(str(mat), "r") as vf:
-        assert vf.has_rcvdata is False
         assert vf.available_buffers() == [0, 1]
         for k in range(2):
             reconstructed = vf.read_raw_buffer_array(k)
@@ -146,7 +143,6 @@ def test_binary_buffer_reconstruction(tmp_path):
             assert reconstructed.dtype == np.int16
             # Saved channels match; non-saved channels are zero-filled.
             np.testing.assert_array_equal(reconstructed, full_buffers[k])
-            np.testing.assert_array_equal(vf.read_nonzero_rf_columns(k), masks[k])
 
 
 def test_binary_only_saved_buffers_are_available(tmp_path):

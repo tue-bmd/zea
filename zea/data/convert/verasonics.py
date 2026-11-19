@@ -38,12 +38,6 @@ Or alternatively, use the CLI to convert all .mat files in a directory:
 
         zea convert verasonics "C:/path/to/source" "C:/path/to/output"
 
-A source directory may contain either several single-buffer ``.mat`` files (each
-converted to one ``.hdf5``) or a single multi-buffer acquisition (one ``.mat``
-plus ``RF_data_{k}.bin`` files, converted to one ``.hdf5`` per RF buffer). The
-CLI detects the ``.bin`` files and dispatches to the appropriate path
-automatically.
-
 ---------------
 
 By default the zea dataformat saves all the data to an hdf5 file with the following structure:
@@ -71,6 +65,7 @@ import yaml
 from keras import ops
 
 from zea import log
+from zea.data.convert import _verasonics_bin
 from zea.data.convert.utils import (
     require_output_dir_ownership,
     upload_dataset_to_hf,
@@ -1051,207 +1046,35 @@ class VerasonicsFile(h5py.File):
 
         return self.get_indices_to_reorder(first_frame, n_frames)
 
-    # ------------------------------------------------------------------
-    # RF buffer source (RcvData in the .mat, or external binary files)
-    # ------------------------------------------------------------------
-    # Verasonics saves RF as a MATLAB cell array ``RcvData{k}``. Writing the
-    # full workspace to a v7.3 ``.mat`` is slow for large RF buffers, so an
-    # alternative workflow saves the RF of each buffer to a raw binary file
-    # ``RF_data_{k}.bin`` (int16, MATLAB column-major) next to a v7.3 ``.mat``
-    # that holds all the metadata plus:
-    #   - ``RF_rows``   (1, N): fast-time samples per buffer (full sample count)
-    #   - ``RF_cols``   (1, N): number of *saved* channels per buffer
-    #   - ``RF_frames`` (1, N): number of frames per buffer
-    #   - ``NonzeroRFcolumns`` {N}: per-buffer logical mask (length = full number
-    #     of hardware channels) that is True for every saved channel. This
-    #     defines both which columns of the binary map to which hardware
-    #     channels and the full hardware-channel count (which need not be 128).
-    # Only *saved* buffers have a ``RF_data_{k}.bin`` file; a buffer may hold
-    # data on the system yet not be saved for a given measurement.
-
-    RF_BINARY_TEMPLATE = "RF_data_{k}.bin"
-
-    @property
-    def has_rcvdata(self):
-        """Whether the ``.mat`` file contains an in-file ``RcvData`` cell array."""
-        return "RcvData" in self
-
-    @property
-    def _mat_dir(self):
-        """Directory containing the ``.mat`` file (used to locate ``.bin`` files)."""
-        return Path(self.filename).resolve().parent
-
-    def rf_binary_path(self, buffer_index):
-        """Path to the external ``RF_data_{k}.bin`` for a 0-based ``buffer_index``.
-
-        Verasonics/MATLAB buffers are 1-based, so ``buffer_index=i`` maps to the
-        file for ``RcvData{i + 1}``.
-        """
-        return self._mat_dir / self.RF_BINARY_TEMPLATE.format(k=buffer_index + 1)
-
-    def available_binary_buffers(self):
-        """0-based indices of buffers that have an external ``RF_data_{k}.bin``."""
-        available = []
-        # The number of buffers is known from the RF_* dimension arrays when
-        # present, otherwise scan a reasonable range of filenames.
-        n = None
-        if "RF_frames" in self:
-            n = int(np.asarray(self["RF_frames"][:]).size)
-        indices = range(n) if n is not None else range(64)
-        for i in indices:
-            if self.rf_binary_path(i).is_file():
-                available.append(i)
-        return available
-
     def available_buffers(self):
-        """0-based indices of the RF buffers actually present in this file.
+        """0-based indices of the RF buffers in this file.
 
-        Unifies the two storage forms:
-
-        * RF stored **in** the ``.mat``: every ``RcvData`` cell is a buffer.
-        * RF stored in **external binaries**: only the buffers that were saved
-          have an ``RF_data_{k}.bin``. A buffer may exist on the system yet not
-          be written for a given measurement, so a missing file means "not
-          saved", not "empty".
-
-        Returns:
-            list[int]: 0-based buffer indices. Add 1 for MATLAB ``RcvData{k}``.
+        Every ``RcvData`` cell is a buffer. Add 1 for the MATLAB ``RcvData{k}`` number.
         """
-        if self.has_rcvdata:
-            return list(range(self.get_reference_size(self["RcvData"])))
-        return self.available_binary_buffers()
-
-    def _read_rf_dimension(self, name, buffer_index):
-        """Read entry ``buffer_index`` from a ``(1, N)`` RF dimension array."""
-        if name not in self:
-            raise KeyError(
-                f"'{name}' not found in the .mat file. It is required to read RF "
-                "data from an external binary file (it stores the per-buffer "
-                "dimensions)."
-            )
-        values = np.asarray(self[name][:]).reshape(-1)
-        if buffer_index >= values.size:
-            raise IndexError(
-                f"buffer_index={buffer_index} is out of range for '{name}' with "
-                f"{values.size} entries."
-            )
-        return int(values[buffer_index])
-
-    def read_nonzero_rf_columns(self, buffer_index):
-        """Boolean mask of saved hardware channels for ``buffer_index``.
-
-        Reads ``NonzeroRFcolumns{buffer_index + 1}`` (a MATLAB logical vector).
-        The length of the mask is the full number of hardware channels for the
-        buffer, and it is ``True`` for every channel that was written to the
-        binary file. Returns ``None`` if the file has no ``NonzeroRFcolumns``.
-        """
-        if "NonzeroRFcolumns" not in self:
-            return None
-        mask = self.dereference_index(self["NonzeroRFcolumns"], buffer_index)
-        mask = np.asarray(mask).reshape(-1).astype(bool)
-        return mask
+        if _verasonics_bin.is_binary_workspace(self):
+            return _verasonics_bin.available_buffers(self)
+        return list(range(self.get_reference_size(self["RcvData"])))
 
     def read_raw_buffer_array(self, buffer_index):
-        """Return the raw ``(n_frames, n_channels, n_samples)`` array for a buffer.
-
-        Reads from ``RcvData`` when present in the ``.mat`` file, otherwise from
-        the external ``RF_data_{k}.bin`` binary. In both cases the returned array
-        has the full hardware-channel dimension (zero-filled for channels that
-        were not saved), so the downstream ``ConnectorES`` element selection in
-        :meth:`read_raw_data` behaves identically for both sources.
-        """
-        if self.has_rcvdata:
-            raw_data = self.dereference_index(self["RcvData"], buffer_index)
-            return np.asarray(raw_data, dtype=np.int16)
-
-        return self._read_raw_buffer_from_binary(buffer_index)
-
-    def _read_raw_buffer_from_binary(self, buffer_index):
-        """Read and reconstruct a raw buffer from an external ``RF_data_{k}.bin``.
-
-        The binary stores only the saved (nonzero) channels, written by MATLAB
-        ``fwrite`` in column-major order with shape ``(RF_rows, RF_cols,
-        RF_frames)``. This method reads it, restores the MATLAB dimension order,
-        scatters the saved channels back into a full hardware-channel array using
-        the ``NonzeroRFcolumns`` mask, and returns
-        ``(n_frames, n_hardware_channels, n_samples)`` to match ``RcvData``.
-        """
-        binary_path = self.rf_binary_path(buffer_index)
-        if not binary_path.is_file():
-            available = self.available_binary_buffers()
-            available_1based = [i + 1 for i in available]
-            raise FileNotFoundError(
-                f"No RF data found for buffer_index={buffer_index}: the .mat file "
-                f"has no 'RcvData' and no binary file '{binary_path.name}' exists "
-                f"in {self._mat_dir}. Saved buffers (MATLAB 1-based) are "
-                f"{available_1based}. Note that a buffer may hold data on the "
-                "system yet not be saved for a given measurement."
+        """Return ``RcvData{buffer_index + 1}`` as ``(n_frames, n_channels, n_samples)`` int16."""
+        if _verasonics_bin.is_binary_workspace(self):
+            return _verasonics_bin.read_buffer(self, buffer_index)
+        if "RcvData" not in self:
+            raise KeyError(
+                f"'RcvData' not found in {self.filename}. Save the full workspace "
+                "after the acquisition, e.g. save('raw_data.mat', '-v7.3')."
             )
-
-        # Per-buffer dimensions (MATLAB layout: rows=fast time, cols=saved
-        # channels, frames).
-        rows = self._read_rf_dimension("RF_rows", buffer_index)
-        cols = self._read_rf_dimension("RF_cols", buffer_index)
-        n_frames = self._read_rf_dimension("RF_frames", buffer_index)
-
-        # Read the raw int16 stream (little-endian, as written on PCWIN64).
-        raw = np.fromfile(binary_path, dtype="<i2")
-        expected = rows * cols * n_frames
-        if raw.size != expected:
-            raise ValueError(
-                f"Binary file '{binary_path.name}' has {raw.size} int16 values but "
-                f"RF_rows*RF_cols*RF_frames = {rows}*{cols}*{n_frames} = {expected}. "
-                "The binary file and the stored dimensions are inconsistent."
-            )
-
-        # MATLAB fwrite is column-major: reshape as (rows, cols, frames) in
-        # Fortran order, then move to (frames, cols, rows) to match how RcvData
-        # is delivered (n_frames, n_channels, n_samples).
-        raw = raw.reshape((rows, cols, n_frames), order="F")
-        raw = np.transpose(raw, (2, 1, 0))  # (n_frames, cols, rows)
-
-        # Scatter the saved channels back into the full hardware-channel array
-        # using the NonzeroRFcolumns mask.
-        mask = self.read_nonzero_rf_columns(buffer_index)
-        if mask is None:
-            # Without a mask we cannot know the full channel count or where the
-            # saved channels belong; fall back to treating the saved channels as
-            # the full set (only valid if nothing was zero-padded away).
-            log.warning(
-                "'NonzeroRFcolumns' not found; assuming the binary file contains "
-                "all hardware channels in order. If the acquisition zero-padded "
-                "channels, provide NonzeroRFcolumns for correct reconstruction."
-            )
-            return np.ascontiguousarray(raw, dtype=np.int16)
-
-        if int(mask.sum()) != cols:
-            raise ValueError(
-                f"NonzeroRFcolumns for buffer {buffer_index + 1} marks "
-                f"{int(mask.sum())} saved channels, but RF_cols={cols} "
-                f"(binary column count). These must match."
-            )
-
-        n_hardware_channels = mask.size
-        full = np.zeros((n_frames, n_hardware_channels, rows), dtype=np.int16)
-        full[:, mask, :] = raw
-        return full
+        raw_data = self.dereference_index(self["RcvData"], buffer_index)
+        return np.asarray(raw_data, dtype=np.int16)
 
     def read_raw_data(self, frames="all", buffer_index=0, first_frame_idx=None):
         """
         Read the raw data from the file.
 
-        The channel data is read either from the ``RcvData`` cell array inside the
-        ``.mat`` file, or - when ``RcvData`` is absent - from an external binary
-        file ``RF_data_{k}.bin`` (see :meth:`read_raw_buffer_array`). Everything
-        after the initial read (channel selection, frame ordering, trimming and
-        reshaping) is identical for both sources.
-
         Returns:
             raw_data (np.ndarray): The raw data of shape (n_rcv, n_samples).
         """
 
-        # Read the raw (n_frames, n_channels, n_samples) array for this buffer,
-        # from RcvData or from an external binary file.
         raw_data = self.read_raw_buffer_array(buffer_index)
 
         # Convert the raw data to a numpy array to allow out-of-order indexing later
@@ -2512,39 +2335,20 @@ def convert_verasonics(args):
 
     log.info(f"Selected path: {log.yellow(selected_path)}")
 
-    # Detect a multi-buffer acquisition. Verasonics can save the RF of each
-    # buffer to an external binary file (RF_data_{k}.bin) next to a single .mat
-    # workspace holding all the metadata and the per-buffer dimensions. This is
-    # distinct from a directory of independent single-buffer .mat files (the
-    # default), which is converted one .mat -> one .hdf5. We distinguish the two
-    # by the presence of RF_data_{k}.bin files in the directory.
-    multibuffer_mat = None
+    # A directory with external RF binaries is one acquisition, converted per buffer.
+    binary_workspace = None
     if selected_path_is_directory:
-        bin_glob = VerasonicsFile.RF_BINARY_TEMPLATE.format(k="*")
-        bin_files = sorted(selected_path.glob(bin_glob))
-        if bin_files:
-            mat_files = sorted(selected_path.glob("*.mat"))
-            if len(mat_files) != 1:
-                log.error(
-                    f"Found {len(bin_files)} external RF binary file(s) "
-                    f"({bin_glob}) in {log.yellow(selected_path)}, indicating a "
-                    "multi-buffer acquisition, but expected exactly one .mat "
-                    f"workspace alongside them (found {len(mat_files)}). Cannot "
-                    "determine which .mat holds the metadata."
-                )
-                sys.exit(2)
-            multibuffer_mat = mat_files[0]
+        try:
+            binary_workspace = _verasonics_bin.find_binary_workspace(selected_path)
+        except ValueError as e:
+            log.error(str(e))
+            sys.exit(2)
 
     num_converted = 0
 
-    if multibuffer_mat is not None:
-        # Multi-buffer path: a single .mat + external RF_data_{k}.bin files ->
-        # one .hdf5 per saved RF buffer, written into the output directory.
-        log.info(
-            f"Detected multi-buffer acquisition: {log.yellow(multibuffer_mat.name)} "
-            f"with {len(bin_files)} RF binary file(s). Converting per RF buffer."
-        )
-        with VerasonicsFile(multibuffer_mat, "r") as file:
+    if binary_workspace is not None:
+        log.info(f"Found external RF binaries next to {log.yellow(binary_workspace.name)}.")
+        with VerasonicsFile(binary_workspace, "r") as file:
             results = file.to_zea_all(
                 output_path,
                 overwrite=True,
