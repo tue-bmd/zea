@@ -452,6 +452,18 @@ def test_receive_metadata_per_buffer(tmp_path):
         assert "_constant_field_cache" not in vf.__dict__
 
 
+def test_buffer_with_several_tgc_waveforms_is_rejected(tmp_path):
+    """One buffer whose receives use different TGC waveforms cannot be one track."""
+    mat = tmp_path / "raw_data.mat"
+    with h5py.File(mat, "w") as f:
+        _write_struct(f, "Receive", {"bufnum": [1, 1], "TGC": [1, 2]})
+        _write_cell_array(f, "TGC/Waveform", [np.full((4, 1), 7.0), np.full((4, 1), 9.0)])
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        with pytest.raises(ValueError, match=r"RF buffer 0 \(RcvData\{1\}\).*\[1, 2\]"):
+            vf._read_tgc_waveform(0)
+
+
 def test_tgc_index_out_of_range_uses_first_waveform(tmp_path):
     """A ``Receive.TGC`` beyond the stored waveforms falls back to the first one."""
     mat = tmp_path / "raw_data.mat"

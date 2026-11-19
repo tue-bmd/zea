@@ -1408,6 +1408,12 @@ class VerasonicsFile(h5py.File):
             tgc_values = np.unique(
                 np.round(self._read_scalar_field("Receive", "TGC")[recv_idx]).astype(int)
             )
+            if tgc_values.size != 1 and buffer_index is not None:
+                # A track stores a single tgc_gain_curve, so a mixed buffer cannot be stored.
+                raise ValueError(
+                    f"The receives of {rf_buffer_name(buffer_index)} reference several TGC "
+                    f"waveforms {tgc_values.tolist()}. We do not support this case yet."
+                )
             if tgc_values.size != 1:
                 log.warning(
                     f"Receives for buffer_index={buffer_index} reference multiple TGC "
