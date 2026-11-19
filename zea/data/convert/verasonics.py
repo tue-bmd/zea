@@ -282,6 +282,7 @@ def _validate_convert_config(data):
             frames: all | "N" | "N-M" | [N, ...] # optional
             transmits: all | [N, ...]         # optional
             buffers: [N, ...]                 # optional
+            connector_applied: <bool>         # optional
     """
     if not isinstance(data, dict) or "files" not in data:
         raise ValueError("convert.yaml must have a top-level 'files' key")
@@ -333,6 +334,10 @@ def _validate_convert_config(data):
                 and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in bu)
             ):
                 raise ValueError(f"'buffers' must be a list of non-negative ints, got {bu!r}")
+        if "connector_applied" in entry and not isinstance(entry["connector_applied"], bool):
+            raise ValueError(
+                f"'connector_applied' must be a bool, got {entry['connector_applied']!r}"
+            )
     return data
 
 
@@ -950,6 +955,7 @@ class VerasonicsFile(h5py.File):
               first_frame: 26  # 0-based indexing
               frames: 30-99  # 0-based indexing
               buffers: [0]  # 0-based indexing, so RcvData{1}
+              connector_applied: true  # see VerasonicsFile.read_raw_data
 
         If ``first_frame`` is provided, it will reorder the frames first and use
         the ``frames`` key to subsample afterwards.
@@ -1079,9 +1085,19 @@ class VerasonicsFile(h5py.File):
         raw_data = self.dereference_index(self._rcvdata(), buffer_index)
         return np.asarray(raw_data, dtype=np.int16)
 
-    def read_raw_data(self, frames="all", buffer_index=0, first_frame_idx=None):
+    def read_raw_data(
+        self, frames="all", buffer_index=0, first_frame_idx=None, connector_applied=None
+    ):
         """
         Read the raw data from the file.
+
+        Args:
+            connector_applied (bool, optional): Whether the raw data was already reordered
+                from hardware channels to probe elements with ``Trans.ConnectorES`` before
+                saving. Only used when the probe has a connector. Defaults to None, which
+                applies the connector for files saved with ``save_raw_version`` or with more
+                channels than elements, and raises a ``ValueError`` otherwise, because such
+                files can be either.
 
         Returns:
             raw_data (np.ndarray): The raw data of shape (n_rcv, n_samples).
@@ -1101,16 +1117,35 @@ class VerasonicsFile(h5py.File):
             f"(n_frames, n_channels, n_samples), but got {raw_data.shape}."
         )
 
-        # Verasonics acquires on all hardware channels (e.g. 128), which can be more
-        # than the probe elements (e.g. 80). Trans.ConnectorES maps elements to channels.
+        # Map hardware channels to probe elements (see VerasonicsProbe.connector).
         n_channels = raw_data.shape[1]
         connector = self.probe.connector
         n_elements = self.probe.geometry.shape[0]
 
-        if n_channels == n_elements and not self.is_new_save_raw_format:
-            # Assume the channel order already matches the element order.
-            pass
-        elif connector is not None and connector.size == n_elements:
+        if connector is not None and connector_applied is None:
+            if self.is_new_save_raw_format or n_channels != n_elements:
+                connector_applied = False
+            else:
+                raise ValueError(
+                    "Cannot tell whether the raw data was already reordered with "
+                    "Trans.ConnectorES before saving: the file has as many channels as "
+                    f"probe elements ({n_elements}) and no 'save_raw_version'. Set "
+                    "connector_applied (convert.yaml, or --connector-applied True/False) "
+                    "to True if it was reordered, or False to apply the connector."
+                )
+
+        if connector is not None and connector_applied:
+            if n_channels != n_elements:
+                raise ValueError(
+                    "connector_applied=True, but the raw data has "
+                    f"{n_channels} channels and the probe has {n_elements} elements."
+                )
+        elif connector is not None:
+            if connector.size != n_elements:
+                raise ValueError(
+                    f"Trans.ConnectorES has {connector.size} entries but the probe has "
+                    f"{n_elements} elements."
+                )
             if connector.min() < 0 or connector.max() >= n_channels:
                 raise ValueError(
                     "Cannot map acquired channels to probe elements: connector "
@@ -1124,7 +1159,7 @@ class VerasonicsFile(h5py.File):
                     "Trans.ConnectorES."
                 )
             raw_data = raw_data[:, connector, :]
-        else:
+        elif n_channels != n_elements:
             log.warning(
                 f"Raw data has {n_channels} channels but the probe has "
                 f"{n_elements} elements, and no usable connector map "
@@ -1640,6 +1675,7 @@ class VerasonicsFile(h5py.File):
         buffers=None,
         additional_functions=None,
         lens_sound_speed: float = 1000.0,
+        connector_applied=None,
     ):
         """Reads data from a .mat Verasonics output file.
 
@@ -1664,6 +1700,8 @@ class VerasonicsFile(h5py.File):
                 wavelengths) into ``lens_thickness`` and ``lens_sound_speed`` fields on the
                 probe dict.  Only applied when the file contains a ``lensCorrection`` field.
                 Defaults to 1000.0.
+            connector_applied (bool, optional): See :meth:`read_raw_data`. Defaults to the
+                ``connector_applied`` in a `convert.yaml` file, or else None.
 
         Returns:
             tuple: ``(tracks, probe_dict, custom_elements)`` with one track dict
@@ -1679,6 +1717,8 @@ class VerasonicsFile(h5py.File):
             frames = convert_config.get("frames", "all")
         if buffers is None:
             buffers = convert_config.get("buffers", None)
+        if connector_applied is None:
+            connector_applied = convert_config.get("connector_applied", None)
 
         buffers = self._select_buffers(buffers)
         if len(buffers) > 1 and (not _is_all_frames(frames) or first_frame is not None):
@@ -1702,6 +1742,7 @@ class VerasonicsFile(h5py.File):
                     frames=frames,
                     buffer_index=buffer_index,
                     first_frame_idx=first_frame,
+                    connector_applied=connector_applied,
                 )
             except Exception as e:
                 e.add_note(f"While reading {rf_buffer_name(buffer_index)} of {self.filename}.")
@@ -1835,6 +1876,7 @@ class VerasonicsFile(h5py.File):
         additional_functions=None,
         lens_sound_speed: float = 1000.0,
         buffers=None,
+        connector_applied=None,
     ):
         """Converts the Verasonics file to the zea format.
 
@@ -1864,6 +1906,8 @@ class VerasonicsFile(h5py.File):
                 ``RcvData{1}``. Defaults to the
                 ``buffers`` in a `convert.yaml` file, or else every buffer in the file
                 (see :meth:`available_buffers`).
+            connector_applied (bool, optional): See :meth:`read_raw_data`. Defaults to the
+                ``connector_applied`` in a `convert.yaml` file, or else None.
         """
         tracks, probe_dict, custom_elements = self.read_verasonics_file(
             frames=frames,
@@ -1871,6 +1915,7 @@ class VerasonicsFile(h5py.File):
             buffers=buffers,
             additional_functions=additional_functions,
             lens_sound_speed=lens_sound_speed,
+            connector_applied=connector_applied,
         )
 
         log.info("Generating zea dataset...")
@@ -2010,7 +2055,10 @@ class VerasonicsProbe:
     def connector(self):
         """Probe connector indices (0-based) mapping elements to hardware channels.
 
-        ``None`` if the transducer has no ``ConnectorES`` field.
+        ``None`` if the transducer has no ``ConnectorES`` field, in which case the
+        channel order is taken to match the element order. Whether the connector is
+        applied to the raw data is decided by ``connector_applied`` in
+        :meth:`VerasonicsFile.read_raw_data`.
         """
         if "ConnectorES" not in self.trans_obj.keys():
             return None
@@ -2118,7 +2166,8 @@ def convert_verasonics(args):
             - dst (str): Destination folder path.
             - frames (list[str]): MATLAB frames spec (e.g., ["all"], integers, or ranges like "4-8")
             - allow_accumulate (bool): Whether to allow accumulate mode.
-            - buffers (list[int] | None): 0-based RF buffers to convert (all if None)."""
+            - buffers (list[int] | None): 0-based RF buffers to convert (all if None).
+            - connector_applied (bool | None): See :meth:`VerasonicsFile.read_raw_data`."""
 
     if getattr(args, "upload", False):
         assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
@@ -2201,6 +2250,7 @@ def convert_verasonics(args):
                 frames=args.frames,
                 allow_accumulate=args.allow_accumulate,
                 buffers=getattr(args, "buffers", None),
+                connector_applied=getattr(args, "connector_applied", None),
             )
             num_converted += 1
         except Exception:

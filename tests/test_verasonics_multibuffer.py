@@ -571,6 +571,39 @@ def test_read_raw_data_layout(tmp_path):
     np.testing.assert_array_equal(raw, expected)
 
 
+@pytest.mark.parametrize(
+    "save_raw_version, connector_applied, permutation",
+    [
+        (True, None, [2, 0, 1]),  # our saver never reorders
+        (False, False, [2, 0, 1]),
+        (False, True, [0, 1, 2]),
+    ],
+)
+def test_read_raw_data_connector(tmp_path, save_raw_version, connector_applied, permutation):
+    """The connector is applied unless the raw data was already reordered with it."""
+    rcv_data = np.arange(3 * 8, dtype=np.int16).reshape(1, 3, 8)
+    mat = tmp_path / "raw_data.mat"
+    _write_raw_data_workspace(mat, rcv_data, connector=[3, 1, 2])
+    if save_raw_version:
+        with h5py.File(mat, "a") as f:
+            f.create_dataset("save_raw_version", data=_matlab_value(1))
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        raw = vf.read_raw_data(connector_applied=connector_applied)
+    expected = rcv_data[:, permutation].reshape(1, 3, 2, 4).transpose(0, 2, 3, 1)[..., None]
+    np.testing.assert_array_equal(raw, expected)
+
+
+def test_read_raw_data_connector_ambiguous(tmp_path):
+    """Without save_raw_version and with equal channel and element counts, the user must choose."""
+    mat = tmp_path / "raw_data.mat"
+    _write_raw_data_workspace(mat, np.zeros((1, 3, 8), np.int16), connector=[3, 1, 2])
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        with pytest.raises(ValueError, match="connector_applied"):
+            vf.read_raw_data()
+
+
 def test_read_raw_data_connector_out_of_range(tmp_path):
     """A connector map pointing past the acquired channels is rejected."""
     mat = tmp_path / "raw_data.mat"

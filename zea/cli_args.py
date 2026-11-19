@@ -826,6 +826,10 @@ class _Verasonics:
     harmonic imaging through pulse inversion). In this case, the mode in the Receive
     structure is set to 1 (accumulate). If this flag is set, such files will be processed.
     Otherwise, an error is raised when such a mode is detected."""
+    connector_applied: bool | None = None
+    """Whether the raw data was already reordered with Trans.ConnectorES before saving.
+    Required for files that have as many channels as probe elements and no
+    save_raw_version, unless specified in a convert.yaml file."""
     upload: bool = False
     """Upload the converted dataset to HuggingFace Hub after conversion. Only for zea
     maintainers with push access to the repository."""
