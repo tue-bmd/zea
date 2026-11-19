@@ -322,6 +322,15 @@ def _validate_convert_config(data):
     return data
 
 
+def _is_all_frames(frames) -> bool:
+    # True for "all", or a list/tuple of only "all" (the CLI passes frames as a list).
+    if isinstance(frames, str):
+        return frames == "all"
+    if isinstance(frames, (list, tuple)):
+        return len(frames) > 0 and all(isinstance(f, str) and f == "all" for f in frames)
+    return False
+
+
 def _is_reference_dataset(dataset) -> bool:
     """Whether an HDF5 dataset stores object references.
 
@@ -1638,7 +1647,7 @@ class VerasonicsFile(h5py.File):
         if frames is None:
             frames = convert_config.get("frames", "all")
 
-        if len(buffers) > 1 and (frames not in ("all", ["all"]) or first_frame is not None):
+        if len(buffers) > 1 and (not _is_all_frames(frames) or first_frame is not None):
             raise NotImplementedError(
                 "Selecting frames ('frames' / 'first_frame') is not supported for files "
                 f"with several RF buffers ({len(buffers)} buffers): the buffers generally "

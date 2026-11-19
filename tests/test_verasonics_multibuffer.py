@@ -181,7 +181,7 @@ def test_binary_dimension_mismatch_raises(tmp_path):
             vf.read_raw_buffer_array(0)
 
 
-@pytest.mark.parametrize("frames", ["0-1", [0]])
+@pytest.mark.parametrize("frames", ["0-1", [0], np.arange(2), ("all", "0")])
 def test_frame_selection_with_several_buffers_is_not_implemented(tmp_path, frames):
     """Frame selection is ambiguous when buffers hold different numbers of frames."""
     buffers = [np.zeros((2, 2, 4), np.int16), np.zeros((3, 2, 4), np.int16)]
@@ -195,6 +195,20 @@ def test_frame_selection_with_several_buffers_is_not_implemented(tmp_path, frame
         # missing metadata of this synthetic file, not on the frame selection).
         with pytest.raises(Exception) as excinfo:
             vf.read_verasonics_file(frames=frames, buffers=[0])
+        assert not isinstance(excinfo.value, NotImplementedError)
+
+
+@pytest.mark.parametrize("frames", ["all", ["all"], ("all",)])
+def test_all_frames_with_several_buffers_is_allowed(tmp_path, frames):
+    """Every spelling of 'all' passes the multi-buffer frame-selection check."""
+    buffers = [np.zeros((2, 2, 4), np.int16), np.zeros((3, 2, 4), np.int16)]
+    mat = tmp_path / "raw_data.mat"
+    _write_rcvdata_workspace(mat, buffers, bufnums=[1, 2])
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        # Fails later on the missing metadata of this synthetic file.
+        with pytest.raises(Exception) as excinfo:
+            vf.read_verasonics_file(frames=frames)
         assert not isinstance(excinfo.value, NotImplementedError)
 
 
