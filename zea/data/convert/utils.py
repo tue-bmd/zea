@@ -1,5 +1,8 @@
+import atexit
 import json
 import os
+import shutil
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -8,6 +11,7 @@ import numpy as np
 from tqdm import tqdm
 
 from zea import log
+from zea.internal.utils import atomic_write
 
 # Girder API base URL shared by CAMUS and CETUS collections
 GIRDER_API = "https://humanheart-project.creatis.insa-lyon.fr/database/api/v1"
@@ -156,6 +160,27 @@ def unzip(src: Path, dst: Path) -> Path:
     return dst
 
 
+def unzip_beside(src: Path) -> Path:
+    """Unzips a .zip file next to itself, or into a fresh temp dir if its folder is read-only.
+
+    Args:
+        src (Path): Path to the .zip file to unzip.
+
+    Returns:
+        Path: Path to the unzipped directory.
+    """
+    if os.access(src.parent, os.W_OK):
+        return unzip(src, src.with_suffix(""))
+
+    # A fresh private dir each run, as reusing a predictable path in the shared temp dir
+    # would let another user plant a forged extraction.
+    tmp_dir = Path(tempfile.mkdtemp(prefix="zea_unzipped_"))
+    # Registered before extracting, so a failed or partial extraction is removed too.
+    atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
+    log.warning(f"{src.parent} is not writable, unzipping to {tmp_dir} instead.")
+    return unzip(src, tmp_dir)
+
+
 def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cover
     """Download a file from a URL to a local path.
 
@@ -182,13 +207,11 @@ def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cove
     destination.parent.mkdir(parents=True, exist_ok=True)
     timeout = int(os.getenv("ZEA_DOWNLOAD_TIMEOUT", "600"))
     filename = destination.name
-    temp_path = destination.with_name(f"{destination.name}.part")
-
-    if temp_path.exists():
-        temp_path.unlink()
 
     log.info(f"Downloading {filename} ...")
-    try:
+    # An interrupted download must not leave a truncated file behind that the
+    # `destination.exists()` check above would then treat as a completed one.
+    with atomic_write(destination) as temp_path:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             total_header = response.headers.get("content-length")
             total = int(total_header) if total_header is not None else None
@@ -209,11 +232,6 @@ def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cove
                 f"Downloaded size mismatch for {filename}: "
                 f"expected {total} bytes, got {bytes_written}."
             )
-
-        temp_path.replace(destination)
-    finally:
-        if temp_path.exists() and not destination.exists():
-            temp_path.unlink(missing_ok=True)
 
     log.info(f"Downloaded {filename} to {destination.parent}")
     return destination
@@ -416,14 +434,15 @@ def upload_dataset_to_hf(  # pragma: no cover
     file_glob: str = "*.hdf5",
     commit_message: str | None = None,
     allow_patterns: "list[str] | None" = None,
+    yes: bool = False,
 ) -> None:
     """Upload a converted dataset to a HuggingFace Hub revision branch.
 
-    Uses :meth:`huggingface_hub.HfApi.upload_large_folder`, the resumable,
-    chunked, multi-commit uploader meant for large datasets (many or large
-    files).  Upload to the ``main`` branch is intentionally blocked.  After
-    uploading to a named revision branch, verify the data manually and then
-    merge the branch into ``main`` on the Hugging Face Hub.
+    Uses :meth:`huggingface_hub.HfApi.upload_folder`, which (with ``hf_xet``
+    installed) is resumable and splits large folders over several commits.
+    Upload to the ``main`` branch is intentionally blocked.  After uploading
+    to a named revision branch, verify the data manually and then merge the
+    branch into ``main`` on the Hugging Face Hub.
 
     Args:
         folder: Root folder containing the files to upload.
@@ -431,19 +450,25 @@ def upload_dataset_to_hf(  # pragma: no cover
         revision: Target branch name.  Must not be ``"main"``.
         file_glob: Glob pattern for files to include in the size summary.
             Defaults to ``"*.hdf5"``.
-        commit_message: Message used only when creating the *revision* branch
-            (``upload_large_folder`` generates its own per-commit messages).
-            Defaults to ``"Upload <repo_id> (zea format) to <revision>"``.
+        commit_message: Commit message for the upload (large uploads get a
+            `` (part N)`` suffix on follow-up commits).  Defaults to
+            ``"Upload <repo_id> (zea format) to <revision>"``.
         allow_patterns: Optional list of glob patterns limiting which files in
             *folder* are uploaded.  When ``None`` (default) the whole folder is
             uploaded.  Use this to scope an upload to specific files.
+        yes: Skip the interactive confirmation prompts and create the revision
+            branch without asking.  For unattended batch migrations; leave at
+            ``False`` for interactive use.  Requires an already configured
+            Hugging Face token (``HF_TOKEN`` or ``hf auth login``).
 
     Raises:
         ValueError: If *revision* is ``"main"``.
         FileNotFoundError: If no files matching *file_glob* are found
             under *folder*.
+        RuntimeError: If *yes* is ``True`` but no Hugging Face token is
+            configured.
     """
-    from huggingface_hub import HfApi, login
+    from huggingface_hub import HfApi, get_token, login
 
     if revision == "main":
         raise ValueError(
@@ -474,13 +499,25 @@ def upload_dataset_to_hf(  # pragma: no cover
     log.info("=" * 60)
     log.info("")
 
-    answer = input("Proceed with upload? [y/N] ").strip().lower()
-    if answer != "y":
-        log.info("Upload cancelled.")
-        return
+    if not yes:
+        answer = input("Proceed with upload? [y/N] ").strip().lower()
+        if answer != "y":
+            log.info("Upload cancelled.")
+            return
 
-    login()
-    api = HfApi()
+    # With no token, login() drops into an interactive token prompt, which would hang
+    # the unattended run that yes=True exists for. Demand the token up front instead.
+    token = get_token() if yes else None
+    if yes:
+        if token is None:
+            raise RuntimeError(
+                "yes=True requires a Hugging Face token to be configured already: "
+                "set HF_TOKEN or run `hf auth login` before an unattended upload."
+            )
+    else:
+        login()
+
+    api = HfApi(token=token)
 
     # Check if the revision (branch) exists; if not, prompt to create it.
     try:
@@ -488,7 +525,9 @@ def upload_dataset_to_hf(  # pragma: no cover
         branch_names = {b.name for b in refs.branches}
         if revision not in branch_names:
             create = (
-                input(
+                "y"
+                if yes
+                else input(
                     f"Revision (branch) '{revision}' does not exist on {repo_id}. Create it? [y/N] "
                 )
                 .strip()
@@ -502,14 +541,12 @@ def upload_dataset_to_hf(  # pragma: no cover
     except Exception as exc:
         log.warning("Could not verify revision existence: %s", exc)
 
-    # upload_large_folder is the resumable, chunked, multi-commit uploader meant
-    # for big datasets (many/large files). It manages its own commit messages, so
-    # commit_message only affects the branch-creation path above, not the upload.
-    api.upload_large_folder(
+    api.upload_folder(
         folder_path=str(folder),
         repo_id=repo_id,
         repo_type="dataset",
         revision=revision,
         allow_patterns=allow_patterns,
+        commit_message=commit_message,
     )
     log.info(f"Uploaded to https://huggingface.co/datasets/{repo_id}/tree/{revision}")

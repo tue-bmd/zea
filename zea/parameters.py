@@ -104,6 +104,12 @@ import numpy as np
 from keras import ops
 
 from zea import log
+from zea.beamform.geometry import (
+    compute_element_normals,
+    is_diverging,
+    is_focused,
+    is_plane_wave,
+)
 from zea.beamform.pfield import compute_pfield
 from zea.beamform.pixelgrid import (
     cartesian_pixel_grid,
@@ -114,10 +120,10 @@ from zea.beamform.pixelgrid import (
 )
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.display import compute_scan_convert_2d_coordinates
-from zea.func.ultrasound import compute_time_to_peak_stack
+from zea.func.ultrasound import compute_time_to_peak
 from zea.internal.parameters import BaseParameters, MissingDependencyError, cache_with_dependencies
 from zea.internal.utils import deprecated
-from zea.probes import Probe
+from zea.probes import Probe, fit_curved_probe_radius
 
 
 class Parameters(BaseParameters):
@@ -152,7 +158,12 @@ class Parameters(BaseParameters):
     """Nominal center frequency of the probe [Hz]."""
 
     probe_bandwidth_percent: float
-    """Probe bandwidth as a percentage of the center frequency. Defaults to 200.0."""
+    """Probe bandwidth as a percentage of the center frequency. Defaults to 100.0."""
+
+    bandwidth: float
+    """Width of the RF band kept by processing [Hz], centered on the
+    ``demodulation_frequency``. Used by :class:`~zea.ops.BandPassFilter` and by
+    :meth:`check_for_aliasing`."""
 
     n_el: int
     """Number of elements in the transducer array."""
@@ -190,12 +201,6 @@ class Parameters(BaseParameters):
     - ``list``/``np.ndarray``: use these specific transmit indices.
     - ``slice``: use transmits given by the slice (e.g. ``slice(0, 10, 2)``).
     """
-
-    waveforms_one_way: np.ndarray | None
-    """One-way transmit waveforms, shape (n_tx, n_samples_one_way). None if absent."""
-
-    waveforms_two_way: np.ndarray | None
-    """Two-way transmit waveforms, shape (n_tx, n_samples_two_way). None if absent."""
 
     pixels_per_wavelength: int
     """Number of grid pixels per wavelength. Defaults to 4."""
@@ -302,6 +307,7 @@ class Parameters(BaseParameters):
         "pfield_kwargs": {"dtype": dict, "default": {}},
         "apply_lens_correction": {"dtype": bool, "default": False},  # native dtype on purpose
         "enable_scanline": {"dtype": bool, "default": False},  # native dtype on purpose
+        "flat_aligned_apodization": {"dtype": (type(None), np.ndarray)},
         "flat_receive_apodization": {"dtype": (type(None), np.ndarray), "default": None},
         "focal_region_length": {"dtype": np.float32, "default": 0.0},
         "grid_type": {"dtype": str, "default": "cartesian"},
@@ -316,6 +322,7 @@ class Parameters(BaseParameters):
         "n_tx": {"dtype": np.int32},
         "n_ax": {"dtype": int},  # native dtype on purpose
         "n_ch": {"dtype": np.int32},
+        "bandwidth": {"dtype": np.float32},
         "attenuation_coef": {"dtype": np.float32, "default": 0.0},
         "f_number": {"dtype": float, "default": 1.0},  # native dtype on purpose
         "t_peak": {"dtype": np.float32},
@@ -324,12 +331,12 @@ class Parameters(BaseParameters):
         "rho_range": {"dtype": np.float32, "shape": (2,)},
         "fill_value": {"dtype": float},
         "resolution": {"dtype": (np.float32, type(None)), "default": None},
-        "distance_to_apex": {"dtype": np.float32, "default": 0.0},
+        "distance_to_apex": {"dtype": (np.float32, type(None)), "default": None},
     }
 
     # Add some defaults that are not stored in a file
     VALID_PARAMS["sound_speed"]["default"] = 1540.0
-    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 200.0
+    VALID_PARAMS["probe_bandwidth_percent"]["default"] = 100.0
     # Give these a default of None (rather than leaving them unset) so that they can be
     # declared as dependencies of computed properties (e.g. t_peak, n_waveforms) without
     # tripping MissingDependencyError
@@ -349,19 +356,26 @@ class Parameters(BaseParameters):
             return np.array([aperture_width, aperture_height, aperture_depth])
         return None
 
-    @cache_with_dependencies("polar_limits", "aperture_size")
+    @cache_with_dependencies("probe_geometry")
     def distance_to_apex(self):
-        """Calculate the distance from the transducer to the apex of the pixel grid."""
-        if "distance_to_apex" in self._params:
-            return self._params["distance_to_apex"]
-        if self.aperture_size is not None:
-            max_angle = np.max(np.abs(self.polar_limits))
-            t = np.tan(max_angle)
-            if np.isclose(t, 0.0):
-                return 0.0
-            distance_to_apex = (self.aperture_size[0] / 2) / t
-            return distance_to_apex
-        return 0.0
+        """The distance from the transducer surface to the apex of the polar pixel grid.
+
+        The apex is the point the beams fan out from. For a curved array it is the centre
+        of curvature, so this is the probe's radius of curvature, fitted from
+        :attr:`probe_geometry`. A flat array has no centre of curvature and its beams
+        originate at the array itself, giving 0. Set it explicitly to override the fit.
+        """
+        value = self._params.get("distance_to_apex")
+        if value is not None:
+            return value
+
+        probe_geometry = self._params.get("probe_geometry")
+        if probe_geometry is None:
+            return np.float32(0.0)
+        try:
+            return np.float32(fit_curved_probe_radius(probe_geometry))
+        except ValueError:  # not a curved array
+            return np.float32(0.0)
 
     @cache_with_dependencies(
         "xlims",
@@ -405,7 +419,10 @@ class Parameters(BaseParameters):
             )
         elif self.grid_type == "polar":
             if self.is_3d:
-                raise NotImplementedError("3D polar grids are not yet supported.")
+                raise NotImplementedError(
+                    "3D polar grids are not yet supported. Set grid_type='cartesian', "
+                    "or drop ylims/grid_size_y to build a 2D polar grid."
+                )
             return polar_pixel_grid(
                 self.polar_limits,
                 self.zlims,
@@ -422,11 +439,15 @@ class Parameters(BaseParameters):
                 grid_size_x=self.grid_size_x,
                 grid_size_y=self.grid_size_y,
             )
-            try:
-                check_for_aliasing(self)
-            except MissingDependencyError:
-                # No wavelength (e.g. missing center frequency); cannot assess aliasing.
-                pass
+            # Aliasing cannot be assessed without the frequency and probe geometry.
+            if (
+                self._params.get("center_frequency") is not None
+                and self._params.get("probe_geometry") is not None
+            ):
+                try:
+                    self.check_for_aliasing()
+                except MissingDependencyError:
+                    pass
             return grid
         else:
             raise ValueError(
@@ -434,18 +455,111 @@ class Parameters(BaseParameters):
                 "'cartesian' and 'polar'."
             )
 
-    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z")
+    def check_for_aliasing(self, demodulated=True, bandwidth=None) -> list:
+        """Warn when the beamforming grid under-samples the data it will carry.
+
+        Run by :attr:`grid` for cartesian grids. Whether a pixel pitch
+        under-samples depends on whether the data reaching the grid is RF or
+        baseband IQ, which the parameters alone do not tell. By default IQ is
+        assumed: its axial limit is never stricter than the RF one, so a grid
+        that fails it aliases either way, and the lateral limit is the same for
+        both. See :func:`zea.beamform.pixelgrid.aliasing_limits` for the
+        criteria. Only regular cartesian grids, 2D or 3D, are checked.
+
+        Args:
+            demodulated: Whether the data reaching the grid is baseband IQ.
+                Pass ``False`` to check against the stricter RF axial limit.
+            bandwidth: The RF band in Hz. Overrides the ``bandwidth`` parameter;
+                when neither is set, ``probe_bandwidth_percent`` of the
+                ``center_frequency`` is assumed.
+
+        Returns:
+            list of str: The warnings emitted; empty when the grid is adequate.
+        """
+        if self.grid_type != "cartesian" or self.enable_scanline:
+            return []
+
+        def stored(name):
+            # Read through the property so the transmit selection applies, but only
+            # when the value was provided: the fallbacks log a warning that the
+            # check should not trigger.
+            return getattr(self, name) if self._params.get(name) is not None else None
+
+        focus_distances = stored("focus_distances")
+        tx_apodizations = stored("tx_apodizations")
+        if focus_distances is None or tx_apodizations is None:
+            # Unknown transmit geometry: an empty one makes aliasing_limits assume
+            # the symmetric transmit cone.
+            focus_distances, tx_apodizations = np.zeros(0), np.zeros((0, 0))
+        transmit_origins = stored("transmit_origins")
+        if transmit_origins is None:
+            transmit_origins = np.zeros((len(focus_distances), 3))
+
+        if bandwidth is None:
+            bandwidth = self._params.get("bandwidth")
+        if bandwidth is None:
+            center_frequency = np.max(np.asarray(self.center_frequency, dtype=float))
+            bandwidth = self.probe_bandwidth_percent / 100 * center_frequency
+
+        return check_for_aliasing(
+            self.xlims,
+            self.zlims,
+            self.grid_size_x,
+            self.grid_size_z,
+            self.sound_speed,
+            self.center_frequency,
+            self.f_number,
+            demodulation_frequency=self.demodulation_frequency,
+            focus_distances=focus_distances,
+            probe_geometry=self.probe_geometry,
+            tx_apodizations=tx_apodizations,
+            polar_angles=self.polar_angles,
+            transmit_origins=transmit_origins,
+            demodulated=demodulated,
+            bandwidth=bandwidth,
+            azimuth_angles=stored("azimuth_angles"),
+            ylims=self.ylims if self.is_3d else (0.0, 0.0),
+            grid_size_y=self.grid_size_y if self.is_3d else 1,
+            element_width=self._params.get("element_width"),
+            element_height=self._params.get("element_height"),
+        )
+
+    @cache_with_dependencies("enable_scanline", "n_tx", "grid_size_z", "selected_transmits")
     def flat_aligned_apodization(self):
         """Per-pixel, per-transmit compounding apodization weight of shape (n_pix, n_tx).
 
-        Only defined when ``enable_scanline`` is ``True``, where it is the one-hot
-        mask (see :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`)
-        that isolates each pixel's owning transmit. ``None`` otherwise, which
-        makes :class:`~zea.ops.AlignedApodization` a no-op.
+        Can be set explicitly to any weighting, in which case it is stored over
+        the full transmit axis and read back sliced by ``selected_transmits``.
+        This requires ``enable_scanline`` to be ``False``: a scanline grid has
+        one column per *selected* transmit, so its pixel axis is defined by the
+        transmit selection and a mask stored over the full transmit axis cannot
+        stay aligned with it.
+        When left unset, it is the one-hot mask (see
+        :func:`~zea.beamform.pixelgrid.scanline_aligned_apodization`) that
+        isolates each pixel's owning transmit if ``enable_scanline`` is ``True``,
+        and ``None`` otherwise, which makes :class:`~zea.ops.AlignedApodization`
+        a no-op.
 
         This weights the *transmit* axis (compounding), not the receive channels;
         for custom receive-aperture apodization see ``flat_receive_apodization``.
         """
+        value = self._params.get("flat_aligned_apodization")
+        if value is not None:
+            if self.enable_scanline:
+                raise ValueError(
+                    "``flat_aligned_apodization`` cannot be set explicitly when "
+                    "``enable_scanline`` is True: the scanline grid holds one column per "
+                    "selected transmit, so its pixel axis follows the transmit selection and "
+                    "a mask stored over the full transmit axis cannot stay aligned with it. "
+                    "Set ``enable_scanline=False`` to supply a custom mask."
+                )
+            _ = self.n_tx  # raises a clear error if no transmit selection is resolved yet
+            if value.shape[1] != self.n_tx_total:
+                raise ValueError(
+                    "``flat_aligned_apodization`` is stored over the full transmit axis, so "
+                    f"it must have {self.n_tx_total} columns, got shape {value.shape}."
+                )
+            return value[:, self.selected_transmits]
         if not self.enable_scanline:
             return None
         return scanline_aligned_apodization(self.n_tx, self.grid_size_z)
@@ -466,8 +580,9 @@ class Parameters(BaseParameters):
         if grid_size_x is not None:
             return grid_size_x
 
+        # Pixels sit on both limits, so n pixels span n - 1 pitches.
         width = self.xlims[1] - self.xlims[0]
-        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_x = int(np.ceil(width / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_x, 1)
 
     @cache_with_dependencies(
@@ -485,7 +600,7 @@ class Parameters(BaseParameters):
             return grid_size_y
 
         height = self.ylims[1] - self.ylims[0]
-        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_y = int(np.ceil(height / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_y, 1)
 
     @cache_with_dependencies(
@@ -502,7 +617,7 @@ class Parameters(BaseParameters):
             return grid_size_z
 
         depth = self.zlims[1] - self.zlims[0]
-        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength)))
+        min_grid_size_z = int(np.ceil(depth / (self.wavelength / self.pixels_per_wavelength))) + 1
         return max(min_grid_size_z, 1)
 
     @cache_with_dependencies("sound_speed", "center_frequency")
@@ -510,29 +625,69 @@ class Parameters(BaseParameters):
         """Calculate the wavelength based on sound speed and transmit center frequency."""
         return self.sound_speed / self.center_frequency
 
-    @cache_with_dependencies("zlims", "polar_limits", "probe_geometry")
+    @cache_with_dependencies(
+        "zlims",
+        "probe_geometry",
+        "distance_to_apex",
+        "focus_distances",
+        "polar_angles",
+        "f_number",
+        "sound_speed",
+        "sampling_frequency",
+        "n_ax",
+    )
     def xlims(self):
-        """The x-limits of the beamforming grid [m]. If not explicitly set, it is computed based
-        on the polar limits and probe geometry.
+        """The lateral (x) limits of the beamforming grid in meters.
+
+        If not explicitly provided, the limits are derived from the probe geometry, the transmits
+        and the receive :attr:`f_number`:. If f_number is 0, a 45 degree cone is used instead.
+        The limits never come out narrower than the probe width.
+
+        Unsteered focused or plane wave transmits on a flat array (e.g. walking aperture scans)
+        image the strip in front of the array, so the limits hug the probe width. Otherwise the
+        field of view follows the receive cone for the edge elements.
         """
         xlims = self._params.get("xlims")
-        if xlims is None:
-            radius = max(self.zlims)
-            xlims_polar = (
-                radius * np.cos(-np.pi / 2 + self.polar_limits[0]),
-                radius * np.cos(-np.pi / 2 + self.polar_limits[1]),
-            )
-            xlims_plane = (
-                min(self.probe_geometry[:, 0]),
-                max(self.probe_geometry[:, 0]),
-            )
-            xlims = (
-                min(xlims_polar[0], xlims_plane[0]),
-                max(xlims_polar[1], xlims_plane[1]),
-            )
-        return xlims
+        if xlims is not None:
+            return xlims
 
-    @cache_with_dependencies("zlims", "grid_type", "azimuth_limits", "probe_geometry")
+        aperture_x = self.probe_geometry[:, 0]
+        left, right = int(np.argmin(aperture_x)), int(np.argmax(aperture_x))
+        xmin, xmax = float(aperture_x[left]), float(aperture_x[right])
+
+        focus_distances = self.focus_distances
+        polar_angles = self.polar_angles
+        if polar_angles is None:
+            polar_angles = np.zeros_like(focus_distances)
+
+        # Tolerance: converted data stores a nominally unsteered scan as float noise.
+        unsteered = np.allclose(polar_angles, 0.0, atol=1e-6) and np.all(
+            (focus_distances >= 0) | np.isinf(focus_distances)
+        )
+        if unsteered and self.distance_to_apex == 0:
+            return (xmin, xmax)
+
+        f_number = float(self.f_number)
+        half_angle = np.arctan(1 / (2 * f_number)) if f_number > 0 else np.pi / 4
+        normals = ops.convert_to_numpy(
+            compute_element_normals(ops.convert_to_tensor(self.probe_geometry))
+        )
+        tilt = np.arctan2(normals[:, 0], normals[:, 2])
+
+        # Outermost accepted ray of each edge element.
+        angle = tilt[[left, right]] + [-half_angle, half_angle]
+        depth = max(self.zlims) - self.probe_geometry[[left, right], 2]
+
+        # Stop at the deepest pixel or at the end of the record, whichever is first.
+        reach = depth * np.tan(np.abs(angle))
+        max_range = self.sound_speed * float(self.n_ax) / self.sampling_frequency / 2
+        reach = np.minimum(reach, max_range * np.sin(np.abs(angle)))
+        reach = np.sign(angle) * reach
+        return (min(xmin, xmin + float(reach[0])), max(xmax, xmax + float(reach[1])))
+
+    @cache_with_dependencies(
+        "zlims", "grid_type", "azimuth_limits", "probe_geometry", "distance_to_apex"
+    )
     def ylims(self):
         """The y-limits of the beamforming grid [m]. If not explicitly set, it is computed based
         on the azimuth limits and probe geometry.
@@ -542,7 +697,7 @@ class Parameters(BaseParameters):
             return ylims
 
         # If ylims not set, compute based on azimuth limits and probe geometry
-        radius = max(self.zlims)
+        radius = max(self.zlims) + self.distance_to_apex
         ylims_azimuth = (
             (0.0, 0.0)  # avoid numerical imprecision with np.cos(np.pi/2)
             if self.azimuth_limits is None or self.azimuth_limits[0] == self.azimuth_limits[1]
@@ -566,18 +721,16 @@ class Parameters(BaseParameters):
             return [0, self.sound_speed * self.n_ax / self.sampling_frequency / 2]
         return zlims
 
-    @cache_with_dependencies("grid", "grid_type", "distance_to_apex")
+    @cache_with_dependencies("grid")
     def extent(self):
         """
         The extent of the beamforming grid in the format: (xmin, xmax, ymin, ymax, zmin, zmax).
         """
+        # self.grid holds transducer-frame coordinates for every grid type (polar grids
+        # place their ray origins at -distance_to_apex), so this needs no correction.
         xlims = (self.grid[..., 0].min(), self.grid[..., 0].max())
         ylims = (self.grid[..., 1].min(), self.grid[..., 1].max())
         zlims = (self.grid[..., 2].min(), self.grid[..., 2].max())
-
-        # For polar grids, adjust zlims to account for distance to apex
-        if self.grid_type == "polar":
-            zlims = (zlims[0] + self.distance_to_apex, zlims[1])
 
         return np.array(
             [
@@ -717,20 +870,19 @@ class Parameters(BaseParameters):
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select focused transmits")
-            # Plane waves use inf (or 0); a finite positive focus marks a focused transmit.
-            return np.where((value > 0) & np.isfinite(value))[0].tolist()
+            return np.where(is_focused(value))[0].tolist()
 
         if selection == "diverging":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select diverging transmits")
-            return np.where(value < 0)[0].tolist()
+            return np.where(is_diverging(value))[0].tolist()
 
         if selection == "plane":
             value = self._params.get("focus_distances")
             if value is None:
                 raise ValueError("No focus distances provided, cannot select plane wave transmits")
-            return np.where((value == 0) | np.isinf(value))[0].tolist()
+            return np.where(is_plane_wave(value))[0].tolist()
 
         # Handle integer - select evenly spaced transmits
         if isinstance(selection, (int, np.integer)):
@@ -775,6 +927,31 @@ class Parameters(BaseParameters):
             return self._params["demodulation_frequency"]
 
         return self.center_frequency
+
+    @cache_with_dependencies("center_frequency", "probe_bandwidth_percent")
+    def bandwidth(self):
+        """The signal bandwidth in Hz, used by filter operations such as
+        :class:`~zea.ops.LowPassFilterIQ` and :class:`~zea.ops.BandPassFilter`.
+
+        If not set explicitly, it is derived from the probe metadata as
+        ``center_frequency * probe_bandwidth_percent / 100``. When the file does not store
+        ``probe_bandwidth_percent``, its default applies.
+
+        The filter operations design one set of taps, so they need a scalar. A per-transmit
+        ``center_frequency`` that is the same for every transmit gives a scalar bandwidth; when
+        it varies across transmits, no bandwidth is derived (``None``), and ``bandwidth`` must be
+        set explicitly for these filters.
+        """
+        if self._params.get("bandwidth") is not None:
+            return self._params["bandwidth"]
+
+        bandwidth = self.center_frequency * self.probe_bandwidth_percent / 100
+        if np.ndim(bandwidth) > 0:
+            per_transmit = np.asarray(bandwidth)
+            if per_transmit.size == 0 or np.any(per_transmit != per_transmit.flat[0]):
+                return None
+            return per_transmit.flat[0]
+        return bandwidth
 
     @cache_with_dependencies("selected_transmits")
     def polar_angles(self):
@@ -857,6 +1034,41 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def rx_aperture_indices(self):
+        """Probe element index of each receive channel of shape (n_tx, n_rx).
+
+        ``None`` for the usual case where every element receives on every transmit,
+        in which case the mapping is the identity and :attr:`n_rx` equals
+        :attr:`n_el`. Only acquisitions with a receive sub-aperture (a sliding
+        receive window, or a multiplexed front-end with fewer channels than
+        elements) carry it, since the mapping is then not recoverable from the
+        channel data alone. Sliced by :attr:`selected_transmits`, so it stays
+        aligned with :attr:`t0_delays` and :attr:`tx_apodizations`.
+
+        The transmit counterpart needs no such field: the transmit aperture is
+        recorded per element in :attr:`tx_apodizations`, whose zeros mark the
+        elements that did not fire.
+        """
+        value = self._params.get("rx_aperture_indices")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
+    @cache_with_dependencies("rx_aperture_indices", "n_el")
+    def n_rx(self):
+        """Number of receive channels in the channel data.
+
+        Equal to :attr:`n_el` unless the acquisition used a receive sub-aperture,
+        which :attr:`rx_aperture_indices` then maps onto the probe's elements.
+        """
+        indices = self.rx_aperture_indices
+        if indices is None:
+            return self.n_el
+
+        return int(indices.shape[1])
+
     @cache_with_dependencies("selected_transmits", "n_tx")
     def focus_distances(self):
         """Focus distances in meters for each event of shape (n_tx,).
@@ -905,9 +1117,27 @@ class Parameters(BaseParameters):
 
         return value[self.selected_transmits]
 
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_one_way(self):
+        """One-way transmit waveforms of shape (n_tx, n_samples_one_way), or None."""
+        value = self._params.get("waveforms_one_way")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
+    @cache_with_dependencies("selected_transmits")
+    def waveforms_two_way(self):
+        """Two-way transmit waveforms of shape (n_tx, n_samples_two_way), or None."""
+        value = self._params.get("waveforms_two_way")
+        if value is None:
+            return None
+
+        return value[self.selected_transmits]
+
     @cache_with_dependencies("waveforms_one_way", "waveforms_two_way")
     def n_waveforms(self):
-        """The number of unique transmit waveforms."""
+        """The number of transmit waveforms, one per selected transmit."""
 
         if self.waveforms_one_way is not None:
             return self.waveforms_one_way.shape[0]
@@ -923,14 +1153,16 @@ class Parameters(BaseParameters):
 
         If not set explicitly and ``waveforms_two_way`` (the two-way,
         pulse-echo transmit waveform) is available, this is estimated from it
-        via :func:`~zea.func.ultrasound.compute_time_to_peak_stack`. Otherwise
+        via :func:`~zea.func.ultrasound.compute_time_to_peak`. Otherwise
         it defaults to ``1 / center_frequency``.
         """
         t_peak = self._params.get("t_peak")
         if t_peak is None:
             waveforms = self._params.get("waveforms_two_way")
             if waveforms is not None:
-                t_peak = np.asarray(compute_time_to_peak_stack(waveforms, self.center_frequency))
+                t_peak = ops.convert_to_numpy(
+                    compute_time_to_peak(waveforms, self.center_frequency)
+                )
             else:
                 t_peak = np.full(self.n_tx_total, 1 / self.center_frequency)
 
@@ -961,29 +1193,32 @@ class Parameters(BaseParameters):
         "sound_speed",
         "center_frequency",
         "probe_bandwidth_percent",
-        "n_el",
         "probe_geometry",
         "tx_apodizations",
         "grid",
         "t0_delays",
         "pfield_kwargs",
+        "attenuation_coef",
+        optional=("element_width",),
     )
     def pfield(self) -> np.ndarray:
         """Compute or return the pressure field (pfield) for weighting
-        of shape (n_tx, grid_size_z, grid_size_x)."""
+        of shape (n_tx, grid_size_z, grid_size_x).
+
+        Uses :attr:`attenuation_coef`, unless overridden in :attr:`pfield_kwargs`."""
         if self.is_3d:
             raise NotImplementedError("Pfield computation is not yet implemented for 3D scans.")
 
         pfield = compute_pfield(
             sound_speed=self.sound_speed,
             center_frequency=self.center_frequency,
-            n_el=self.n_el,
             probe_geometry=self.probe_geometry,
             tx_apodizations=self.tx_apodizations,
             grid=self.grid,
             t0_delays=self.t0_delays,
             probe_bandwidth_percent=self.probe_bandwidth_percent,
-            **self.pfield_kwargs,
+            element_width=self._params.get("element_width"),
+            **{"attenuation_coef": self.attenuation_coef, **self.pfield_kwargs},
         )
         return ops.convert_to_numpy(pfield)
 
@@ -994,11 +1229,17 @@ class Parameters(BaseParameters):
 
     @cache_with_dependencies("zlims", "distance_to_apex")
     def rho_range(self):
-        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in mm.
-        Used for scan conversion."""
+        """A tuple specifying the range of rho values (min_rho, max_rho). Defined in meters.
+        Used for scan conversion. Rho is measured from the apex of the polar grid, so
+        :attr:`zlims` (depths below the transducer) are shifted by
+        :attr:`distance_to_apex`, matching the ``rlims`` of
+        :func:`~zea.beamform.pixelgrid.polar_pixel_grid`."""
         value = self._params.get("rho_range")
         if value is None:
-            return (self.zlims[0], self.zlims[1] + self.distance_to_apex)
+            return (
+                self.zlims[0] + self.distance_to_apex,
+                self.zlims[1] + self.distance_to_apex,
+            )
         return value
 
     @cache_with_dependencies("polar_limits")
@@ -1016,16 +1257,18 @@ class Parameters(BaseParameters):
         "resolution",
         "grid_size_z",
         "grid_size_x",
-        "distance_to_apex",
     )
     def coordinates_2d(self):
-        """The coordinates for scan conversion."""
+        """The coordinates for scan conversion.
+
+        These index the polar image, so they live in the apex frame and need no
+        ``distance_to_apex`` correction; :attr:`rho_range` already carries it.
+        """
         coords, _ = compute_scan_convert_2d_coordinates(
             (self.grid_size_z, self.grid_size_x),
             self.rho_range,
             self.theta_range,
             self.resolution,
-            distance_to_apex=self.distance_to_apex,
         )
         return coords
 
@@ -1033,7 +1276,10 @@ class Parameters(BaseParameters):
     def coordinates(self):
         """Get the coordinates for scan conversion."""
         if self.is_3d:
-            raise NotImplementedError
+            raise NotImplementedError(
+                "Scan conversion of 3D grids is not supported. Use "
+                "zea.display.scan_convert_3d directly on the volume."
+            )
         return self.coordinates_2d
 
     @cache_with_dependencies("time_to_next_transmit")

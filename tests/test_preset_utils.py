@@ -6,12 +6,13 @@ model and the data stack) and the Keras preset loading/saving in
 """
 
 import json
-import logging
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-import httpx
+import httpx2
 import keras
 import numpy as np
 import pytest
@@ -23,7 +24,6 @@ from huggingface_hub.utils import (
 )
 
 import zea
-from zea import log
 from zea.internal import preset_utils as ipu
 from zea.internal.registry import model_registry
 from zea.models import preset_utils as mpu
@@ -35,8 +35,8 @@ REPO_ID = "zeahub/pytest-preset"
 
 def _repo_not_found(message="404 Client Error"):
     """A ``RepositoryNotFoundError`` as huggingface_hub raises it (needs a response)."""
-    request = httpx.Request("GET", "https://huggingface.co")
-    return RepositoryNotFoundError(message, response=httpx.Response(404, request=request))
+    request = httpx2.Request("GET", "https://huggingface.co")
+    return RepositoryNotFoundError(message, response=httpx2.Response(404, request=request))
 
 
 @pytest.fixture(autouse=True)
@@ -243,7 +243,13 @@ def test_cache_key_is_none_for_unhashable_arguments():
 def fake_tree(monkeypatch):
     """Patch ``list_repo_tree`` with a fixed repo layout and count the calls."""
     entries = [
-        RepoFile(path="val/a.hdf5", size=10, oid="1"),
+        # Data files are LFS-backed, hence the lfs info; the rest are plain git blobs.
+        RepoFile(
+            path="val/a.hdf5",
+            size=10,
+            oid="1",
+            lfs={"oid": "lfs-sha-a", "size": 10, "pointerSize": 100},
+        ),
         RepoFile(path="val/b.h5", size=20, oid="2"),
         RepoFile(path="val/notes.txt", size=1, oid="3"),
         RepoFile(path="train/c.hdf5", size=30, oid="4"),
@@ -304,6 +310,19 @@ def test_list_h5_files_single_file(fake_tree):
 
 def test_list_h5_files_unknown_subdirectory_is_empty(fake_tree):
     assert ipu._hf_list_h5_files(f"hf://{REPO_ID}/nope") == []
+
+
+def test_content_id_prefers_lfs_sha_over_blob_id(fake_tree):
+    """Data files live in LFS, whose sha256 names the content; the blob id is the fallback."""
+    assert ipu._hf_content_id(f"hf://{REPO_ID}/val/b.h5") == "2"  # no lfs info: git blob id
+    assert ipu._hf_content_id(f"hf://{REPO_ID}/val/a.hdf5") == "lfs-sha-a"
+    # Shares the one memoized listing with the other views.
+    assert len(fake_tree) == 1
+
+
+def test_content_id_is_none_for_unknown_path(fake_tree):
+    assert ipu._hf_content_id(f"hf://{REPO_ID}/val/nope.hdf5") is None
+    assert ipu._hf_content_id(f"hf://{REPO_ID}") is None
 
 
 # Downloads
@@ -483,6 +502,14 @@ def test_stream_url_with_revision_and_repo_type():
     assert url == f"https://huggingface.co/{REPO_ID}/resolve/v1/model.weights.h5"
 
 
+def test_stream_url_encodes_pr_revision():
+    # A PR ref is a single path segment in the resolve URL; unencoded, the hub 404s.
+    url = ipu._hf_stream_url(f"hf://{REPO_ID}/oslo/a b.hdf5", revision="refs/pr/66")
+    assert url == (
+        f"https://huggingface.co/datasets/{REPO_ID}/resolve/refs%2Fpr%2F66/oslo/a%20b.hdf5"
+    )
+
+
 def test_stream_url_requires_file():
     with pytest.raises(ValueError, match="single file"):
         ipu._hf_stream_url(f"hf://{REPO_ID}")
@@ -493,22 +520,37 @@ def test_stream_url_rejects_bad_repo_type():
         ipu._hf_stream_url(f"hf://{REPO_ID}/a.hdf5", repo_type="banana")
 
 
-def test_stream_open_retries_after_login(monkeypatch):
+def _fake_metadata(url="https://cdn.example/x", etag="sha", commit="c0ffee", size=10):
+    return SimpleNamespace(location=url, etag=etag, commit_hash=commit, size=size)
+
+
+@pytest.fixture
+def no_byte_reads(monkeypatch):
+    """Answer the streamed file's reads (e.g. its metadata prefetch) without a network."""
+    from zea.data import hf_remote
+
+    monkeypatch.setattr(hf_remote.RemoteFile, "_block", lambda self, start: bytes(self.blocksize))
+
+
+def test_stream_open_retries_after_login(monkeypatch, no_byte_reads):
     """A stream open that 404s anonymously is retried once after logging in."""
+    from zea.data import hf_remote
+
+    hf_remote.clear()
     logins = []
     monkeypatch.setattr(ipu, "_hf_login", lambda: logins.append(1))
     attempts = []
 
-    class FakeFS:
-        def open(self, path, mode, **kwargs):
-            attempts.append(path)
-            if len(attempts) == 1:
-                raise _repo_not_found()
-            return "FILEOBJ"
+    def fake_metadata(url, **kwargs):
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise _repo_not_found()
+        return _fake_metadata()
 
-    monkeypatch.setattr("huggingface_hub.HfFileSystem", FakeFS)
+    monkeypatch.setattr("huggingface_hub.get_hf_file_metadata", fake_metadata)
 
-    assert ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5") == "FILEOBJ"
+    fileobj = ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5")
+    assert fileobj.size == 10
     assert len(attempts) == 2
     assert len(logins) == 1
 
@@ -891,6 +933,91 @@ def test_load_model_builds_from_input_shape(monkeypatch, local_preset):
     assert loaded_from == [str(local_preset / mpu.MODEL_WEIGHTS_FILE)]
 
 
+# load_model: models that load their own weights (`custom_load_weights`)
+
+
+@pytest.fixture()
+def custom_weights_loader(tmp_path):
+    """A KerasPresetLoader backed by a minimal config.json in a temp directory."""
+    config = {
+        "class_name": "DummyModel",
+        "registered_name": "DummyModel",
+        "config": {},
+        "module": "builtins",
+        "build_config": None,
+    }
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    return mpu.KerasPresetLoader(str(tmp_path), config)
+
+
+class _DummyModelBase:
+    """Minimal stand-in for a Keras model (no weights, already built)."""
+
+    weights = []
+    built = True
+
+
+def test_custom_load_weights_with_load_weights_param(monkeypatch, custom_weights_loader):
+    """custom_load_weights that accepts load_weights receives it forwarded."""
+    calls = []
+
+    class DummyModel(_DummyModelBase):
+        def custom_load_weights(self, preset, load_weights=True):
+            calls.append(load_weights)
+
+    dummy = DummyModel()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=False)
+
+    assert result is dummy
+    assert calls == [False], f"load_weights should be forwarded as False, got {calls}"
+
+
+def test_custom_load_weights_without_param_skipped_when_false(monkeypatch, custom_weights_loader):
+    """custom_load_weights without load_weights param is NOT called when load_weights=False."""
+    calls = []
+
+    class DummyModel(_DummyModelBase):
+        def custom_load_weights(self, preset, **kwargs):
+            calls.append(True)
+
+    dummy = DummyModel()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=False)
+
+    assert result is dummy
+    assert calls == [], "custom_load_weights should NOT be called when load_weights=False"
+
+
+def test_custom_load_weights_without_param_called_when_true(monkeypatch, custom_weights_loader):
+    """custom_load_weights without load_weights param IS called when load_weights=True."""
+    calls = []
+
+    class DummyModel(_DummyModelBase):
+        def custom_load_weights(self, preset, **kwargs):
+            calls.append(True)
+
+    dummy = DummyModel()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=True)
+
+    assert result is dummy
+    assert calls == [True], "custom_load_weights should be called when load_weights=True"
+
+
+def test_model_without_custom_load_weights_returned_as_is(monkeypatch, custom_weights_loader):
+    """Model without custom_load_weights is returned as-is when load_weights=False."""
+    dummy = _DummyModelBase()
+    monkeypatch.setattr(mpu, "load_serialized_object", lambda *a, **kw: dummy)
+
+    result = custom_weights_loader.load_model(cls=object, load_weights=False)
+
+    assert result is dummy
+
+
 # Converters and preprocessors
 
 
@@ -1024,17 +1151,6 @@ def test_save_preprocessor_uses_config_file_and_saves_sublayers(tmp_path):
 @model_registry(name="_preset_utils_test_submodel")
 class _SubTinyPresetModel(_TinyPresetModel):
     """Registered subclass, to exercise the class-mismatch branches of from_preset."""
-
-
-@pytest.fixture
-def attach_caplog(caplog):
-    """Attach pytest's caplog handler to zea's (non-propagating) logger."""
-    caplog.set_level(logging.DEBUG)
-    log.logger.addHandler(caplog.handler)
-    try:
-        yield caplog
-    finally:
-        log.logger.removeHandler(caplog.handler)
 
 
 @pytest.fixture
@@ -1282,20 +1398,38 @@ def test_cache_ttl_falls_back_on_an_unparseable_value(monkeypatch):
     assert ipu._hf_cache_ttl() == 0
 
 
-def test_streaming_does_not_go_through_the_caches(monkeypatch):
-    """Streamed reads must reach the hub every time; they are not downloads."""
-    opens = []
+def test_stream_opens_share_one_resolution(monkeypatch, no_byte_reads):
+    """Opening a streamed file twice asks the Hub once, and never downloads it."""
+    from zea.data import hf_remote
 
-    class FakeFS:
-        def open(self, path, mode, **kwargs):
-            opens.append(path)
-            return "FILEOBJ"
-
-    monkeypatch.setattr("huggingface_hub.HfFileSystem", FakeFS)
+    hf_remote.clear()
+    heads = []
+    monkeypatch.setattr(
+        "huggingface_hub.get_hf_file_metadata",
+        lambda url, **kwargs: heads.append(url) or _fake_metadata(),
+    )
+    monkeypatch.setattr(ipu, "hf_hub_download", MagicMock(side_effect=AssertionError))
 
     for _ in range(2):
         ipu._hf_stream_open(f"hf://{REPO_ID}/val/a.hdf5")
-    assert len(opens) == 2
+    assert len(heads) == 1
+    hf_remote.clear()
+
+
+def test_listing_is_shared_through_disk(fake_tree):
+    """A second process (simulated by clearing the in-memory cache) reuses the listing."""
+    first = ipu._hf_list_h5_files(f"hf://{REPO_ID}")
+    ipu._LISTING_CACHE.clear()
+    assert ipu._hf_list_h5_files(f"hf://{REPO_ID}") == first
+    assert len(fake_tree) == 1
+
+
+def test_listing_is_not_shared_when_caching_is_off(fake_tree, monkeypatch):
+    monkeypatch.setattr(ipu, "_HF_CACHE_TTL", 0)
+    monkeypatch.setattr(ipu, "_LISTING_CACHE", ipu._TTLCache(0))
+    ipu._hf_list_h5_files(f"hf://{REPO_ID}")
+    ipu._hf_list_h5_files(f"hf://{REPO_ID}")
+    assert len(fake_tree) == 2
 
 
 def test_dtype_size_falls_back_for_unsizeable_dtypes():

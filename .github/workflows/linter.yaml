@@ -1,3 +1,4 @@
+# Static checks on every PR and on main: ruff lint + format, and a ty type check.
 name: Linter
 
 on:
@@ -46,4 +47,4 @@ jobs:
       # warnings in [tool.ty]. ty's version comes from the `lint` group.
       # --no-default-groups keeps the default `dev` group out.
       - name: Run Type Checker
-        run: uv run --python 3.10 --no-default-groups --group lint ty check --exit-zero-on-warning
+        run: uv run --python 3.11 --no-default-groups --group lint ty check --exit-zero-on-warning

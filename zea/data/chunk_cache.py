@@ -20,17 +20,39 @@ fast and parallel (see :mod:`zea.data.chunk_reader`).
 from __future__ import annotations
 
 import os
-import tempfile
+import threading
 from pathlib import Path
 
 from zea import log
 from zea.internal.cache import ZEA_CACHE_DIR
+from zea.internal.utils import atomic_write
 
 #: Cache is enabled unless ZEA_CHUNK_CACHE=0.
 ENABLED = os.environ.get("ZEA_CHUNK_CACHE", "1") != "0"
 
 #: Byte budget for the whole cache. Overrun is pruned oldest-first (by access time).
 MAX_BYTES = int(os.environ.get("ZEA_CHUNK_CACHE_SIZE", 10 << 30))  # 10 GiB
+
+# Process-wide count of bytes fetched over the network by the streaming read paths (metadata
+# blocks through CachedFile, chunks through chunk_reader.HTTPFetcher). Cache hits do not count.
+_network_bytes = 0
+_network_lock = threading.Lock()
+
+
+def network_bytes() -> int:
+    """Bytes fetched over the network by streamed ``hf://`` reads since the process started.
+
+    Take the difference of two readings to measure a single operation, e.g. to drive a
+    progress display. Reads served from this cache are not counted.
+    """
+    return _network_bytes
+
+
+def _count_network_bytes(n: int) -> None:
+    global _network_bytes
+    with _network_lock:
+        _network_bytes += n
+
 
 #: Prune this often (in writes) rather than on every one — the check has to stat the tree.
 PRUNE_EVERY = 64
@@ -68,20 +90,23 @@ class ChunkCache:
             pass
         return data
 
+    def contains(self, offset: int, size: int) -> bool:
+        """Whether this chunk is cached, without reading it."""
+        try:
+            return self._path(offset, size).stat().st_size == size
+        except OSError:
+            return False
+
     def put(self, offset: int, size: int, data: bytes) -> None:
         """Store this chunk. Failure to cache is never an error — it just costs a re-fetch."""
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
-            # Write to a temporary and rename: a reader (possibly another dataloader worker)
-            # must never observe a half-written chunk. os.replace is atomic within a filesystem.
-            fd, tmp = tempfile.mkstemp(dir=self.dir, suffix=".part")
-            try:
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(data)
-                os.replace(tmp, self._path(offset, size))
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+            # A reader (possibly another dataloader worker) must never observe a
+            # half-written chunk, hence the atomic write. The `.part` suffix is not
+            # cosmetic: `prune` skips it, so a chunk still being written cannot be
+            # evicted out from under us before it is renamed into place.
+            with atomic_write(self._path(offset, size), suffix=".part") as tmp:
+                tmp.write_bytes(data)
 
             self._writes += 1
             if self._writes % PRUNE_EVERY == 0:
@@ -113,10 +138,17 @@ class CachedFile:
         self._file = fileobj
         self._cache = cache
         self._block = block_size or getattr(fileobj, "blocksize", None) or _HF_STREAM_BLOCK_SIZE
+        self.blocksize = self._block
         self._pos = 0
         self.size = fileobj.size
         #: Passed through: this is where the chunk fetcher reads the file's content hash from.
         self.details = getattr(fileobj, "details", {})
+        #: Passed through: the chunk fetcher reuses the file's CDN URL.
+        self.location = getattr(fileobj, "location", None)
+        #: Reads keep the blocks they fetch (in the cache).
+        self.keeps_blocks = True
+        # Guards seek + read on a wrapped file object that has no positional read_at.
+        self._lock = threading.Lock()
 
     def _block_bytes(self, index: int) -> bytes:
         offset = index * self._block
@@ -124,20 +156,23 @@ class CachedFile:
         hit = self._cache.get(offset, size)
         if hit is not None:
             return hit
-        self._file.seek(offset)
-        data = self._file.read(size)
+        if hasattr(self._file, "read_at"):
+            data = self._file.read_at(offset, size)
+        else:
+            with self._lock:
+                self._file.seek(offset)
+                data = self._file.read(size)
+        _count_network_bytes(len(data))
         self._cache.put(offset, size, data)
         return data
 
-    def read(self, length: int = -1) -> bytes:
-        if length < 0:
-            length = self.size - self._pos
-        length = max(0, min(length, self.size - self._pos))
-        if not length:
-            return b""
-
+    def read_at(self, offset: int, size: int) -> bytes:
+        """Read ``size`` bytes at ``offset`` through the cached blocks, without moving the file
+        position. Safe to call from several threads.
+        """
+        length = max(0, min(size, self.size - offset))
         out = bytearray()
-        pos = self._pos
+        pos = offset
         while len(out) < length:
             index = pos // self._block
             within = pos - index * self._block
@@ -147,8 +182,14 @@ class CachedFile:
                 break  # short block: end of file
             out += take
             pos += len(take)
-        self._pos = pos
         return bytes(out)
+
+    def read(self, length: int = -1) -> bytes:
+        if length < 0:
+            length = self.size - self._pos
+        data = self.read_at(self._pos, length)
+        self._pos += len(data)
+        return data
 
     def seek(self, offset: int, whence: int = 0) -> int:
         base = {0: 0, 1: self._pos, 2: self.size}[whence]
@@ -189,6 +230,8 @@ def cache_for(details: dict, root: str | os.PathLike | None = None) -> ChunkCach
     content_id = None
     if isinstance(lfs, dict):
         content_id = lfs.get("sha256")
+    # The Hub etag equals the LFS sha256, so both give the same cache key.
+    content_id = content_id or details.get("etag")
     content_id = content_id or details.get("blob_id")  # non-LFS files
     if not content_id:
         return None

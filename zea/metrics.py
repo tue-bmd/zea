@@ -14,6 +14,7 @@ from zea.func.tensor import translate
 from zea.internal.registry import metrics_registry
 from zea.internal.utils import reduce_to_signature
 from zea.models.lpips import LPIPS
+from zea.models.ultrapips import UltraPIPS
 
 
 def get_metric(name, **kwargs):
@@ -163,103 +164,96 @@ def ssim(
     filter_sigma: float = 1.5,
     k1: float = 0.01,
     k2: float = 0.03,
-    return_map: bool = False,
-    filter_fn=None,
 ):
     """Computes the structural similarity index (SSIM) between image pairs.
 
-    This function is based on the standard SSIM implementation from:
-    Z. Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli,
+    Thin wrapper around :func:`keras.ops.image.ssim`, which implements the standard
+    SSIM from: Z. Wang, A. C. Bovik, H. R. Sheikh and E. P. Simoncelli,
     "Image quality assessment: from error visibility to structural similarity",
     in IEEE Transactions on Image Processing, vol. 13, no. 4, pp. 600-612, 2004.
-
-    This function copied from [`dm_pix.ssim`](https://dm-pix.readthedocs.io/en/latest/api.html#dm_pix.ssim),
-    which is part of the DeepMind's `dm_pix` library. They modeled their implementation
-    after the `tf.image.ssim` function.
 
     Note: the true SSIM is only defined on grayscale. This function does not
     perform any colorspace transform. If the input is in a color space, then it
     will compute the average SSIM.
 
     Args:
-        a: First image (or set of images).
-        b: Second image (or set of images).
+        a: First image (or batch of images), of shape ``((batch,) height, width, channels)``.
+        b: Second image (or batch of images), with the same shape as `a`.
         max_val: The maximum magnitude that `a` or `b` can have.
         filter_size: Window size (>= 1). Image dims must be at least this small.
         filter_sigma: The bandwidth of the Gaussian used for filtering (> 0.).
         k1: One of the SSIM dampening parameters (> 0.).
         k2: One of the SSIM dampening parameters (> 0.).
-        return_map: If True, will cause the per-pixel SSIM "map" to be returned.
-        filter_fn: An optional argument for overriding the filter function used by
-            SSIM, which would otherwise be a 2D Gaussian blur specified by filter_size
-            and filter_sigma.
 
     Returns:
-        Each image's mean SSIM, or a tensor of individual values if `return_map`.
+        Each image's mean SSIM: a scalar for a single image, or one value per image
+        in the batch.
     """
+    return ops.image.ssim(
+        a,
+        b,
+        max_val=max_val,
+        filter_size=filter_size,
+        filter_sigma=filter_sigma,
+        k1=k1,
+        k2=k2,
+        data_format="channels_last",
+    )
 
-    if filter_fn is None:
-        # Construct a 1D Gaussian blur filter.
-        hw = filter_size // 2
-        shift = (2 * hw - filter_size + 1) / 2
-        f_i = ((ops.cast(ops.arange(filter_size), "float32") - hw + shift) / filter_sigma) ** 2
-        filt = ops.exp(-0.5 * f_i)
-        filt /= ops.sum(filt)
 
-        # Construct a 1D convolution.
-        def filter_fn_1(z):
-            return tensor.correlate(z, ops.flip(filt), mode="valid")
+@metrics_registry(name="smsle", paired=True, jittable=True)
+def smsle(y_true, y_pred, *, dynamic_range: float = 60.0):
+    r"""Signed Mean Squared Logarithmic Error (SMSLE).
 
-        # Apply the vectorized filter along the y axis.
-        def filter_fn_y(z):
-            z_flat = ops.reshape(ops.moveaxis(z, -3, -1), (-1, z.shape[-3]))
-            z_filtered_shape = ((z.shape[-4],) if z.ndim == 4 else ()) + (
-                z.shape[-2],
-                z.shape[-1],
-                -1,
-            )
-            _z_filtered = ops.vectorized_map(filter_fn_1, z_flat)
-            z_filtered = ops.moveaxis(ops.reshape(_z_filtered, z_filtered_shape), -1, -3)
-            return z_filtered
+    Loss for regressing radio-frequency data, where a plain MSE is dominated by the
+    few high-amplitude samples. SMSLE instead compares the signals after log
+    compression, which weighs the low-amplitude samples that carry the speckle
+    texture just as heavily. The positive and negative half-waves are compressed
+    separately, so the sign of the signal (and with it the phase information needed
+    for further processing) is preserved.
 
-        # Apply the vectorized filter along the x axis.
-        def filter_fn_x(z):
-            z_flat = ops.reshape(ops.moveaxis(z, -2, -1), (-1, z.shape[-2]))
-            z_filtered_shape = ((z.shape[-4],) if z.ndim == 4 else ()) + (
-                z.shape[-3],
-                z.shape[-1],
-                -1,
-            )
-            _z_filtered = ops.vectorized_map(filter_fn_1, z_flat)
-            z_filtered = ops.moveaxis(ops.reshape(_z_filtered, z_filtered_shape), -1, -2)
-            return z_filtered
+    Writing :math:`L_D(x) = \mathrm{clip}\left(20 \log_{10}
+    \frac{\mathrm{clip}(x, \epsilon, \max|x|)}{\max|x|}, -D, 0\right)` for log
+    compression to a dynamic range of :math:`D` dB:
 
-        # Apply the blur in both x and y.
-        filter_fn = lambda z: filter_fn_y(filter_fn_x(z))
+    .. math::
 
-    mu0 = filter_fn(a)
-    mu1 = filter_fn(b)
-    mu00 = mu0 * mu0
-    mu11 = mu1 * mu1
-    mu01 = mu0 * mu1
-    sigma00 = filter_fn(a**2) - mu00
-    sigma11 = filter_fn(b**2) - mu11
-    sigma01 = filter_fn(a * b) - mu01
+        \mathrm{SMSLE} = \tfrac{1}{2} \mathrm{MSE}\big(L_D(y), L_D(\hat{y})\big)
+        + \tfrac{1}{2} \mathrm{MSE}\big(L_D(-y), L_D(-\hat{y})\big)
 
-    # Clip the variances and covariances to valid values.
-    # Variance must be non-negative:
-    epsilon = keras.config.epsilon()
-    sigma00 = ops.maximum(epsilon, sigma00)
-    sigma11 = ops.maximum(epsilon, sigma11)
-    sigma01 = ops.sign(sigma01) * ops.minimum(ops.sqrt(sigma00 * sigma11), ops.abs(sigma01))
+    Both inputs are normalized by their own maximum absolute value before log
+    compression, so the metric is invariant to the overall scale of either input.
 
-    c1 = (k1 * max_val) ** 2
-    c2 = (k2 * max_val) ** 2
-    numer = (2 * mu01 + c1) * (2 * sigma01 + c2)
-    denom = (mu00 + mu11 + c1) * (sigma00 + sigma11 + c2)
-    ssim_map = numer / denom
-    ssim_value = ops.mean(ssim_map, axis=tuple(range(-3, 0)))
-    return ssim_map if return_map else ssim_value
+    .. citation:: luijten2020adaptive
+
+    Args:
+        y_true (tensor): Ground truth values.
+        y_pred (tensor): Predicted values.
+        dynamic_range (float): Dynamic range :math:`D` in dB used to clip the
+            log-compressed signals. Defaults to 60.
+
+    Returns:
+        (float): SMSLE loss value.
+    """
+    eps = keras.config.epsilon()
+
+    def _log_compress(x, x_max):
+        return ops.clip(
+            20 * ops.log10(ops.clip(x / x_max, eps, 1)),
+            -dynamic_range,
+            0,
+        )
+
+    y_pred_max = ops.maximum(ops.max(ops.abs(y_pred)), eps)
+    y_true_max = ops.maximum(ops.max(ops.abs(y_true)), eps)
+
+    positive = ops.mean(
+        ops.square(_log_compress(y_pred, y_pred_max) - _log_compress(y_true, y_true_max))
+    )
+    negative = ops.mean(
+        ops.square(_log_compress(-y_pred, y_pred_max) - _log_compress(-y_true, y_true_max))
+    )
+    return 0.5 * positive + 0.5 * negative
 
 
 @metrics_registry(name="ncc", paired=True, jittable=True)
@@ -270,7 +264,9 @@ def ncc(x, y):
     return num / ops.maximum(denom, keras.config.epsilon())
 
 
-@metrics_registry(name="lpips", paired=True, jittable=True, torch_vmappable=False)
+@metrics_registry(
+    name="lpips", paired=True, jittable=True, torch_vmappable=False, torch_jittable=False
+)
 def get_lpips(image_range, clip=False):
     """
     Get the Learned Perceptual Image Patch Similarity (LPIPS) metric.
@@ -310,6 +306,55 @@ def get_lpips(image_range, clip=False):
     return lpips
 
 
+@metrics_registry(
+    name="ultrapips", paired=True, jittable=True, torch_vmappable=False, torch_jittable=False
+)
+def get_ultrapips(image_range, clip=False, preset="ultrapips-tusa"):
+    """
+    Get the UltraPIPS perceptual similarity metric for B-mode ultrasound.
+
+    .. note::
+        Unlike LPIPS, UltraPIPS resizes all images to a fixed square size, so
+        non-square images are stretched (a warning is logged). Crop or pad them
+        to a square first if the aspect ratio matters.
+
+    Args:
+        image_range (list): The range of the images. Will be translated to [-1, 1] for UltraPIPS.
+        clip (bool): Whether to clip the images to `image_range`.
+        preset (str): The UltraPIPS preset (backbone) to load.
+
+    Returns:
+        The UltraPIPS metric function.
+    """
+    _ultrapips = UltraPIPS.from_preset(preset)
+    _ultrapips.trainable = False
+    _ultrapips.disable_checks = True
+
+    def ultrapips(img1, img2):
+        """
+        The UltraPIPS metric function.
+
+        Args:
+            img1 (tensor) with shape (height, width, channels) with optional batch dimension
+            img2 (tensor) with shape (height, width, channels) with optional batch dimension
+
+        Returns (float): The UltraPIPS distance between img1 and img2 with shape (batch_size,)
+            or scalar if no batch dimension.
+        """
+        # cast to float first so translate does not subtract in an integer dtype
+        img1 = ops.cast(img1, "float32")
+        img2 = ops.cast(img2, "float32")
+        if clip:
+            img1 = ops.clip(img1, *image_range)
+            img2 = ops.clip(img2, *image_range)
+        img1 = translate(img1, image_range, [-1, 1])
+        img2 = translate(img2, image_range, [-1, 1])
+
+        return _ultrapips([img1, img2])
+
+    return ultrapips
+
+
 class Metrics:
     """Class for calculating multiple paired metrics. Also useful for batch processing.
 
@@ -330,6 +375,9 @@ class Metrics:
             >>> print(result)  # doctest: +ELLIPSIS
             {'psnr': ..., 'lpips': ...}
     """
+
+    #: Range all images are translated to (from ``image_range``) before the metrics are computed.
+    METRIC_RANGE = (0, 255)
 
     def __init__(
         self,
@@ -355,8 +403,9 @@ class Metrics:
                 f"Metric {m} is not a paired metric."
             )
 
-        # Add image_range to kwargs for metrics that require it
-        kwargs["image_range"] = image_range
+        # Metrics that take an `image_range` (LPIPS, UltraPIPS) receive the preprocessed images,
+        # which are in METRIC_RANGE, not in the user's `image_range`.
+        kwargs["image_range"] = self.METRIC_RANGE
         self.image_range = image_range
 
         # Initialize all metrics
@@ -366,7 +415,10 @@ class Metrics:
             jittable = metrics_registry.get_parameter(m, "jittable")
             metric_fn = get_metric(m, **reduce_to_signature(metrics_registry[m], kwargs))
             if jit_compile and jittable:
-                metric_fn = jit(metric_fn)
+                metric_fn = jit(
+                    metric_fn,
+                    torch=metrics_registry.get_parameter(m, "torch_jittable", default=True),
+                )
             self.metrics[m] = metric_fn
             self.torch_vmappable[m] = metrics_registry.get_parameter(
                 m, "torch_vmappable", default=True
@@ -385,7 +437,7 @@ class Metrics:
         return_numpy,
         device,
         mapped_batch_size=None,
-        _use_torch_vmap=True,
+        torch_vmappable=True,
     ):
         num_batch_axes = max(0, ops.ndim(y_true) - 3)
 
@@ -399,11 +451,10 @@ class Metrics:
             # disable_jit only when on the torch backend and the metric is not
             # torch-vmappable (e.g. LPIPS), so that other backends (JAX, etc.)
             # still benefit from their native vmap / vectorized_map paths.
-            disable_jit = not _use_torch_vmap and keras.backend.backend() == "torch"
+            disable_jit = not torch_vmappable and keras.backend.backend() == "torch"
             metric_fn = tensor.vmap(
                 metric_fn,
                 in_axes=0,
-                _use_torch_vmap=_use_torch_vmap,
                 disable_jit=disable_jit,
                 batch_size=mapped_batch_size,
             )
@@ -418,9 +469,9 @@ class Metrics:
         return out
 
     def _preprocess(self, tensor):
-        tensor = translate(tensor, self.image_range, [0, 255])
+        tensor = translate(tensor, self.image_range, self.METRIC_RANGE)
         if self.clip:
-            tensor = ops.clip(tensor, 0, 255)
+            tensor = ops.clip(tensor, *self.METRIC_RANGE)
         if self.quantize:
             tensor = ops.cast(tensor, "uint8")
         tensor = ops.cast(tensor, "float32")  # Some metrics require float32
@@ -462,7 +513,7 @@ class Metrics:
                 return_numpy,
                 device,
                 mapped_batch_size=mapped_batch_size,
-                _use_torch_vmap=self.torch_vmappable[name],
+                torch_vmappable=self.torch_vmappable[name],
             )
         return results
 

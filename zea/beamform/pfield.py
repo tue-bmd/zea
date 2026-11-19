@@ -24,12 +24,9 @@ import numpy as np
 from keras import ops
 
 from zea.backend import jit
-from zea.func.tensor import sinc, vmap
+from zea.func.tensor import vmap
+from zea.func.ultrasound import directivity
 from zea.internal.cache import cache_output
-
-
-def _abs_sinc(x):
-    return sinc(ops.abs(x))
 
 
 @cache_output(verbose=True)
@@ -37,11 +34,11 @@ def compute_pfield(
     sound_speed,
     center_frequency,
     probe_bandwidth_percent,
-    n_el,
     probe_geometry,
     tx_apodizations,
     grid,
     t0_delays,
+    element_width=None,
     frequency_step=4,
     db_thresh=-1.0,
     downsample=10,
@@ -51,20 +48,36 @@ def compute_pfield(
     norm=True,
     point_batch_size=2048,
     interpolation="bilinear",
+    attenuation_coef=0.0,
 ):
     """Compute the pressure field for ultrasound imaging.
+
+    This implements PFIELD from MUST in its two-dimensional form: element height and elevation
+    focus are taken to infinity, so the elevation term of the 3-D theory drops out
+    and the Green's function is 1 / sqrt(r) instead of 1 / r (Eqs. 36-37). Equation
+    numbers in this module refer to the reference below.
+
+    .. admonition:: Reference
+
+        Garcia, D. (2022). SIMUS: An open-source simulator for medical ultrasound
+        imaging. Part I: Theory & examples. *Computer Methods and Programs in
+        Biomedicine, 218*, 106726. https://www.biomecardio.com/publis/cmpb22.pdf
+
+    Only linear (and phased) arrays are supported: all elements must lie on the x-axis
+    and face +z.
 
     Args:
         sound_speed (float): Speed of sound in the medium.
         center_frequency (float): Center frequency of the transmit pulse in Hz.
         probe_bandwidth_percent (float): Bandwidth of the probe, pulse-echo 6dB
             fractional bandwidth (%)
-        n_el (int): Number of elements in the probe.
-        probe_geometry (array): Geometry of the probe elements.
+        probe_geometry (array): Geometry of the probe elements of shape (n_el, 3).
         tx_apodizations (array): Transmit apodizations of shape (n_tx, n_el).
         grid (array): Grid points where the pressure field is computed
             of shape (grid_size_z, grid_size_x, 3).
         t0_delays (array): Transmit delays for each transmit event.
+        element_width (float, optional): Width of a single element in metres.
+            Default is None, which infers it as 90% of the pitch.
         frequency_step (int, optional): Frequency step. Default is 4.
             Higher is faster but less accurate.
         db_thresh (float, optional): dB threshold. Default is -1.0
@@ -74,10 +87,11 @@ def compute_pfield(
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
-            Only works when norm is True. Default is 1.
+            Default is 1. Values above roughly 10 can overflow float32, giving NaN.
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
-            Only works when norm is True. Higher is more aggressive. Default is 10.
-        norm (bool, optional): per pixel normalization (True) or unnormalized (False)
+            Higher is more aggressive. Default is 10.
+        norm (bool, optional): per pixel normalization over the transmit axis (True)
+            or unnormalized (False).
         point_batch_size (int, optional): Batch size for the pressure field computation.
             Higher is slightly faster, but requires more memory. Default is 2048.
         interpolation (str, optional): Interpolation used to resize the pressure
@@ -86,18 +100,35 @@ def compute_pfield(
             weighting, which can cause visible steps at the edges of each
             transmit's insonified region; "bilinear" (default) removes those steps at a
             small extra cost and is recommended for display-quality images.
+        attenuation_coef (float, optional): Frequency-dependent attenuation of the
+            medium in dB/(cm·MHz), applied one-way along the transmit path (Eq. 40)
+            at the true frequency, regardless of `downmix`. Default is 0 (lossless).
+            Soft tissue is ~0.5; with it the
+            high end of the band, which focuses hardest, is lost with depth, so the
+            focus is wider and weaker than in the lossless field.
 
     Returns:
         ops.array: The (normalized) pressure field (across tx events)
             of shape (n_tx, grid_size_z, grid_size_x).
     """
-    # medium params
-    # NOTE: currently we ignore attenuation in the compounding
-    attenuation_coef = 0  # dB/cm/MHz, attenuation coefficient of the medium
-    attenuation_coef = attenuation_coef / 8.686  # convert to Np/cm/MHz
-    attenuation_coef = attenuation_coef / 1e6 / 1e2  # convert to Np/m/Hz
+    # medium params: attenuation dB/(cm·MHz) -> Np/(cm·MHz) -> Np/(m·Hz)
+    attenuation_coef = float(attenuation_coef)
+    if not (np.isfinite(attenuation_coef) and attenuation_coef >= 0):
+        raise ValueError(
+            f"`attenuation_coef` must be finite and non-negative, got {attenuation_coef!r}"
+        )
+    attenuation_coef = attenuation_coef / 8.686 * 1e2 / 1e6
 
-    n_el = int(n_el)
+    # Element orientation (theta) is assumed zero and sub-elements are laid out along x.
+    geometry = ops.convert_to_numpy(probe_geometry)
+    if not (np.allclose(geometry[:, 1], 0) and np.allclose(geometry[:, 2], 0)):
+        raise NotImplementedError(
+            "Pfield computation currently only supports linear arrays, with all elements "
+            "at y=0 and z=0."
+        )
+    from zea.probes import _resolve_element_width
+
+    element_width = _resolve_element_width(geometry, element_width)
 
     # cast to float32
     sound_speed = ops.cast(sound_speed, "float32")
@@ -110,13 +141,11 @@ def compute_pfield(
     probe_geometry = ops.convert_to_tensor(probe_geometry, dtype="float32")
     grid_x = ops.convert_to_tensor(grid[:, :, 0], dtype="float32")
     grid_z = ops.convert_to_tensor(grid[:, :, 2], dtype="float32")
+    for name, value in (("t0_delays", t0_delays), ("tx_apodizations", tx_apodizations)):
+        if not np.all(np.isfinite(ops.convert_to_numpy(value))):
+            raise ValueError(f"`{name}` must be finite to compute the pressure field.")
     t0_delays = ops.convert_to_tensor(t0_delays, dtype="float32")
-    tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="float32")
-
-    # formatting
-    t0_delays = ops.where(ops.isnan(t0_delays), 0, t0_delays)
-    tx_apodizations = ops.where(ops.isnan(tx_apodizations), 0, tx_apodizations)
-    tx_apodizations = ops.cast(tx_apodizations, "complex64")
+    tx_apodizations = ops.convert_to_tensor(tx_apodizations, dtype="complex64")
 
     # probe params
     fc_original = center_frequency
@@ -124,19 +153,12 @@ def compute_pfield(
 
     # pulse params
     num_waveforms = 1  # number of waveforms in the pulse
-    center_wavenumber = 2 * np.pi * center_frequency / sound_speed
-
-    # array params
-    pitch = ops.abs(probe_geometry[1, 0] - probe_geometry[0, 0])  # element pitch
-
-    kerf = 0.1 * pitch  # for now this is hardcoded
-    element_width = pitch - kerf
 
     # %------------------------------------%
     # % POINT LOCATIONS, DISTANCES & GRIDS %
     # %------------------------------------%
 
-    # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
+    # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation, Eq. 21)
     lambda_min = sound_speed / (center_frequency * (1 + probe_bandwidth_percent / 200))
     num_sub_elements = ops.ceil(element_width / lambda_min)
 
@@ -152,9 +174,9 @@ def compute_pfield(
     grid_z = ops.reshape(grid_z, (-1,))
 
     # Centers of the transducer elements (x- and z-coordinates)
-    element_x = (ops.arange(0.0, n_el) - (n_el - 1) / 2) * pitch
-    element_z = ops.zeros(n_el)
-    element_theta = ops.zeros(n_el)
+    element_x = probe_geometry[:, 0]
+    element_z = probe_geometry[:, 2]
+    element_theta = ops.zeros_like(element_x)
 
     # Centroids of the sub-elements
     seg_length = element_width / num_sub_elements
@@ -174,8 +196,14 @@ def compute_pfield(
     # Angle between the normal to the transducer and the line joining
     # the point and the transducer
     epsilon = keras.config.epsilon()
-    theta = ops.arcsin(ops.clip(delta_x / distance, -1.0, 1.0)) - element_theta
-    sin_theta = ops.sin(theta)
+    theta = ops.arcsin(ops.clip(delta_x / (distance + epsilon), -1.0, 1.0)) - element_theta
+
+    # Directivity of a sub-element (Eq. 17). It varies over the band, but we approximate it at the
+    # center frequency such that it doesn't need to be recomputed for each frequency sample.
+    # We use a rigid baffle by default, PFIELD uses a soft baffle (extra cos(theta) factor, Eq. 39).
+    sub_element_directivity = ops.cast(
+        directivity(center_frequency, theta, seg_length, sound_speed), "complex64"
+    )
 
     # Clamp distance from below at λ/2; the 1/sqrt(r) Green's function is singular
     # below this scale and the far-field approximation breaks down there.
@@ -183,33 +211,36 @@ def compute_pfield(
     distance = ops.maximum(distance, min_distance)
 
     pulse_width = num_waveforms / center_frequency  # temporal pulse width
-    center_angular_freq = 2 * np.pi * center_frequency
 
-    def pulse_spectrum(w):
-        imag = _abs_sinc(pulse_width * (w - center_angular_freq) / 2) - _abs_sinc(
-            pulse_width * (w + center_angular_freq) / 2
+    # Both spectra are written in ordinary frequency (Hz) rather than angular frequency:
+    # the sinc arguments then carry no factors of pi, since keras.ops.sinc is the
+    # normalized sin(pi x) / (pi x).
+    def pulse_spectrum(f):  # Eq. (25)
+        imag = ops.sinc(pulse_width * (f - center_frequency)) - ops.sinc(
+            pulse_width * (f + center_frequency)
         )
         return 1j * ops.cast(imag, "complex64")
 
     # FREQUENCY RESPONSE of the ensemble PZT + probe
-    w_bandwidth = probe_bandwidth_percent * center_angular_freq / 100  # angular frequency bandwidth
-    p_shape = ops.log(126) / ops.log(epsilon + 2 * center_angular_freq / w_bandwidth)
+    bandwidth = probe_bandwidth_percent * center_frequency / 100  # bandwidth in Hz
+    p_shape = ops.log(126) / ops.log(epsilon + 2 * center_frequency / bandwidth)
 
-    def probe_spectrum(w):
+    def probe_spectrum(f):  # sqrt of Eq. (27), the one-way half of Eq. (28)
         # Calculate the normalized frequency difference
-        freq_diff = ops.abs(w - center_angular_freq)
+        freq_diff = ops.abs(f - center_frequency)
         # Calculate the denominator for normalization
-        denom = (w_bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
+        denom = (bandwidth / 2) / (ops.log(2) ** (1 / p_shape))
         # Raise the normalized difference to the power of p_shape
         exponent = (freq_diff / denom) ** p_shape
-        # Apply the negative sign and exponential
-        return ops.cast(ops.exp(-exponent), "complex64")
+        # The bandwidth is a pulse-echo (two-way) bandwidth; the one-way transmit
+        # response is the square root of the two-way response, hence the factor 1/2.
+        return ops.cast(ops.exp(-exponent / 2), "complex64")
 
     # The frequency response is a pulse-echo (transmit + receive) response.
     # The spectrum of the pulse (pulse_spectrum) will be then multiplied
     # by the frequency-domain tapering window of the transducer (probe_spectrum)
     # The frequency step df is chosen to avoid interferences due to
-    # inadequate discretization.
+    # inadequate discretization (the criterion below Eq. 42).
     # df = frequency step (must be sufficiently small):
     # One has exp[-i(k r + w delay)] = exp[-2i pi(f r/c + f delay)] in the Eq.
     # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
@@ -223,30 +254,26 @@ def compute_pfield(
     freq = ops.arange(0, num_freq, dtype="float32") * freq_step
 
     # keep the significant components only by using db_thresh
-    spectrum = ops.abs(
-        pulse_spectrum(2 * np.pi * freq) * ops.cast(probe_spectrum(2 * np.pi * freq), "complex64")
-    )
+    spectrum = ops.abs(pulse_spectrum(freq) * ops.cast(probe_spectrum(freq), "complex64"))
     gain_db = 20 * ops.log10(keras.config.epsilon() + spectrum / (ops.max(spectrum)))
     idx = gain_db > db_thresh
 
     freq = freq[idx]
 
-    pulse_spect = pulse_spectrum(2 * np.pi * freq)
-    probe_spect = probe_spectrum(2 * np.pi * freq)
+    pulse_spect = pulse_spectrum(freq)
+    probe_spect = probe_spectrum(freq)
 
     # Exponential arrays of size [numel(x) n_el num_sub_elements]
     wavenumber = 2 * np.pi * freq[0] / sound_speed
-    attenuation_wavenumber = attenuation_coef * freq[0]
-    attenuation_wavenumber = ops.cast(attenuation_wavenumber, dtype="complex64")
+    # freq is downmixed, which only coarsens the phase: the loss follows the true frequency.
+    attenuation_wavenumber = attenuation_coef * downmix * freq[0]
 
     # Exponential array for the increment wavenumber dk
     wavenumber_step = 2 * np.pi * freq_step / sound_speed
-    attenuation_wavenumber_step = attenuation_coef * freq_step
-    wavenumber_step = ops.cast(wavenumber_step, dtype="complex64")
-    attenuation_wavenumber_step = ops.cast(attenuation_wavenumber_step, dtype="complex64")
+    attenuation_wavenumber_step = attenuation_coef * downmix * freq_step
 
-    @jit
-    def _pfield_freq_loop(distance, sin_theta):
+    @jit(torch=False)
+    def _pfield_freq_loop(distance, sub_element_directivity):
         """Calculates the pressure field using frequency loop method.
 
         Returns:
@@ -256,17 +283,18 @@ def compute_pfield(
         distance_complex = ops.cast(distance, dtype="complex64")
 
         mod_out = ops.cast(ops.mod(wavenumber * distance, 2 * np.pi), dtype="complex64")
-        exp_arr = ops.exp(-attenuation_wavenumber * distance_complex + 1j * mod_out)
+        exp_arr = ops.exp(
+            ops.cast(-attenuation_wavenumber * distance, dtype="complex64") + 1j * mod_out
+        )
 
         exp_freq_step = ops.exp(
-            (-attenuation_wavenumber_step + 1j * wavenumber_step) * distance_complex
+            ops.cast(-attenuation_wavenumber_step * distance, dtype="complex64")
+            + 1j * ops.cast(wavenumber_step * distance, dtype="complex64")
         )
 
         exp_arr = exp_arr / ops.sqrt(distance_complex)
-        exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
 
-        directivity = _abs_sinc(center_wavenumber * seg_length / 2 * sin_theta)
-        exp_arr = exp_arr * ops.cast(directivity, "complex64")
+        exp_arr = exp_arr * sub_element_directivity
 
         monochromatic_pressure = exp_arr / exp_freq_step
 
@@ -277,7 +305,7 @@ def compute_pfield(
                 freq[k],
                 t0_delays,
                 tx_apodizations,
-                ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
+                ops.mean(monochromatic_pressure, axis=1),  # as PFIELD; Eq. (37) sums instead
                 pulse_spect[k],
                 probe_spect[k],
             )
@@ -300,10 +328,21 @@ def compute_pfield(
         batch_size=point_batch_size,
     )
 
-    pressure_squared = _pfield_freq_loop_mapped(distance, sin_theta)  # shape (num_points, n_tx)
+    pressure_squared = _pfield_freq_loop_mapped(
+        distance, sub_element_directivity
+    )  # shape (num_points, n_tx)
 
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
+
+    # The Riemann sum of Eq. (42), completed by PFIELD's correcting factor: the
+    # frequency step, which cancels the sample count -- that count follows freq_step,
+    # itself set above from max(t0_delays), so a bare sum would depend on which
+    # transmits are in the stack -- times the element width, whose square root is the
+    # amplitude factor of Eq. (36). Like PFIELD we integrate over ordinary frequency,
+    # so there is no 2 pi against Eq. (42)'s Δω. The step is taken at the true frequency,
+    # since downmixing shrinks the band by the same factor. No effect when norm=True.
+    pressure_squared = pressure_squared * (freq_step * downmix) * element_width
 
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
@@ -314,28 +353,23 @@ def compute_pfield(
         ops.image.resize(pressure[..., None], size_orig, interpolation=interpolation), axis=-1
     )
 
-    if norm:
-        normalized_pfield = normalize_pressure_field(p_arr, alpha=alpha, percentile=percentile)
-    else:
-        normalized_pfield = p_arr
+    p_arr = shape_pressure_field(p_arr, alpha=alpha, percentile=percentile)
 
-    return normalized_pfield
+    return normalize_pressure_field(p_arr) if norm else p_arr
 
 
-def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
-    """
-    Normalize the input array of intensities by zeroing out values below a given percentile.
+def shape_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.0):
+    """Per-transmit shaping of a pressure field: floor the dim tail, sharpen the beam.
 
     Args:
-        pfield (array): The unnormalized pressure field array
-            of shape (n_tx, grid_size_z, grid_size_x).
+        pfield (array): Pressure field of shape (n_tx, grid_size_z, grid_size_x).
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting.
-            Higher values result in sharper weighting. Default is 1.0.
-        percentile (int, optional): minimum percentile threshold to keep in the weighting.
-            Higher is more aggressive. Default is 10.
+            Higher values result in sharper weighting. Default is 1.0 (no change).
+        percentile (int, optional): minimum percentile threshold to keep in the
+            weighting, per transmit. Higher is more aggressive. Default is 10.
 
     Returns:
-        ops.array: Normalized intensity array.
+        ops.array: Shaped pressure field, same shape.
     """
     # Convert percentile to quantile (0–1 range)
     q = percentile / 100.0
@@ -347,12 +381,21 @@ def normalize_pressure_field(pfield, alpha: float = 1.0, percentile: float = 10.
     pfield = ops.where(pfield < threshold, 0, pfield)
 
     # Sharpen the beam
-    pfield = ops.power(pfield, alpha)
+    return ops.power(pfield, alpha)
 
-    # Normalize over transmit events (axis=0)
-    normalized_pfield = pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
-    return normalized_pfield
+def normalize_pressure_field(pfield):
+    """Normalize a pressure field per pixel, over the transmit axis.
+
+    Turns the field into compounding weights that sum to 1 at every pixel.
+
+    Args:
+        pfield (array): Pressure field of shape (n_tx, grid_size_z, grid_size_x).
+
+    Returns:
+        ops.array: Normalized intensity array.
+    """
+    return pfield / (keras.config.epsilon() + ops.sum(pfield, axis=0, keepdims=True))
 
 
 def _pfield_freq_step(
@@ -382,7 +425,8 @@ def _pfield_freq_step(
     delay_apodization = (
         ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
     )
-    # (num_points, n_el) @ (n_el, n_tx) -> (num_points, n_tx): all transmits batched
+    # The sum over elements of Eq. (37), as a matmul:
+    # (num_points, n_el) @ (n_el, n_tx) -> (num_points, n_tx), all transmits batched
     pressure_k = (
         ops.matmul(monochromatic_pressure, ops.transpose(delay_apodization, (1, 0)))
         * pulse_spect

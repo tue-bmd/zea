@@ -12,17 +12,22 @@ layouts and selections where it could plausibly diverge. The cases that earn the
 """
 
 import http.server
+import inspect
 import logging
 import os
 import socketserver
 import threading
+from importlib import import_module
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import aiohttp
+import h5py
 import hdf5plugin
 import numpy as np
 import pytest
 
+from zea.data import chunk_reader
 from zea.data.chunk_reader import (
     MIN_BYTES,
     HTTPFetcher,
@@ -93,6 +98,21 @@ def _write(path, raw, compression=BLOSC, chunk_axes=("n_frames",)):
         overwrite=True,
         ignore_warnings=True,
     )
+    return path
+
+
+def _write_partial_chunks(path):
+    """A dataset whose chunks do not divide its shape along a chunked axis.
+
+    Reads then hit the generic decode branch (each frame ends in a chunk that only
+    partly overlaps the output) rather than decompressing straight into the output.
+    """
+    shape, chunks = (4, 21, 60_000), (1, 13, 60_000)
+    with h5py.File(path, "w") as handle:
+        dataset = handle.create_group("data").create_dataset(
+            "raw", shape=shape, dtype="int16", chunks=chunks, **BLOSC
+        )
+        dataset[:] = np.random.default_rng(0).integers(-500, 500, shape, dtype=np.int16)
     return path
 
 
@@ -285,20 +305,9 @@ class TestFallbackNotes:
     """
 
     @pytest.fixture
-    def notes(self, caplog):
-        """Capture ``zea.log`` (``propagate=False``) and isolate the once-only dedupe set."""
-        from zea import log
-
-        caplog.set_level(logging.WARNING)
-        log.logger.addHandler(caplog.handler)
-        saved = set(log._warned_locations)
-        log._warned_locations.clear()
-        try:
-            yield caplog
-        finally:
-            log.logger.removeHandler(caplog.handler)
-            log._warned_locations.clear()
-            log._warned_locations.update(saved)
+    def notes(self, attach_caplog_warnings):
+        """The notes a read emitted: ``attach_caplog_warnings`` under a local name."""
+        return attach_caplog_warnings
 
     def test_lzf_nudges_to_resave_even_without_progress(self, tmp_path, notes):
         path = _write(tmp_path / "lzf.hdf5", _structured(), compression="lzf")
@@ -333,6 +342,73 @@ class TestFallbackNotes:
             for _ in range(3):
                 read(file[RAW], slice(None), file._chunk_fetcher, progress=False)
         assert len(notes.records) == 1
+
+    def test_reads_concurrently_under_h5py_lock(self, tmp_path, notes):
+        """A read from inside an h5py generator must stay on the fast path, not deadlock.
+
+        ``group.items()`` is a generator that holds h5py's global lock across its yields,
+        so the read runs with it held. That is safe only because the workers never touch
+        the dataset — reinstating any ``dset.<attr>`` inside ``place`` deadlocks here, as
+        the workers would block on a lock this thread cannot release until they finish.
+
+        Partial chunks on purpose: they take the generic decode branch, the one that
+        reads the dtype. Chunks dividing the shape evenly decompress straight into the
+        output and would not exercise it. A regression **hangs rather than fails** — a
+        deadlocked worker keeps the lock for good — so the read runs in a worker thread
+        to bound the wait, and the assertion below reports it as a failure when it can.
+        """
+        path = _write_partial_chunks(tmp_path / "partial.hdf5")
+        fetcher = LocalFetcher(path)
+        phil = import_module("h5py._objects").phil
+        try:
+            with h5py.File(path, "r") as handle:
+                group = handle["data"]
+                done, out = threading.Event(), {}
+
+                def read_inside_the_generator():
+                    try:
+                        for _, item in group.items():
+                            out["locked"] = phil._is_owned()  # the lock really is held here
+                            out["values"] = read(item, slice(None), fetcher, progress=False)
+                    except BaseException as exc:  # surfaced on the main thread below
+                        out["error"] = exc
+                    finally:
+                        done.set()
+
+                worker = threading.Thread(target=read_inside_the_generator, daemon=True)
+                worker.start()
+                assert done.wait(timeout=60), "read under h5py's global lock deadlocked"
+                if "error" in out:
+                    # Re-raise so the worker's own failure is reported, not a stray KeyError
+                    raise out["error"]
+                assert out["locked"], "test is vacuous: h5py's lock was not held"
+                assert np.array_equal(out["values"], group["raw"][:])
+        finally:
+            fetcher.close()
+
+        assert notes.records == []  # concurrent, so nothing to report
+
+    def test_read_outside_the_generator_stays_on_the_fast_path(self, tmp_path, notes):
+        """The same read with the items materialised first: also concurrent, also quiet."""
+        path = _write_partial_chunks(tmp_path / "partial.hdf5")
+        fetcher = LocalFetcher(path)
+        try:
+            with h5py.File(path, "r") as handle:
+                group = handle["data"]
+                for _, item in list(group.items()):
+                    values = read(item, slice(None), fetcher, progress=False)
+                assert np.array_equal(values, group["raw"][:])
+        finally:
+            fetcher.close()
+        assert notes.records == []
+
+    def test_load_group_reads_on_the_fast_path(self, tmp_path, notes):
+        """``File.load_group`` reads a whole group without falling back."""
+        path = _write(tmp_path / "blosc.hdf5", _structured())
+        with File(path) as file:
+            data = file.load_group("data")
+            assert np.array_equal(data["raw_data"], file[RAW][:])
+        assert notes.records == []
 
     def test_lzf_over_http_still_nudges_when_progress_is_requested(self, tmp_path, notes):
         """lzf has no fast path even when streamed, so asking for progress gets none of it —
@@ -371,6 +447,22 @@ class TestFallbackNotes:
             got = file.data.raw_data[selection]
             assert got.nbytes < MIN_BYTES
             np.testing.assert_array_equal(got, file[RAW][selection])
+
+
+class TestSmallRemoteReads:
+    def test_small_remote_read_takes_the_fast_path(self, structured_file):
+        """A small read over HTTP is still one merged request, not h5py's block-by-block reads."""
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                selection = (0, 0, slice(0, 4))
+                got = read(file[RAW], selection, fetcher)
+                assert got.nbytes < MIN_BYTES
+                np.testing.assert_array_equal(got, file[RAW][selection])
+            assert server.count == 1
+        finally:
+            server.close()
 
 
 class TestHumanBytes:
@@ -565,13 +657,22 @@ class TestFetchers:
 # Remote: the win is round trips, so count them rather than timing them.
 # --------------------------------------------------------------------------- #
 class _CountingServer:
-    """Range-capable HTTP server that counts requests and delays each one."""
+    """Range-capable HTTP server that counts requests and delays each one.
 
-    def __init__(self, directory, latency=0.02):
+    Two ways to make a request fail, for the two halves of the retry path: ``reject_first``
+    requests are answered with ``reject_status`` instead of bytes (Hugging Face answers 429 to
+    a reader going too fast), and ``drop_first`` requests get no answer at all — the connection
+    closes before a status is sent, as a CDN does when it hiccups.
+    """
+
+    def __init__(self, directory, latency=0.02, reject_first=0, reject_status=429, drop_first=0):
         self.count = 0
         #: Highest number of requests in flight at once — the real evidence of concurrency.
         self.peak = 0
         self._active = 0
+        self._reject_left = reject_first
+        self._drop_left = drop_first
+        self.reject_status = reject_status
         lock = threading.Lock()
         outer = self
 
@@ -594,7 +695,28 @@ class _CountingServer:
                 finally:
                     with lock:
                         outer._active -= 1
+                        rejected = outer._reject_left > 0
+                        if rejected:
+                            outer._reject_left -= 1
+                        dropped = not rejected and outer._drop_left > 0
+                        if dropped:
+                            outer._drop_left -= 1
+                if dropped:
+                    # No response line at all: returning None from send_head leaves do_GET
+                    # nothing to write, and the socket closes under the waiting client.
+                    self.close_connection = True
+                    return None
+                if rejected:
+                    self.send_response(outer.reject_status)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
                 path = self.translate_path(self.path)
+                if not os.path.isfile(path):  # an expired or unknown URL
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
                 with open(path, "rb") as handle:
                     body = handle.read()
                 rng = self.headers.get("Range")
@@ -639,6 +761,12 @@ class _Body:
         pass
 
 
+@pytest.fixture
+def no_merge(monkeypatch):
+    """Send one request per chunk, for tests about concurrency rather than merging."""
+    monkeypatch.setattr(chunk_reader, "MERGE_GAP", -1)
+
+
 class TestRemote:
     def test_http_fetcher_matches_local_bytes(self, structured_file):
         server = _CountingServer(structured_file.parent, latency=0)
@@ -668,7 +796,7 @@ class TestRemote:
         finally:
             server.close()
 
-    def test_chunks_are_fetched_concurrently(self, structured_file):
+    def test_chunks_are_fetched_concurrently(self, structured_file, no_merge):
         """The point of the remote path: N chunks cost ~1 round trip, not N.
 
         Asserted on *peak concurrency* — the maximum number of requests the server held open
@@ -717,3 +845,465 @@ class TestRemote:
             tqdm_mock.assert_not_called()
         finally:
             server.close()
+
+
+# --------------------------------------------------------------------------- #
+# Rate limits: a host that says "slow down" must be waited out, not failed on.
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def fast_backoff(monkeypatch):
+    """Keep the retry tests to milliseconds instead of the real seconds-long backoff."""
+    monkeypatch.setattr(chunk_reader, "BASE_BACKOFF", 0.01)
+    monkeypatch.setattr(chunk_reader, "MAX_BACKOFF", 0.05)
+
+
+def _status_error(status):
+    """The exception fsspec's HTTP filesystem raises for a response with this status."""
+    return aiohttp.ClientResponseError(MagicMock(), (), status=status)
+
+
+class TestRetry:
+    def test_rate_limited_range_requests_are_retried(self, structured_file, fast_backoff):
+        """A 429 is transient: the read must come back with the right bytes, not an error."""
+        rejects = 3
+        server = _CountingServer(structured_file.parent, latency=0, reject_first=rejects)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                ranges = [(int(info.byte_offset), int(info.size))]
+                (raw,) = fetcher.fetch(ranges)
+
+                local = LocalFetcher(structured_file)
+                try:
+                    assert [raw] == local.fetch(ranges)
+                finally:
+                    local.close()
+            assert server.count == rejects + 1, "expected one attempt per rejection, then the read"
+        finally:
+            server.close()
+
+    def test_dropped_connections_are_retried(self, structured_file, fast_backoff):
+        """A connection that dies before any status arrives is as transient as a 503 — and
+        likelier: the more chunks a pass streams, the closer to certain one of them drops."""
+        drops = 2
+        server = _CountingServer(structured_file.parent, latency=0, drop_first=drops)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                ranges = [(int(info.byte_offset), int(info.size))]
+                (raw,) = fetcher.fetch(ranges)
+
+                local = LocalFetcher(structured_file)
+                try:
+                    assert [raw] == local.fetch(ranges)
+                finally:
+                    local.close()
+            assert server.count == drops + 1, "expected one attempt per drop, then the read"
+        finally:
+            server.close()
+
+    def test_retries_run_out(self, structured_file, fast_backoff, monkeypatch):
+        """A host that never lets up surfaces its error rather than retrying forever."""
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 2)
+        server = _CountingServer(structured_file.parent, latency=0, reject_first=1000)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                with pytest.raises(Exception) as excinfo:
+                    fetcher.fetch([(int(info.byte_offset), int(info.size))])
+            assert getattr(excinfo.value, "status", None) == 429
+            assert server.count == 3, "expected the first attempt plus MAX_RETRIES retries"
+        finally:
+            server.close()
+
+    @pytest.mark.parametrize(
+        "failure",
+        [{"reject_first": 1000, "reject_status": 503}, {"drop_first": 1000}],
+        ids=["503", "dropped"],
+    )
+    def test_exhausted_retries_raise_os_error(
+        self, structured_file, fast_backoff, monkeypatch, failure
+    ):
+        """aiohttp errors are not ``OSError``, so callers that reopen on ``OSError`` missed them."""
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
+        server = _CountingServer(structured_file.parent, latency=0, **failure)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)  # no signature to redact
+            with pytest.raises(chunk_reader.RemoteReadError):
+                fetcher.fetch([(0, 16)])
+        finally:
+            server.close()
+
+    @staticmethod
+    def _flaky_frames(tmp_path, monkeypatch, key="data", status=503):
+        """A chunked file streamed from a server whose first read fails both of its attempts."""
+        path = tmp_path / "frames.hdf5"
+        data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
+        with h5py.File(path, "w") as f:
+            f.create_dataset(key, data=data, chunks=(1, 8, 8), compression="gzip")
+
+        monkeypatch.setattr(chunk_reader, "MAX_RETRIES", 1)
+        server = _CountingServer(tmp_path, latency=0, reject_first=2, reject_status=status)
+        monkeypatch.setattr(
+            chunk_reader, "fetcher_for", lambda file: HTTPFetcher(server.url + path.name)
+        )
+        return path, data, server
+
+    def test_dataloader_recovers_from_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
+        """One read that outlasts the retries is reopened and read again, not fatal to the epoch."""
+        from zea.data.dataloader import H5DataSource
+
+        path, data, server = self._flaky_frames(tmp_path, monkeypatch)
+        try:
+            source = H5DataSource(str(path), key="data", validate=False, frame_axis=0)
+            np.testing.assert_array_equal(np.squeeze(source[0]), data[0])
+            assert server.count == 3
+        finally:
+            server.close()
+
+    def test_cached_handle_survives_exhausted_retries(self, tmp_path, fast_backoff, monkeypatch):
+        """A failed read leaves no state behind: every chunk read sends fresh range requests, so
+        the next read through the same cached handle works without reopening the file."""
+        from zea.data.datasets import H5FileHandleCache
+
+        path, data, server = self._flaky_frames(tmp_path, monkeypatch)
+        cache = H5FileHandleCache()
+        try:
+            file = cache.get_file(str(path))
+            with pytest.raises(OSError):
+                file.dataset("data")[0]
+            assert cache.get_file(str(path)) is file
+            np.testing.assert_array_equal(file.dataset("data")[0], data[0])
+            assert server.count == 3
+        finally:
+            cache.close()
+            server.close()
+
+    @pytest.mark.parametrize(
+        "status, error", [(503, chunk_reader.RemoteReadError), (404, FileNotFoundError)]
+    )
+    def test_load_data_keeps_failed_reads_an_os_error(
+        self, tmp_path, fast_backoff, monkeypatch, status, error
+    ):
+        """``load_data`` turns bad indices into ``ValueError``; a failed read is not one."""
+        from zea.data.datasets import H5FileHandleCache
+
+        path, data, server = self._flaky_frames(
+            tmp_path, monkeypatch, key="data/raw_data", status=status
+        )
+        cache = H5FileHandleCache()
+        try:
+            file = cache.get_file(str(path))
+            with pytest.raises(error):
+                file.load_data("raw_data", 0)
+        finally:
+            cache.close()
+            server.close()
+
+    @pytest.mark.parametrize("fsspec_error", [False, True])
+    def test_an_exhausted_timeout_is_a_remote_read_error(self, fsspec_error):
+        """A bare timeout is an ``OSError`` that ``load_data`` would take for a bad index."""
+        from fsspec.exceptions import FSTimeoutError
+
+        exc = FSTimeoutError() if fsspec_error else TimeoutError()
+        assert isinstance(chunk_reader._as_os_error(exc), chunk_reader.RemoteReadError)
+
+    def test_a_missing_file_is_not_retried(self, structured_file, fast_backoff):
+        """Only transient statuses are worth another attempt; 404 is an answer, not a stall."""
+        server = _CountingServer(
+            structured_file.parent, latency=0, reject_first=1, reject_status=404
+        )
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                info = file[RAW].id.get_chunk_info(0)
+                with pytest.raises(FileNotFoundError):
+                    fetcher.fetch([(int(info.byte_offset), int(info.size))])
+            assert server.count == 1, "a 404 must not be retried"
+        finally:
+            server.close()
+
+    def test_requests_in_flight_are_capped(self, structured_file, monkeypatch, no_merge):
+        """No more requests are in flight than the cap allows."""
+        cap = 2
+        monkeypatch.setattr(chunk_reader, "MAX_CONCURRENT_REQUESTS", cap)
+        # The semaphore is made once per event loop and cached, so drop whatever earlier
+        # reads left behind -- otherwise this would run against the real cap.
+        monkeypatch.setattr(chunk_reader, "_limiters", {})
+
+        server = _CountingServer(structured_file.parent, latency=0.02)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                got = read(file[RAW], slice(0, 4), fetcher)
+                np.testing.assert_array_equal(got, file[RAW][0:4])
+            assert server.count > cap, "too few requests for the cap to constrain anything"
+            assert server.peak <= cap, f"{server.peak} requests in flight, cap is {cap}"
+        finally:
+            server.close()
+
+
+class TestMerge:
+    def test_adjacent_chunks_cost_one_request(self, structured_file):
+        """A read of neighbouring chunks goes out as one request, and still matches h5py."""
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with File(structured_file) as file:
+                got = read(file[RAW], slice(0, 4), fetcher)
+                np.testing.assert_array_equal(got, file[RAW][0:4])
+            assert server.count == 1
+        finally:
+            server.close()
+
+    def test_merged_bytes_are_cached_per_chunk(self, structured_file, tmp_path):
+        """The cache stores each chunk on its own, so a later partial read is a hit."""
+        from zea.data.chunk_cache import ChunkCache
+
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            cache = ChunkCache("merge-test", root=tmp_path)
+            fetcher = HTTPFetcher(server.url + structured_file.name, cache=cache)
+            with File(structured_file) as file:
+                read(file[RAW], slice(0, 4), fetcher)
+                before = server.count
+                np.testing.assert_array_equal(read(file[RAW], 2, fetcher), file[RAW][2])
+            assert server.count == before
+        finally:
+            server.close()
+
+    def test_groups_by_gap_and_size(self, monkeypatch):
+        monkeypatch.setattr(chunk_reader, "MERGE_GAP", 10)
+        monkeypatch.setattr(chunk_reader, "MERGE_MAX", 100)
+        misses = [(0, 0, 40), (1, 45, 40), (2, 200, 10), (3, 85, 30)]
+        spans = chunk_reader._merge(misses)
+        # 0 and 1 merge (gap 5); 3 would make the request 115 bytes, over the max; 2 is far.
+        assert [(start, end) for start, end, _ in spans] == [(0, 85), (85, 115), (200, 210)]
+        assert [[m[0] for m in members] for *_, members in spans] == [[0, 1], [3], [2]]
+
+    def test_sparse_ranges_are_not_inflated(self):
+        """One small chunk per far-apart frame stays one request each, instead of a request
+        that is mostly gap."""
+        misses = [(i, i * (1 << 20), 64 << 10) for i in range(8)]
+        assert len(chunk_reader._merge(misses)) == 8
+        # Gaps no larger than the chunks still merge.
+        misses = [(i, i * (128 << 10), 64 << 10) for i in range(8)]
+        assert len(chunk_reader._merge(misses)) == 1
+
+    def test_unsorted_and_overlapping_ranges(self):
+        spans = chunk_reader._merge([(0, 50, 10), (1, 0, 60), (2, 55, 10)])
+        assert [(start, end) for start, end, _ in spans] == [(0, 65)]
+
+
+class _Location:
+    """A SignedURL stand-in: a URL that is rejected until it is refreshed."""
+
+    def __init__(self, stale, fresh):
+        self.url, self.fresh, self.refreshes = stale, fresh, 0
+
+    def current(self):
+        return self.url, {}
+
+    def refresh(self, stale_url):
+        if self.url == stale_url:
+            self.refreshes += 1
+            self.url = self.fresh
+        return True
+
+
+class TestRefusedLocation:
+    def test_rejected_url_is_refreshed_once(self, structured_file):
+        server = _CountingServer(structured_file.parent, latency=0)
+        try:
+            location = _Location(server.url + "expired.hdf5", server.url + structured_file.name)
+            fetcher = HTTPFetcher(location)
+            with File(structured_file) as file:
+                got = read(file[RAW], slice(0, 4), fetcher)
+                np.testing.assert_array_equal(got, file[RAW][0:4])
+            assert location.refreshes == 1
+        finally:
+            server.close()
+
+    def test_plain_url_is_not_refreshed(self, structured_file, fast_backoff):
+        server = _CountingServer(
+            structured_file.parent, latency=0, reject_first=1, reject_status=403
+        )
+        try:
+            fetcher = HTTPFetcher(server.url + structured_file.name)
+            with pytest.raises(chunk_reader.RemoteReadError) as info:
+                fetcher.fetch([(0, 16)])
+            assert info.value.status == 403
+            assert server.count == 1
+        finally:
+            server.close()
+
+    @pytest.mark.parametrize("status", [401, 403, 410])
+    def test_refused_statuses(self, status):
+        exc = aiohttp.ClientResponseError(MagicMock(), (), status=status)
+        assert chunk_reader._is_refused(exc)
+
+    def test_missing_file_is_refused(self):
+        assert chunk_reader._is_refused(FileNotFoundError("x"))
+
+    def test_server_errors_are_not_refusals(self):
+        exc = aiohttp.ClientResponseError(MagicMock(), (), status=503)
+        assert not chunk_reader._is_refused(exc)
+
+
+def test_request_cap_is_read_from_the_environment():
+    """ZEA_MAX_CONCURRENT_REQUESTS sets the cap (read once, at import)."""
+    import subprocess
+    import sys
+
+    env = {**os.environ, "ZEA_MAX_CONCURRENT_REQUESTS": "7", "KERAS_BACKEND": "numpy"}
+    code = "from zea.data import chunk_reader as c; print(c.MAX_CONCURRENT_REQUESTS)"
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip().splitlines()[-1] == "7"
+
+
+@pytest.mark.parametrize("value", ["0", "-3", "lots"])
+def test_bad_request_cap_falls_back_to_the_default(monkeypatch, value):
+    """A cap of zero would hang every request; a non-number would break the import."""
+    monkeypatch.setenv("ZEA_MAX_CONCURRENT_REQUESTS", value)
+    with pytest.warns(UserWarning, match="ZEA_MAX_CONCURRENT_REQUESTS"):
+        assert chunk_reader._max_concurrent_requests(default=64) == 64
+
+
+def test_retry_log_does_not_refresh_or_leak_the_url(structured_file, fast_backoff):
+    """The retry message neither reads ``self.url`` (which may refresh) nor logs a signature."""
+
+    class Location:
+        def __init__(self, url):
+            self.url, self.calls = url, 0
+
+        def current(self):
+            self.calls += 1
+            return self.url, {}
+
+        def refresh(self, stale_url):
+            return False
+
+    server = _CountingServer(structured_file.parent, latency=0, reject_first=1)
+    try:
+        location = Location(server.url + structured_file.name + "?Signature=secret")
+        fetcher = HTTPFetcher(location)
+        with patch("zea.log.debug") as debug:
+            fetcher.fetch([(0, 16)])
+        assert location.calls == 1  # only the one call in fetch(), none from the retry
+        message = debug.call_args[0][0]
+        assert "retrying" in message and "secret" not in message
+    finally:
+        server.close()
+
+
+def test_fsspec_debug_log_redacts_signed_urls(structured_file, caplog):
+    """fsspec logs every URL it requests; the signature must not end up in the log."""
+    server = _CountingServer(structured_file.parent, latency=0)
+    try:
+        url = server.url + structured_file.name + "?Policy=abc&Signature=secret"
+        fetcher = HTTPFetcher(url)  # the test server ignores the query string
+        with caplog.at_level(logging.DEBUG, logger="fsspec.http"):
+            data = fetcher.fetch([(0, 16)])
+        assert data[0] == structured_file.read_bytes()[:16]  # requested with the full URL
+        logged = [r.getMessage() for r in caplog.records if r.name == "fsspec.http"]
+        assert any(structured_file.name in m for m in logged)
+        assert not any("secret" in m or "Policy" in m for m in logged)
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize(
+    "name, status, error",
+    [("gone.hdf5", None, FileNotFoundError), (None, 403, chunk_reader.RemoteReadError)],
+)
+def test_errors_redact_signed_urls(structured_file, name, status, error):
+    """The error of a failed request names the file, but not the signature of its URL."""
+    server = _CountingServer(
+        structured_file.parent, latency=0, reject_first=100 if status else 0, reject_status=status
+    )
+    try:
+        name = name or structured_file.name
+        fetcher = HTTPFetcher(server.url + name + "?Policy=abc&Signature=secret")
+        with pytest.raises(error) as info:
+            fetcher.fetch([(0, 16)])
+        assert name in str(info.value) and "secret" not in str(info.value)
+        assert info.value.__suppress_context__
+        if status == 403:
+            assert info.value.status == 403
+    finally:
+        server.close()
+
+
+class TestIsTransient:
+    @pytest.mark.parametrize("status", sorted(chunk_reader.RETRY_STATUS))
+    def test_transient_statuses(self, status):
+        assert chunk_reader._is_transient(_status_error(status))
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 416])
+    def test_an_answer_is_not_a_stall(self, status):
+        assert not chunk_reader._is_transient(_status_error(status))
+
+    @pytest.mark.parametrize(
+        "exc", [ConnectionResetError(), TimeoutError(), aiohttp.ServerDisconnectedError()]
+    )
+    def test_connection_failures(self, exc):
+        assert chunk_reader._is_transient(exc)
+
+    @pytest.mark.parametrize("exc", [FileNotFoundError(), PermissionError(), ValueError()])
+    def test_not_retryable(self, exc):
+        """fsspec turns 404 and 403 into these; a read that retried them would hang on for a
+        file that is simply not there."""
+        assert not chunk_reader._is_transient(exc)
+
+    def test_matches_huggingface_hub(self):
+        """The retry policy is documented as huggingface_hub's, so catch it drifting from it.
+
+        Asserted here rather than imported at runtime: the set is private to
+        ``huggingface_hub.utils._http``, and a module-level import of a private name would
+        turn a hub upgrade into an ImportError on a read path. A skip is the right answer if
+        it moves -- a stale status costs one unretried request, not a failure.
+        """
+        http = pytest.importorskip("huggingface_hub.utils._http")
+        statuses = getattr(http, "_DEFAULT_RETRY_ON_STATUS_CODES", None)
+        if statuses is None:
+            pytest.skip("huggingface_hub no longer exposes _DEFAULT_RETRY_ON_STATUS_CODES")
+        assert set(statuses) == chunk_reader.RETRY_STATUS
+
+        defaults = inspect.signature(http.http_backoff).parameters
+        assert defaults["max_retries"].default == chunk_reader.MAX_RETRIES
+        assert defaults["base_wait_time"].default == chunk_reader.BASE_BACKOFF
+        assert defaults["max_wait_time"].default == chunk_reader.MAX_BACKOFF
+
+
+class TestRetryDelay:
+    def test_honours_retry_after(self):
+        assert chunk_reader._retry_delay(0, {"Retry-After": "3"}) == 3.0
+
+    def test_caps_retry_after(self):
+        """However long the server asks for, a read should not disappear for minutes."""
+        assert chunk_reader._retry_delay(0, {"Retry-After": "600"}) == chunk_reader.MAX_BACKOFF
+
+    @pytest.mark.parametrize(
+        "headers", [None, {}, {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}]
+    )
+    def test_falls_back_to_jittered_backoff(self, headers):
+        """No usable Retry-After (the HTTP-date form included) means back off exponentially."""
+        delays = [chunk_reader._retry_delay(3, headers) for _ in range(20)]
+        ceiling = min(chunk_reader.BASE_BACKOFF * 2**3, chunk_reader.MAX_BACKOFF)
+        assert all(0 <= delay <= ceiling for delay in delays)
+        assert len(set(delays)) > 1, "the backoff must be jittered, or throttled requests resync"
+
+    def test_grows_with_the_attempt(self):
+        """Later attempts wait longer, up to the cap."""
+        early = max(chunk_reader._retry_delay(0) for _ in range(50))
+        late = max(chunk_reader._retry_delay(3) for _ in range(50))
+        assert late > early

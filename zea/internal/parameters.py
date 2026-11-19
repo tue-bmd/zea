@@ -17,15 +17,21 @@ import numpy as np
 
 from zea import log
 from zea.data.spec import Spec, check_dtype
-from zea.internal.core import Object as ZeaObject
 from zea.internal.core import _to_tensor, hash_elements, serialize_elements
 
 
-def cache_with_dependencies(*deps):
-    """Decorator to mark a method as a computed property with dependencies."""
+def cache_with_dependencies(*deps, optional=()):
+    """Decorator to mark a method as a computed property with dependencies.
+
+    Args:
+        *deps: Names of the parameters or properties the computed property needs.
+        optional: Names of parameters the computed property uses when set. Changing
+            them invalidates the cache, but the property can be computed without them.
+    """
 
     def decorator(func):
-        func._dependencies = deps
+        func._dependencies = deps + tuple(optional)
+        func._optional_dependencies = tuple(optional)
 
         @functools.wraps(func)
         def wrapper(self: "BaseParameters"):
@@ -82,7 +88,7 @@ class NoDependencyError(ValueError):
         super().__init__(f"'{name}' is not a computed property with dependencies.")
 
 
-class BaseParameters(ZeaObject):
+class BaseParameters:
     """Base class for parameters with dependencies.
 
     This class provides a robust parameter management system,
@@ -182,6 +188,16 @@ class BaseParameters(ZeaObject):
     # Subclasses must populate this; an empty mapping means "not defined".
     VALID_PARAMS: ClassVar[dict[str, dict[str, Any]]] = {}
 
+    # Memoised `_find_all_dependents` results: the dependency graph is fixed per class.
+    # Properties patched onto a class later are still recomputed correctly, because the
+    # cached-property wrapper also checks a hash of its leaf parameters on every access.
+    _dependents_cache: ClassVar[dict[str, frozenset[str]]] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Own dict per class, so it is freed together with the class
+        cls._dependents_cache = {}
+
     def __init__(self, **kwargs):
         super().__init__()
 
@@ -244,23 +260,24 @@ class BaseParameters(ZeaObject):
 
         return value
 
-    @staticmethod
-    def _human_readable_type(type):
-        """Convert a type or tuple of types to a human-readable string."""
-        return (
-            type.__name__ if not isinstance(type, tuple) else ", ".join([t.__name__ for t in type])
-        )
-
     def copy(self):
         """Return a deep copy of the parameters object (including custom params)."""
         return self.__class__(**deepcopy(self._params), **deepcopy(self._custom_params))
 
     @property
     def serialized(self):
-        """Compute the checksum of the object only if not already done"""
-        if self._serialized is None:
-            self._serialized = serialize_elements([self._params, self._custom_params])
-        return self._serialized
+        """Checksum of the parameters' current contents, used as a cache key."""
+
+        # not cached -> avoids a stale checksum if the parameters are mutated in-place
+        cls = type(self)
+        class_id = f"{cls.__module__}.{cls.__qualname__}"
+        return serialize_elements([class_id, self._params, self._custom_params])
+
+    def __eq__(self, other):
+        """Two parameter objects are equal when they hold the same parameters."""
+        if not isinstance(other, self.__class__):
+            return False
+        return self.serialized == other.serialized
 
     @classmethod
     def _is_property_with_dependencies(cls, name):
@@ -279,13 +296,25 @@ class BaseParameters(ZeaObject):
         """Recursively find all leaf parameters that a property depends on.
 
         If it is an optional dependency parameter, it will be included as a leaf. Not the ones it
-        depends on.
+        depends on, unless it is unset and derived from them instead.
         """
         if seen is None:
             seen = set()
         if name in seen:
             return set()
         seen.add(name)
+
+        # An optional dependency parameter that is unset falls back to its dependencies, so
+        # those are leaves too (e.g. bandwidth derived from center_frequency).
+        if (
+            name in self.VALID_PARAMS
+            and self._params.get(name) is None
+            and self._is_property_with_dependencies(name)
+        ):
+            leaves = {name}
+            for dep in self._get_dependencies(name):
+                leaves |= self._find_leaf_params(dep, seen)  # union
+            return leaves
 
         # If the name is already a leaf parameter, return it
         if name in self._params or name in self.VALID_PARAMS:
@@ -335,7 +364,8 @@ class BaseParameters(ZeaObject):
         # Attribute not found
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
 
-    def __setattr__(self, name: str, value):
+    def _check_settable(self, name: str):
+        """Raise if ``name`` is a method or (computed/read-only) property."""
         # Give clear error message on assignment to methods
         class_attr = getattr(self.__class__, name, None)
         if callable(class_attr):
@@ -345,9 +375,9 @@ class BaseParameters(ZeaObject):
                 f"To use it, call it as a function, e.g.: '{self.__class__.__name__}.{name}(...)'"
             )
 
-        # Allow setting private attributes
+        # Private attributes are always settable
         if name.startswith("_"):
-            return super().__setattr__(name, value)
+            return
 
         # Give clear error message on assignment to computed properties
         if self._is_property_with_dependencies(name) and name not in self.VALID_PARAMS:
@@ -361,11 +391,17 @@ class BaseParameters(ZeaObject):
         if isinstance(class_attr, property) and name not in self.VALID_PARAMS:
             raise AttributeError(f"Cannot set read-only property '{name}'.")
 
+    def __setattr__(self, name: str, value):
+        self._check_settable(name)
+
+        # Allow setting private attributes
+        if name.startswith("_"):
+            return super().__setattr__(name, value)
+
         # Any key not in VALID_PARAMS is stored as a custom (passthrough) parameter.
         # Custom params are never type-checked and never participate in derivation.
         if name not in self.VALID_PARAMS:
             self._custom_params[name] = value
-            self._serialized = None  # see core object
             return
 
         # Validate new value
@@ -386,9 +422,9 @@ class BaseParameters(ZeaObject):
 
         Validated parameters (those listed in ``VALID_PARAMS``) are type-checked
         and may invalidate cached computed properties.  Any other key is stored
-        as a custom (passthrough) parameter, except names that collide with a
-        method or computed property of the class, which are silently ignored
-        (they cannot be overridden).
+        as a custom (passthrough) parameter.  Names that collide with a method or
+        (computed/read-only) property raise, as with ``__setitem__``.  All keys
+        are checked before any is set, so such an error leaves the object unchanged.
 
         Args:
             params: Optional mapping of parameters to set.
@@ -399,15 +435,13 @@ class BaseParameters(ZeaObject):
         """
         merged = dict(params) if params else {}
         merged.update(kwargs)
+        # Check all keys up front so a bad key does not leave a partial update.
+        for key in merged:
+            self._check_settable(key)
         for key, new_val in merged.items():
             if key not in self.VALID_PARAMS:
-                # Cannot override methods or (computed/plain) properties.
-                class_attr = getattr(self.__class__, key, None)
-                if callable(class_attr) or isinstance(class_attr, property):
-                    continue
                 # Genuine custom passthrough parameter.
                 self._custom_params[key] = new_val
-                self._serialized = None
                 continue
 
             if not force:
@@ -448,7 +482,6 @@ class BaseParameters(ZeaObject):
             self._invalidate(name)
         elif name in self._custom_params:
             del self._custom_params[name]
-            self._serialized = None
         elif name in self.VALID_PARAMS:
             raise ValueError(f"Cannot delete parameter '{name}' because it is not set.")
         else:
@@ -479,31 +512,40 @@ class BaseParameters(ZeaObject):
                         f"{cls.__name__} class definition."
                     )
 
-    def _find_all_dependents(self, target, seen=None):
+    @classmethod
+    def _find_all_dependents(cls, target):
         """
         Find all computed properties that depend (directly or indirectly) on the target parameter
-        with a global search. Returns a set of property names that depend on the target.
+        with a global search. Returns a frozenset of property names that depend on the target.
+
+        Memoised per class in `_dependents_cache`: every `__setattr__` invalidates through
+        here, and the uncached search rescans the class for each node -- which made `copy()`
+        of a full `Parameters` cost about a second.
         """
+        cache = cls._dependents_cache
+        if target not in cache:
+            cache[target] = frozenset(cls._collect_dependents(target, set()))
+        return cache[target]
+
+    @classmethod
+    def _collect_dependents(cls, target, seen):
         dependents = set()
-        if seen is None:
-            seen = set()
         if target in seen:
             return dependents
         seen.add(target)
-        for name in self.__class__.__dict__:
-            if self._is_property_with_dependencies(name):
-                if target in self._get_dependencies(name):
+        # Walk the MRO so subclasses (e.g. the deprecated Scan) see inherited properties
+        names = dict.fromkeys(name for klass in cls.__mro__ for name in vars(klass))
+        for name in names:
+            if cls._is_property_with_dependencies(name):
+                if target in cls._get_dependencies(name):
                     dependents.add(name)
                     # Recursively add dependents of this property
-                    dependents |= self._find_all_dependents(name, seen)
+                    dependents |= cls._collect_dependents(name, seen)
         return dependents
 
     def _invalidate(self, key):
         """Invalidate a specific cached computed property and its dependencies."""
-        self._cache.pop(key, None)
-        self._dependency_versions.pop(key, None)
-        self._tensor_cache.pop(key, None)
-        self._serialized = None  # see core object
+        self._drop_cached(key)
         self._invalidate_dependents(key)
 
     def _invalidate_dependents(self, changed_key):
@@ -511,8 +553,15 @@ class BaseParameters(ZeaObject):
         Invalidate all cached computed properties that (directly or indirectly)
         depend on the changed_key.
         """
+        # The dependents are already transitive, so no need to recurse per dependent
         for key in self._find_all_dependents(changed_key):
-            self._invalidate(key)
+            self._drop_cached(key)
+
+    def _drop_cached(self, key):
+        """Drop the cached value of a single key, without touching its dependents."""
+        self._cache.pop(key, None)
+        self._dependency_versions.pop(key, None)
+        self._tensor_cache.pop(key, None)
 
     def _current_dependency_hash(self, key) -> str:
         """Compute a hash representing the current state of the dependencies of key.
@@ -539,8 +588,10 @@ class BaseParameters(ZeaObject):
             return missing_set
 
         if self._is_property_with_dependencies(name):
+            optional = getattr(self.__class__, name).fget._optional_dependencies
             for dep in self._get_dependencies(name):
-                missing_set |= self._find_missing_dependencies(dep)  # union
+                if dep not in optional:
+                    missing_set |= self._find_missing_dependencies(dep)  # union
         else:
             missing_set.add(name)
 
@@ -680,12 +731,14 @@ class BaseParameters(ZeaObject):
             log.info(f"Could not find proper scan parameters in {kwargs}.")
         return cls(**params)
 
-    # ------------------------------------------------------------------
-    # Flat dict-like interface
-    # The object behaves as a read-only flat dict over the union of
-    # ``_params`` and ``_custom_params``.  ``__getitem__`` / ``__setitem__``
-    # / ``__delitem__`` are inherited from :class:`~zea.internal.core.Object`.
-    # ------------------------------------------------------------------
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+    def __delitem__(self, key):
+        delattr(self, key)
 
     def _flat(self) -> dict:
         """Merged view of stored params and custom params (the flat dict)."""

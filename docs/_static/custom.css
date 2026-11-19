@@ -3,3 +3,185 @@ figure figcaption p {
   color: var(--color-foreground-secondary, #666);
   text-align: center;
 }
+
+/* ``.. citation::`` blocks -- see docs/source/_ext/citation.py.
+   Every paper zea builds on is attributed in this one block style, so a
+   reference looks the same whether it sits in an operation's docstring, a
+   model page or a dataset converter. Colours come from furo's admonition
+   variables so light and dark themes both stay consistent. */
+.admonition.citation-admonition {
+  --color-admonition-title: #4c6ef5;
+  --color-admonition-title--background: rgba(76, 110, 245, 0.1);
+  --icon: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2h9l5 5v15H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm8 1.5V8h4.5L14 3.5zM8 12h8v1.5H8V12zm0 3.5h8V17H8v-1.5zm0-7h4V10H8V8.5z'/%3E%3C/svg%3E");
+}
+
+body[data-theme="dark"] .admonition.citation-admonition {
+  --color-admonition-title: #91a7ff;
+  --color-admonition-title--background: rgba(145, 167, 255, 0.15);
+}
+
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme="light"]) .admonition.citation-admonition {
+    --color-admonition-title: #91a7ff;
+    --color-admonition-title--background: rgba(145, 167, 255, 0.15);
+  }
+}
+
+/* Hanging indent, so a block listing several papers reads as a bibliography
+   rather than as a wall of wrapped lines. */
+.admonition.citation-admonition p.citation-entry {
+  padding-left: 1.5rem;
+  text-indent: -1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.admonition.citation-admonition p.citation-entry:last-child {
+  margin-bottom: 0;
+}
+
+/* examples.rst -- thumbnail cards and tag filter, see
+   docs/source/_ext/example_gallery.py and docs/_static/example-gallery.js.
+   Rectangular thumbnails are 4:3 and fill the card; scan-cone thumbnails have
+   a transparent background, so they sit directly on the page in both themes.
+   Everything else uses furo's colours. */
+.example-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.example-filter-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+}
+
+.example-filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.9rem;
+  row-gap: 0.15rem;
+}
+
+.example-filter-label {
+  flex: none;
+  width: 3.2rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-foreground-muted);
+}
+
+.example-filter button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.1rem 0;
+  border: none;
+  background: none;
+  color: var(--color-foreground-secondary);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.example-filter button:hover {
+  color: var(--color-foreground-primary);
+}
+
+.example-filter button[aria-pressed="true"] {
+  color: var(--color-foreground-primary);
+  border-bottom-color: var(--color-brand-primary);
+}
+
+.example-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 1.25rem 1rem;
+  margin: 1rem 0 2rem;
+}
+
+.example-card,
+.example-card:visited {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--color-foreground-primary);
+  text-decoration: none;
+}
+
+.example-card[hidden] {
+  display: none;
+}
+
+.example-card-thumb {
+  display: block;
+  aspect-ratio: 4 / 3;
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.example-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: transform 0.2s ease;
+}
+
+.example-card:hover .example-card-thumb img {
+  transform: scale(1.04);
+}
+
+.example-card-title {
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.example-card:hover .example-card-title {
+  color: var(--color-brand-content);
+}
+
+.example-card-source {
+  font-size: 0.75rem;
+  color: var(--color-foreground-secondary);
+}
+
+.example-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.72rem;
+  color: var(--color-foreground-muted);
+}
+
+.example-card-level {
+  color: var(--color-foreground-secondary);
+}
+
+/* Level as stars, on the cards and on the level buttons. */
+.example-card-level::before,
+.example-filter button[data-level]::before {
+  letter-spacing: 0.05em;
+  margin-right: 0.3em;
+}
+
+.example-card-level[data-level="beginner"]::before,
+.example-filter button[data-level="beginner"]::before {
+  content: "★☆☆";
+}
+
+.example-card-level[data-level="intermediate"]::before,
+.example-filter button[data-level="intermediate"]::before {
+  content: "★★☆";
+}
+
+.example-card-level[data-level="advanced"]::before,
+.example-filter button[data-level="advanced"]::before {
+  content: "★★★";
+}
+
+.example-card-tags span + span::before {
+  content: " · ";
+}

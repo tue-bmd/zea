@@ -1,8 +1,15 @@
 """Tests for the dataclass-based config validation (zea.internal.config.validation)."""
 
+from pathlib import Path
+
 import pytest
 
 from zea.config import Config, _migrate_legacy_config, check_config
+from zea.internal.config.users import (
+    UserProfileSpec,
+    local_remote_paths,
+    validate_users_config,
+)
 from zea.internal.config.validation import (
     ConfigSchema,
     ParametersConfig,
@@ -127,3 +134,156 @@ def test_data_config_passthrough_with_full_section():
     assert result["data"]["path"] == "hf://zeahub/picmus/file.hdf5"
     assert result["data"]["local"] is False
     assert result["data"]["indices"] == "all"
+
+
+# ---------------------------------------------------------------------------
+# users.yaml schema (zea.internal.config.users)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "users_config",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param(None, id="none"),
+        pytest.param({"data_root": "/mnt/shared/data"}, id="shared-root"),
+        pytest.param({"data_root": {"local": "/l", "remote": "/r"}}, id="local-remote"),
+        pytest.param({"data_root": {"local": "/l"}}, id="local-only"),
+        pytest.param({"data_root": "/d", "output": {"remote": "/o"}}, id="output-mapping"),
+        pytest.param(
+            {
+                "alice": {
+                    "workstation": {
+                        "system": "linux",
+                        "data_root": {"local": "/l", "remote": "/r"},
+                    },
+                    "data_root": "/mnt/data/alice",
+                },
+                "bob": {"data_root": "/mnt/data/bob"},
+                "data_root": "/mnt/shared/data",
+            },
+            id="users-and-machines",
+        ),
+    ],
+)
+def test_valid_users_configs(users_config):
+    """A well-formed users.yaml validates and survives a round-trip."""
+    result = validate_users_config(users_config)
+    assert validate_users_config(result) == result
+
+
+def test_users_config_keeps_only_the_keys_that_are_set():
+    """Defaults are not filled in: absent means "fall back", unlike an explicit null."""
+    result = validate_users_config({"data_root": "/mnt/shared/data"})
+    assert result == {"data_root": "/mnt/shared/data"}
+    assert "output" not in result and "system" not in result
+
+
+@pytest.mark.parametrize(
+    "users_config",
+    [
+        pytest.param({"data_root": None}, id="root"),
+        pytest.param({"alice": {"data_root": None}}, id="username"),
+        pytest.param({"alice": {"laptop": {"data_root": None}}}, id="hostname"),
+    ],
+)
+def test_users_config_drops_explicit_null(users_config):
+    """An explicit null says "fall back", same as leaving the key out, so it is dropped."""
+    result = validate_users_config(users_config)
+    section = result
+    for key in ("alice", "laptop"):
+        if key in section:
+            section = section[key]
+    assert "data_root" not in section
+
+
+def test_users_config_expands_nested_sections():
+    """Nested user / machine sections come back as plain dicts, not spec objects."""
+    result = validate_users_config({"alice": {"laptop": {"data_root": "/d"}}})
+    assert result == {"alice": {"laptop": {"data_root": "/d"}}}
+    assert isinstance(result["alice"], dict)
+    assert not isinstance(result["alice"], UserProfileSpec)
+
+
+@pytest.mark.parametrize(
+    ("users_config", "match"),
+    [
+        pytest.param({"data_root": 42}, "must be a string or path", id="non-path-root"),
+        pytest.param(
+            {"data_root": {"nas": "/d"}}, r"unexpected keys \['nas'\]", id="unknown-subkey"
+        ),
+        pytest.param({"data_root": {}}, "at least one of", id="empty-mapping"),
+        pytest.param(
+            {"data_root": {"local": 3}}, "local: must be a string or path", id="non-path-subkey"
+        ),
+        pytest.param({"system": 3}, "must be a string", id="non-string-system"),
+        pytest.param(
+            {"notes": "my machine"},
+            "expected a mapping for a user or machine section",
+            id="stray-scalar",
+        ),
+        pytest.param(
+            {"alice": {"laptop": {"data_root": {"nas": "/d"}}}},
+            r"unexpected keys \['nas'\]",
+            id="error-inside-nested-section",
+        ),
+    ],
+)
+def test_invalid_users_configs_raise(users_config, match):
+    with pytest.raises(ValueError, match=match):
+        validate_users_config(users_config)
+
+
+def test_users_config_error_names_the_offending_section():
+    """Errors are prefixed with the section they came from, to locate them in the file."""
+    with pytest.raises(ValueError, match="alice"):
+        validate_users_config({"alice": {"data_root": 42}})
+
+
+def test_local_remote_paths_rejects_a_non_mapping():
+    """The local/remote validator is also usable on its own."""
+    with pytest.raises(ValueError, match="must be a mapping"):
+        local_remote_paths("/not/a/mapping")
+
+
+def test_users_config_rejects_a_non_mapping():
+    with pytest.raises(ValueError, match="expected a mapping"):
+        validate_users_config(["not", "a", "mapping"])
+
+
+@pytest.mark.parametrize("local", [True, False, None])
+def test_data_local_accepts_none(local):
+    """`set_data_paths(local=None)` is valid, so the config must be able to say so."""
+    assert validate_config({"data": {"local": local}})["data"]["local"] is local
+
+
+# ── pipeline.imports ─────────────────────────────────────────────────────────
+
+
+def test_pipeline_imports_defaults_to_none():
+    """Configs that declare no custom modules are unchanged."""
+    assert validate_config({})["pipeline"]["imports"] is None
+
+
+def test_pipeline_imports_accepts_a_list_of_strings():
+    """Dotted modules, file paths and hf:// URIs are all just strings here."""
+    config = validate_config(
+        {
+            "pipeline": {
+                "imports": ["my_project.my_ops", "./ops.py", "hf://org/repo/ops.py"],
+                "operations": ["identity"],
+            }
+        }
+    )
+    assert config["pipeline"]["imports"] == [
+        "my_project.my_ops",
+        "./ops.py",
+        "hf://org/repo/ops.py",
+    ]
+
+
+@pytest.mark.parametrize("imports", ["ops.py", [Path("ops.py")], [1], {"a": "ops.py"}])
+def test_pipeline_imports_rejects_non_string_lists(imports):
+    """A bare string or a list of non-strings is a mistake worth catching early."""
+    with pytest.raises(ValueError, match="list of strings"):
+        validate_config({"pipeline": {"imports": imports}})

@@ -19,9 +19,12 @@ file_paths.txt
 #### General Python ####
 
 # Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+# NOTE: docker ignore patterns do not cross directory separators, so a bare `*.ext`
+# only matches at the context root. Anything that can appear in a subdirectory needs
+# the `**/` prefix.
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
 
 # IDEs and editors
 /.vscode
@@ -29,14 +32,14 @@ __pycache__/
 /.ideas
 
 # C extensions
-*.so
+**/*.so
 
 # Data files
-*.hdf5
-*.h5
-*.npy
-*.npz
-*.mat
+**/*.hdf5
+**/*.h5
+**/*.npy
+**/*.npz
+**/*.mat
 
 # Distribution / packaging
 .Python
@@ -171,4 +174,5 @@ dmypy.json
 /output
 
 **/.cache
-**/__pycache__
+**/.pytest_cache
+**/.ruff_cache

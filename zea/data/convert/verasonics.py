@@ -66,6 +66,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+import scipy.fft
 import yaml
 from keras import ops
 
@@ -195,15 +196,23 @@ def estimate_lens_probe_params(
     }
 
 
-def bs100bw_to_iq(data: np.ndarray) -> np.ndarray:
+def baseband_mode_to_iq(data: np.ndarray, carrier_periods_per_pair: int = 1) -> np.ndarray:
     """Convert BS100BW/BS50BW interleaved data to IQ format.
 
-    Both Verasonics baseband modes (BS100BW and BS50BW) interleave I and Q
-    samples along the axial axis: even samples are I, odd samples are Q
-    (negated).
+    Both Verasonics baseband modes (BS100BW and BS50BW) store pairs of samples taken a
+    quarter carrier period apart. One pair is taken every carrier period (BS100BW) or
+    every two carrier periods (BS50BW).
+
+    With ``x(t) = I(t) cos(2π f_c t) - Q(t) sin(2π f_c t)``, the even samples fall where
+    ``cos = 1`` and hold ``I``, and the odd samples fall where ``sin = 1`` and hold
+    ``-Q``. The odd samples are therefore negated to recover ``Q``. Because Q is sampled
+    a quarter carrier period after I, Q is then shifted back to the I sample times with
+    a band-limited fractional delay.
 
     Args:
         data: Input array of shape ``(n_frames, n_tx, n_ax_raw, n_el, 1)``.
+        carrier_periods_per_pair: Number of carrier periods between consecutive sample
+            pairs: 1 for BS100BW, 2 for BS50BW. Defaults to 1.
 
     Returns:
         IQ array of shape ``(n_frames, n_tx, n_ax, n_el, 2)``.
@@ -212,8 +221,54 @@ def bs100bw_to_iq(data: np.ndarray) -> np.ndarray:
         raise ValueError(f"Expected shape (n_frames, n_tx, n_ax_raw, n_el, 1), got {data.shape}")
     if data.shape[2] % 2 != 0:
         raise ValueError(f"Axial dimension must be even for IQ deinterleaving, got {data.shape[2]}")
+    if carrier_periods_per_pair not in (1, 2):
+        raise ValueError(
+            f"carrier_periods_per_pair must be 1 (BS100BW) or 2 (BS50BW), "
+            f"got {carrier_periods_per_pair}"
+        )
     d = data.astype(np.float32)
-    return np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
+    # Even samples hold I, odd samples hold -Q.
+    iq_data = np.stack([d[:, :, 0::2, :, 0], -d[:, :, 1::2, :, 0]], axis=-1)
+    del d
+    # Q lags I by a quarter carrier period, expressed here in IQ samples.
+    q_delay = 0.25 / carrier_periods_per_pair
+    return _align_baseband_quadrature(iq_data, axis=2, q_delay=q_delay)
+
+
+def _align_baseband_quadrature(iq: np.ndarray, axis: int = 2, q_delay: float = 0.25) -> np.ndarray:
+    """Shift Q back to the I sample times in IQ data built from BS100BW/BS50BW pairs.
+
+    The baseband sample modes capture I at time ``t`` and Q a quarter carrier period
+    later. With ``Ts`` the IQ sample period, that is ``Q(t + Ts/4)`` for BS100BW and
+    ``Q(t + Ts/8)`` for BS50BW. This function applies a band-limited fractional delay
+    of ``q_delay`` samples to Q so that it is evaluated at the I sample times.
+
+    Q is overwritten in place to limit peak memory on full recordings.
+
+    Args:
+        iq: Float32 IQ data with I and Q on the last axis. Modified in place.
+        axis: The axial (fast-time) axis.
+        q_delay: How far Q lags I, in IQ samples. 0.25 for BS100BW, 0.125 for BS50BW.
+            Defaults to 0.25.
+
+    Returns:
+        ``iq``, with Q evaluated at the I sample times.
+    """
+    q_data = np.moveaxis(iq[..., 1], axis, -1)
+    n_ax = q_data.shape[-1]
+    # Mirror the record so the circular FFT shift sees no jump between its end and start.
+    n_fft = 2 * n_ax
+    q_data_extended = np.concatenate([q_data, q_data[..., ::-1]], axis=-1)
+    spectrum = scipy.fft.rfft(q_data_extended, axis=-1, workers=-1)
+    del q_data_extended
+    frequency = scipy.fft.rfftfreq(n_fft)
+    # Q[n] holds Im b at sample n + q_delay; evaluate it at sample n.
+    spectrum *= np.exp(-2j * np.pi * frequency * q_delay).astype(spectrum.dtype)
+    q_aligned = scipy.fft.irfft(spectrum, n=n_fft, axis=-1, workers=-1)
+    del spectrum
+
+    iq[..., 1] = np.moveaxis(q_aligned[..., :n_ax], -1, axis)
+    return iq
 
 
 def _validate_convert_config(data):
@@ -1285,7 +1340,10 @@ class VerasonicsFile(h5py.File):
         raw_data = raw_data[..., None]
 
         if self.get_is_baseband_mode(buffer_index):
-            raw_data = bs100bw_to_iq(raw_data)
+            # BS100BW takes a sample pair every carrier period, BS50BW every two.
+            raw_data = baseband_mode_to_iq(
+                raw_data, carrier_periods_per_pair=100 // self.get_sample_mode(buffer_index)
+            )
 
         return raw_data
 
@@ -1924,27 +1982,24 @@ class VerasonicsFile(h5py.File):
         # (or reduced/exported workspaces) may not contain ImgDataP at all, in
         # which case read_image_data_p returns None and we simply skip it rather
         # than store an empty (None) custom element.
-        try:
-            verasonics_image_buffer = self.read_image_data_p(
-                frames=frames, image_buffer_index=image_buffer_index
-            )
-            if verasonics_image_buffer is None:
-                log.info("No ImgDataP image buffer found in file; skipping.")
-            else:
-                custom_elements.append(
-                    CustomElement(
-                        name="verasonics_image_buffer",
-                        data=verasonics_image_buffer,
-                        description=(
-                            "The Verasonics ImgDataP buffer. "
-                            "WARNING: This buffer may skip frames compared to the raw data! "
-                            "Use only for reference."
-                        ),
-                        unit="unitless",
-                    )
+        verasonics_image_buffer = self.read_image_data_p(
+            frames=frames, image_buffer_index=image_buffer_index
+        )
+        if verasonics_image_buffer is None:
+            log.info("No ImgDataP image buffer found in file; skipping.")
+        else:
+            custom_elements.append(
+                CustomElement(
+                    name="verasonics_image_buffer",
+                    data=verasonics_image_buffer,
+                    description=(
+                        "The Verasonics ImgDataP buffer. "
+                        "WARNING: This buffer may skip frames compared to the raw data! "
+                        "Use only for reference."
+                    ),
+                    unit="unitless",
                 )
-        except Exception as e:
-            log.error(f"Could not read Verasonics ImgDataP buffer: {e}, skipping.")
+            )
 
         probe_dict = self.probe.to_probe_spec()
         f_c = self.probe.center_frequency

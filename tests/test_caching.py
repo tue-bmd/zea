@@ -9,8 +9,11 @@ import numpy as np
 import pytest
 
 import zea.internal.cache as cache_mod
+from zea.beamform.admire import generate_admire_models
+from zea.beamform.pfield import compute_pfield
+from zea.data.datasets import _find_h5_file_shapes, _validate_h5_files
 from zea.internal.cache import cache_output, cache_summary, clear_cache, get_function_source
-from zea.internal.core import Object
+from zea.internal.core import serialize_elements
 
 from . import DEFAULT_TEST_SEED
 
@@ -70,13 +73,17 @@ def _expensive_nested_operation(x, y):
     return result
 
 
-class CustomObject(Object):
-    """Custom core object for testing caching"""
+class CustomObject:
+    """Custom class opting into a content-based cache key via `serialized`."""
 
     def __init__(self, x, y):
-        super().__init__()
         self.x = x
         self.y = y
+
+    @property
+    def serialized(self):
+        """Checksum of the current contents, picked up by `serialize_elements`."""
+        return serialize_elements([type(self).__qualname__, self.__dict__])
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -115,6 +122,33 @@ def test_get_function_source():
     src = get_function_source(some_nested_func)
     assert "# This comment is also required for some tests!" in src, "Did not get source code"
     assert "# This comment is required for some tests!" in src, "Did not get nested source code"
+
+
+def _recursive_func(n):
+    # Recursive marker
+    return n if n <= 0 else _recursive_func(n - 1) + _mutual_b(n)
+
+
+def _mutual_b(n):
+    # Mutual marker
+    return 0 if n <= 0 else _recursive_func(n - 1)
+
+
+def test_get_function_source_recursive():
+    """Recursive and mutually recursive functions do not loop forever."""
+    src = get_function_source(_recursive_func)
+    assert src.count("# Recursive marker") == 1
+    assert src.count("# Mutual marker") == 1
+
+
+@pytest.mark.parametrize(
+    "func",
+    [compute_pfield, generate_admire_models, _find_h5_file_shapes, _validate_h5_files],
+    ids=lambda f: f.__name__,
+)
+def test_cached_functions_have_source(func):
+    """zea's cached functions get a cache key; a failure would only log a warning at runtime."""
+    assert get_function_source(func) is not None
 
 
 def test_caching_x():

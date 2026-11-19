@@ -6,6 +6,7 @@ from huggingface_hub import HfApi, snapshot_download
 
 from zea import log
 from zea.internal.preset_utils import (
+    HF_MODELS_DIR,
     HF_PREFIX,
     _hf_clear_caches,
     _hf_list_files,
@@ -36,6 +37,7 @@ def load_model_from_hf(repo_id, revision="main", verbose=True):
         repo_id=repo_id,
         repo_type="model",
         revision=revision,
+        cache_dir=HF_MODELS_DIR,
     )
     api = HfApi()
     commit = api.list_repo_commits(repo_id, revision=revision)[0]
@@ -118,6 +120,9 @@ class HFPath(PurePosixPath):
     """A path-like object that preserves the hf:// scheme and mimics Path API."""
 
     _scheme = HF_PREFIX
+    # Set in ``__new__``; declared here because ``PurePath`` is slotted and does not
+    # declare it, so the assignment alone gives the type checker nothing to bind to.
+    _needs_scheme: bool
 
     @classmethod
     def _join_without_scheme(cls, args):

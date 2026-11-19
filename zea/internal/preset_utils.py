@@ -9,11 +9,14 @@ repository listings, downloads and streaming — so the two sides cannot drift a
 See https://huggingface.co/zeahub/
 """
 
+import hashlib
 import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import NamedTuple
+from urllib.parse import quote
 
 from huggingface_hub import RepoFile, hf_hub_download, list_repo_tree, login
 from huggingface_hub.utils import (
@@ -24,6 +27,7 @@ from huggingface_hub.utils import (
 
 from zea import log
 from zea.internal.cache import ZEA_CACHE_DIR
+from zea.internal.utils import load_json_cache, store_json_cache
 
 HF_SCHEME = "hf"
 HF_PREFIX = "hf://"
@@ -174,9 +178,15 @@ _DOWNLOAD_CACHE = _TTLCache(_HF_CACHE_TTL)
 
 
 def _hf_clear_caches() -> None:
-    """Drop the memoized repository listings and resolved download paths."""
+    """Drop the memoized repository listings, resolved download paths and CDN URLs."""
+    import shutil
+
+    from zea.data import hf_remote
+
+    hf_remote.clear()
     _LISTING_CACHE.clear()
     _DOWNLOAD_CACHE.clear()
+    shutil.rmtree(_LISTING_DIR, ignore_errors=True)
 
 
 def _cache_key(*parts, **kwargs):
@@ -189,21 +199,71 @@ def _cache_key(*parts, **kwargs):
     return key
 
 
-def _hf_repo_files(repo_id, repo_type="dataset", **kwargs) -> dict:
-    """Map every file in a repo to its size in bytes (memoized).
+# Repo listings are also cached on disk, so processes on one machine (e.g. one per GPU)
+# share them. Listing a large repo takes one API request per page (~20 for Open-H-RF).
+# Entries expire after _HF_CACHE_TTL, the same as the in-memory cache.
+_LISTING_DIR = ZEA_CACHE_DIR / "huggingface" / "listings"
 
-    ``list_repo_tree`` already carries the sizes that ``list_repo_files`` throws away,
-    so one listing serves both the callers that only want names
-    (:func:`_hf_list_files`) and the ones that need sizes (:func:`_hf_list_h5_files`).
+
+class _RepoEntry(NamedTuple):
+    """What zea needs from a :class:`~huggingface_hub.RepoFile`."""
+
+    size: int
+    #: LFS sha256, or the git blob id for non-LFS files. See :func:`_hf_content_id`.
+    content_id: str | None
+
+
+def _hf_token_id(token: str | None) -> str:
+    """Hash of a Hub token, so on-disk caches of Hub answers are kept per user."""
+    return hashlib.sha256(token.encode()).hexdigest()[:16] if token else "anonymous"
+
+
+def _listing_path(key) -> Path:
+    from huggingface_hub import constants, get_token
+
+    who = _hf_token_id(get_token())
+    digest = hashlib.sha256(repr((constants.ENDPOINT, who, key)).encode()).hexdigest()
+    return _LISTING_DIR / f"{digest}.json"
+
+
+def _load_listing(path: Path) -> "dict[str, _RepoEntry] | None":
+    entries = load_json_cache(path, _HF_CACHE_TTL)
+    if not isinstance(entries, dict):
+        return None
+    try:
+        return {name: _RepoEntry(*entry) for name, entry in entries.items()}
+    except TypeError:  # written by another version of zea
+        return None
+
+
+def _hf_repo_files(repo_id, repo_type="dataset", **kwargs) -> "dict[str, _RepoEntry]":
+    """Map every file in a repo to its size and content id (cached in memory and on disk).
+
+    ``list_repo_tree`` already carries the sizes and content ids that ``list_repo_files``
+    throws away, so one listing serves the callers that only want names
+    (:func:`_hf_list_files`), the ones that need sizes (:func:`_hf_list_h5_files`) and
+    the ones that need a content id (:func:`_hf_content_id`).
 
     The returned mapping is shared between callers and must not be mutated.
     """
+    key = _cache_key(repo_id, repo_type, **kwargs)
+    shared = key is not None and _HF_CACHE_TTL > 0
 
     def _list():
+        path = _listing_path(key) if shared else None
+        if path is not None and (listing := _load_listing(path)) is not None:
+            return listing
         entries = _hf_call(list_repo_tree, repo_id, recursive=True, repo_type=repo_type, **kwargs)
-        return {entry.path: entry.size for entry in entries if isinstance(entry, RepoFile)}
+        listing = {
+            entry.path: _RepoEntry(entry.size, getattr(entry.lfs, "sha256", None) or entry.blob_id)
+            for entry in entries
+            if isinstance(entry, RepoFile)
+        }
+        if path is not None:
+            store_json_cache(path, listing)
+        return listing
 
-    return _LISTING_CACHE.get_or_call(_cache_key(repo_id, repo_type, **kwargs), _list)
+    return _LISTING_CACHE.get_or_call(key, _list)
 
 
 def _hf_list_files(repo_id, repo_type="dataset", **kwargs) -> list:
@@ -313,7 +373,20 @@ def _hf_list_h5_files(hf_path: str, **kwargs) -> list[tuple[str, int]]:
     else:
         matched = [f for f in entries if f.endswith(_HF_H5_EXTENSIONS)]
 
-    return [(f, entries[f]) for f in matched]
+    return [(f, entries[f].size) for f in matched]
+
+
+def _hf_content_id(hf_path: str, **kwargs) -> str | None:
+    """Content id of a single ``hf://`` file, or ``None`` if the repo has no such file.
+
+    The LFS sha256 when the file is stored in LFS (as data files are), else its git blob
+    id. Both name the *content*, so they change on re-upload and differ between revisions
+    -- which is what makes them usable as a cache key, unlike the mutable path. Served
+    from the memoized repo listing, so it costs no extra request.
+    """
+    repo_id, subpath = _hf_parse_path(hf_path)
+    entry = _hf_repo_files(repo_id, repo_type="dataset", **kwargs).get(subpath)
+    return None if entry is None else entry.content_id
 
 
 def _hf_resolve_path(hf_path: str, cache_dir=None, repo_type="dataset", **kwargs) -> Path:
@@ -379,7 +452,6 @@ def _hf_resolve_path(hf_path: str, cache_dir=None, repo_type="dataset", **kwargs
 # This file object only serves h5py's metadata reads; chunk_reader fetches the array chunks
 # itself. The paged layout keeps that metadata to ~0.26 MB in one request, so the block just has
 # to cover it. Keep it aligned with chunk_cache.CachedFile's block size. Overridable via File().
-_HF_STREAM_CACHE_TYPE = "blockcache"
 _HF_STREAM_BLOCK_SIZE = 1024 * 1024  # 1 MiB
 
 
@@ -394,13 +466,11 @@ def _hf_stream_url(
     repo_type: str = "dataset",
     **kwargs,
 ) -> str:
-    """The HTTPS URL the bytes of an ``hf://`` file live at.
+    """The ``resolve`` URL of an ``hf://`` file.
 
-    :func:`_hf_stream_open` streams through :class:`~huggingface_hub.HfFileSystem`, which
-    is a *sync* filesystem: its ``cat_ranges`` fetches ranges one after another. Concurrent
-    chunk reads (:mod:`zea.data.chunk_reader`) therefore address this URL directly through
-    fsspec's async HTTP filesystem instead — measured at one round trip for 16 ranges,
-    against sixteen through ``HfFileSystem``.
+    Streamed reads normally use the CDN URL this redirects to (see :mod:`zea.data.hf_remote`),
+    because each request to the resolve URL counts toward the Hub rate limit. This URL is
+    only the fallback.
 
     Args:
         hf_path (str): An ``hf://org/repo/path/to/file`` path to a single file.
@@ -416,7 +486,10 @@ def _hf_stream_url(
     if not subpath:
         raise ValueError(f"Expected an 'hf://' path to a single file, got '{hf_path}'.")
     prefix = _hf_repo_type_prefix(repo_type)
-    return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{revision or 'main'}/{subpath}"
+    # The revision is one path segment: a PR ref ("refs/pr/66") or a branch with a slash
+    # must be percent-encoded, or the hub reads "refs" as the revision and answers 404.
+    rev = quote(revision or "main", safe="")
+    return f"{_HF_HOST}/{prefix}{repo_id}/resolve/{rev}/{quote(subpath)}"
 
 
 def _hf_stream_open(
@@ -425,14 +498,13 @@ def _hf_stream_open(
     repo_type: str = "dataset",
     block_size: int | None = None,
     cache_type: str | None = None,
-    **kwargs,
 ):
     """Open a single Hugging Face file lazily for HTTP range-request streaming.
 
-    Unlike :func:`_hf_resolve_path`, this does **not** download the whole file.
-    It returns an open fsspec file object backed by
-    :class:`~huggingface_hub.HfFileSystem`; only the byte ranges actually read
-    (e.g. via ``h5py`` slicing) are fetched over HTTP.
+    Unlike :func:`_hf_resolve_path`, this does **not** download the whole file. It looks up
+    the file's CDN URL once and returns a file object over it
+    (:func:`zea.data.hf_remote.open_remote`). Only the byte ranges that are read get fetched,
+    and those requests do not count toward the Hub rate limit.
 
     Args:
         hf_path (str): A ``hf://org/repo/path/to/file`` path pointing at a
@@ -441,38 +513,33 @@ def _hf_stream_open(
             repository default branch.
         repo_type (str, optional): One of ``"dataset"``, ``"model"`` or
             ``"space"``. Defaults to ``"dataset"``.
-        block_size (int, optional): Block size in bytes for the fsspec cache.
+        block_size (int, optional): Block size in bytes of streamed reads.
             Larger blocks coalesce more chunk reads per HTTP request (faster for
             whole-frame reads, more over-fetch for sparse reads). Defaults to
             :data:`_HF_STREAM_BLOCK_SIZE`.
-        cache_type (str, optional): fsspec cache strategy. Defaults to
-            :data:`_HF_STREAM_CACHE_TYPE` (``"blockcache"``), which caches touched
-            blocks so the many small chunks of a frame share a few requests.
-        **kwargs: Forwarded to :meth:`HfFileSystem.open`.
+        cache_type (str, optional): ``"none"`` reads exactly the requested bytes. Any other
+            fsspec cache type (default ``"blockcache"``) reads and keeps whole blocks, shared
+            by all handles of the file, so the many small chunks of a frame share a few
+            requests.
 
     Returns:
         An open, seekable binary file object. The caller is responsible for
         closing it.
     """
-    from huggingface_hub import HfFileSystem
+    from zea.data.hf_remote import open_remote
 
-    repo_id, subpath = _hf_parse_path(hf_path)
+    _, subpath = _hf_parse_path(hf_path)
     if not subpath:
         raise ValueError(
             f"Streaming requires an 'hf://' path to a single file, got '{hf_path}'. "
             "Point at a specific '.hdf5'/'.h5' file, or pass stream=False to download."
         )
+    _hf_repo_type_prefix(repo_type)  # validates
 
-    prefix = _hf_repo_type_prefix(repo_type)
-    ref = f"@{revision}" if revision else ""
-    fs_path = f"{prefix}{repo_id}{ref}/{subpath}"
-
-    if block_size is None:
-        block_size = _HF_STREAM_BLOCK_SIZE
-    if cache_type is None:
-        cache_type = _HF_STREAM_CACHE_TYPE
-
-    open_kwargs = {"cache_type": cache_type, "block_size": block_size, **kwargs}
-    # We never pass a token, so `HfFileSystem` resolves one per request: the retry
-    # picks up a login even though fsspec may hand back the same cached instance.
-    return _hf_call(lambda: HfFileSystem().open(fs_path, "rb", **open_kwargs))
+    return open_remote(
+        hf_path,
+        revision=revision,
+        repo_type=repo_type,
+        block_size=block_size,
+        cache_type=cache_type,
+    )

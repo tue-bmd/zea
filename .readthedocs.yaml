@@ -12,11 +12,12 @@ build:
   apt_packages:
     - pandoc
   jobs:
-    # Runs instead of `python.install` below, which supports uv natively but
-    # cannot pass extra arguments to it, and we use `--no-default-groups` to avoid
-    # installing dev dependencies in the docs build.
+    # Runs instead of `python.install` below, which supports uv natively but cannot
+    # pass extra arguments to it, and we use `--no-default-groups` to avoid installing
+    # dev dependencies in the docs build -- the docs group plus jax on CPU is all that
+    # is needed to import zea.
     install:
-      - uv sync --no-default-groups --group docs --extra jax
+      - uv sync --no-default-groups --group docs --group jax-cpu
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:

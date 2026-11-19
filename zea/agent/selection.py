@@ -148,7 +148,10 @@ class GreedyEntropy(LinesActionModel):
         This function computes the Gaussian error between each pair of pixels in the
         set of particles provided. This can be used to approximate the entropy of
         a Gaussian mixture model, where the particles are the means of the Gaussians.
-        For more details see Section 4 here: https://arxiv.org/abs/2406.14388
+
+        .. citation:: nolan2024active
+
+            See Section 4 for the derivation of this entropy approximation.
 
         Args:
             particles (Tensor): Particles of shape (batch_size, n_particles, ...pixels)

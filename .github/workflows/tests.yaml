@@ -1,3 +1,6 @@
+# The main PR gate: unit tests with coverage, a minimum-dependency-floor check,
+# heavy and notebook tests on self-hosted runners, the docs build, and a
+# Dockerfile build + smoke test.
 name: Tests
 
 on:
@@ -7,177 +10,30 @@ on:
       - main
 
 env:
-  REGISTRY: ghcr.io
-  BASE_IMAGE: ghcr.io/tue-bmd/zea/all-cpu
   MAIN_REPO: tue-bmd/zea
-  HF_CACHE_HOST: /cache/huggingface
-  HF_CACHE_CONTAINER: /cache/huggingface
-  ZEA_CACHE_HOST: /cache/zea
-  ZEA_CACHE_CONTAINER: /cache/zea
 
 jobs:
-  tag:
-    uses: ./.github/workflows/set-tag.yaml
-
-  image:
-    needs: [tag]
+  tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
-    outputs:
-      docker_image: ${{ steps.set-image.outputs.docker_image }}
-      needs_artifact: ${{ steps.set-image.outputs.needs_artifact }}
-    steps:
-      - name: Debug repository context
-        run: |
-          echo "Repository: ${{ github.repository }}"
-          echo "Is main repo: ${{ github.repository == 'tue-bmd/zea' }}"
-          echo "Repository owner: ${{ github.repository_owner }}"
-          echo "Event name: ${{ github.event_name }}"
-          echo "PR head repo: ${{ github.event.pull_request.head.repo.full_name }}"
-          echo "PR base repo: ${{ github.event.pull_request.base.repo.full_name }}"
-          echo "Is fork PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}"
-
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Fork PRs: reuse the base-branch image when only code changed, not deps/Dockerfile.
-      - name: Check if image needs rebuilding (fork PR)
-        id: image-check
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: |
-          git fetch origin "$BASE_REF"
-          # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
-          # checkout used here the remote-tracking ref origin/$BASE_REF is not
-          # updated by `git fetch origin "$BASE_REF"` and may be stale or absent.
-          if git diff --quiet FETCH_HEAD -- Dockerfile pyproject.toml uv.lock; then
-            # Verify the branch-tagged image actually exists before deciding to reuse it.
-            # It may be absent on first run after this workflow feature was introduced.
-            BASE_TAG="${{ env.BASE_IMAGE }}:${{ github.event.pull_request.base.ref }}"
-            if docker manifest inspect "$BASE_TAG" > /dev/null 2>&1; then
-              echo "changed=false" >> $GITHUB_OUTPUT
-              echo "No image-relevant files changed — reusing $BASE_TAG"
-            else
-              echo "changed=true" >> $GITHUB_OUTPUT
-              echo "Branch image $BASE_TAG not found — building locally"
-            fi
-          else
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Image-relevant files changed — building locally"
-          fi
-
-      # Free disk space before any docker build. Skipped for fork PRs reusing the base-branch image.
-      - name: Free up disk space
-        if: >
-          github.event_name == 'push'
-          || github.event.pull_request.head.repo.full_name == github.repository
-          || steps.image-check.outputs.changed == 'true'
-        run: |
-          sudo rm -rf "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /opt/hostedtoolcache
-
-      - name: Build and push CI Docker image
-        id: build
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          build-args: |
-            INSTALL_JAX=cpu
-            INSTALL_TORCH=cpu
-            INSTALL_TF=cpu
-            DEV=true
-          push: true
-          tags: ${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}
-          cache-from: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu
-          cache-to: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu,mode=max
-
-      # Fork PR local build — no push. Reads registry cache (public, no auth required).
-      # GHA cache write covers repeated commits to the same fork PR branch.
-      - name: Build CI Docker image (fork PR)
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && steps.image-check.outputs.changed == 'true'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          build-args: |
-            INSTALL_JAX=cpu
-            INSTALL_TORCH=cpu
-            INSTALL_TF=cpu
-            DEV=true
-          push: false
-          tags: zea-fork:local
-          outputs: type=docker,dest=/tmp/fork-image.tar
-          cache-from: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu
-          cache-to: type=gha,mode=max
-
-      - name: Upload fork PR image artifact
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && steps.image-check.outputs.changed == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: fork-pr-image
-          path: /tmp/fork-image.tar
-          retention-days: 1
-
-      - name: Set Docker image for tests
-        id: set-image
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
-            if [ "${{ steps.image-check.outputs.changed }}" = "true" ]; then
-              DOCKER_IMAGE="zea-fork:local"
-              NEEDS_ARTIFACT="true"
-              echo "✅ Fork PR (image changed): using locally built image"
-            else
-              DOCKER_IMAGE="${{ env.BASE_IMAGE }}:${{ github.event.pull_request.base.ref }}"
-              NEEDS_ARTIFACT="false"
-              echo "✅ Fork PR (no image change): reusing $DOCKER_IMAGE"
-            fi
-          else
-            DOCKER_IMAGE="${{ env.BASE_IMAGE }}:${{ needs.tag.outputs.docker_tag }}"
-            NEEDS_ARTIFACT="false"
-            echo "✅ Main repo: using $DOCKER_IMAGE"
-          fi
-          echo "docker_image=$DOCKER_IMAGE" >> $GITHUB_OUTPUT
-          echo "needs_artifact=$NEEDS_ARTIFACT" >> $GITHUB_OUTPUT
-
-  tests:
-    needs: [image]
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
-      - uses: ./.github/actions/load-image
-        with:
-          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
-          docker_image: ${{ needs.image.outputs.docker_image }}
+      - uses: ./.github/actions/setup-zea
 
-      - name: Run Pytest in container
+      - name: Run Pytest
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/zea" \
-            -w /zea \
-            ${{ needs.image.outputs.docker_image }} \
-            sh -c "uv pip install --system --group tests -e . && pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy -p no:cacheprovider -m 'not heavy and not notebook' ./tests"
+          pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml \
+            -o junit_family=legacy -p no:cacheprovider \
+            -m 'not heavy and not notebook' ./tests
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -212,12 +68,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           # Lowest Python we support (see requires-python in pyproject.toml).
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install zea at lowest declared dependency versions
         env:
@@ -225,7 +83,7 @@ jobs:
         run: |
           uv venv
           uv pip install --resolution lowest-direct --group tests -e ".[app]" \
-            "tensorflow-cpu>=2.12.1" "jax[cpu]>=0.4.35" "torch>=2.2"
+            "tensorflow-cpu>=2.16.1" "jax[cpu]>=0.4.35" "torch>=2.2"
           echo "::group::Resolved dependency versions"
           uv pip freeze
           echo "::endgroup::"
@@ -238,33 +96,41 @@ jobs:
         run: uv run --no-sync pytest -p no:cacheprovider ./tests/test_imports.py
 
   heavy-tests:
-    needs: [image]
-    runs-on: self-hosted
+    runs-on: [self-hosted, self-hosted-zea-tests]
     timeout-minutes: 120
+    permissions:
+      contents: read
     concurrency:
       group: heavy-tests-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    env:
+      # The runners are ephemeral ARC pods -- one job per pod -- so nothing survives in
+      # the container filesystem. Only these two PersistentVolumes do, which is why the
+      # uv cache lives *inside* the zea one rather than at a path of its own: an
+      # unmounted /cache/uv would be discarded with the pod, and the runner user cannot
+      # create it anyway (/cache itself is root-owned inside the pod).
+      # HF_HOME and ZEA_CACHE_DIR are also set on the RunnerDeployment; repeated here so
+      # the job is readable on its own.
+      HF_HOME: /cache/huggingface
+      HUGGINGFACE_HUB_CACHE: /cache/huggingface
+      ZEA_CACHE_DIR: /cache/zea
+      UV_CACHE_DIR: /cache/zea/uv
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      - uses: ./.github/actions/load-image
         with:
-          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
-          docker_image: ${{ needs.image.outputs.docker_image }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-zea
+        with:
+          # UV_CACHE_DIR above is on a PersistentVolume, so it already survives
+          # between runs -- no need to ship the cache to the Actions cache service.
+          enable-cache: "false"
 
       - name: Run heavy tests
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/zea" \
-            -v $HF_CACHE_HOST:$HF_CACHE_CONTAINER \
-            -v $ZEA_CACHE_HOST:$ZEA_CACHE_CONTAINER \
-            -e HF_HOME=$HF_CACHE_CONTAINER \
-            -e HUGGINGFACE_HUB_CACHE=$HF_CACHE_CONTAINER \
-            -e ZEA_CACHE_DIR=$ZEA_CACHE_CONTAINER \
-            -w /zea \
-            ${{ needs.image.outputs.docker_image }} \
-            sh -lc "pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml -o junit_family=legacy -p no:cacheprovider -m 'heavy' ./tests"
+          pytest --cov --cov-branch --cov-report=xml --junitxml=junit.xml \
+            -o junit_family=legacy -p no:cacheprovider -m 'heavy' ./tests
 
       - name: Upload heavy coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -287,9 +153,10 @@ jobs:
 
   notebook-tests:
     name: notebook-tests (${{ matrix.label }})
-    needs: [image]
-    runs-on: self-hosted
+    runs-on: [self-hosted, self-hosted-zea-tests]
     timeout-minutes: 120
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -309,58 +176,144 @@ jobs:
     concurrency:
       group: notebook-tests-${{ matrix.name }}-${{ github.ref }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+    env:
+      # See heavy-tests for why these are the only paths that persist, and why the uv
+      # cache sits inside the zea one.
+      HF_HOME: /cache/huggingface
+      HUGGINGFACE_HUB_CACHE: /cache/huggingface
+      ZEA_CACHE_DIR: /cache/zea
+      UV_CACHE_DIR: /cache/zea/uv
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      - uses: ./.github/actions/load-image
         with:
-          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
-          docker_image: ${{ needs.image.outputs.docker_image }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-zea
+        with:
+          enable-cache: "false"
 
       - name: Run ${{ matrix.name }} notebook tests
         run: |
           DIRS_ARGS=$(echo "${{ matrix.dirs }}" | tr ' ' '\n' | sed 's/^/--notebook-dir /' | tr '\n' ' ')
-          docker run --rm \
-            -v "${{ github.workspace }}:/zea" \
-            -v ${{ env.HF_CACHE_HOST }}:${{ env.HF_CACHE_CONTAINER }} \
-            -v ${{ env.ZEA_CACHE_HOST }}:${{ env.ZEA_CACHE_CONTAINER }} \
-            -e HF_HOME=${{ env.HF_CACHE_CONTAINER }} \
-            -e HUGGINGFACE_HUB_CACHE=${{ env.HF_CACHE_CONTAINER }} \
-            -e ZEA_CACHE_DIR=${{ env.ZEA_CACHE_CONTAINER }} \
-            -w /zea \
-            ${{ needs.image.outputs.docker_image }} \
-            sh -lc "pytest -p no:cacheprovider -s -m 'notebook' $DIRS_ARGS"
+          pytest -p no:cacheprovider -s -m 'notebook' $DIRS_ARGS
 
   test-docs-build:
-    needs: [image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Git
         run: git config --global safe.directory $GITHUB_WORKSPACE
 
-      - uses: ./.github/actions/load-image
-        with:
-          needs_artifact: ${{ needs.image.outputs.needs_artifact }}
-          docker_image: ${{ needs.image.outputs.docker_image }}
+      - uses: ./.github/actions/setup-zea
+
+      # nbsphinx shells out to pandoc to render the example notebooks. It ships with
+      # the GitHub runner images; the guard keeps this working if that ever changes.
+      - name: Ensure pandoc is available
+        run: |
+          command -v pandoc || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends pandoc
+          }
 
       - name: Build documentation with Sphinx (fails on warnings, linkcheck warns only)
+        working-directory: docs
+        env:
+          ZEA_LOG_LEVEL: ERROR
         run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/zea" \
-            -w /zea/docs \
-            ${{ needs.image.outputs.docker_image }} \
-            sh -c "\
-              uv pip install --system --group docs -e .. && \
-              export PATH=\"/tmp/.local/bin:\$PATH\" && \
-              export ZEA_LOG_LEVEL=ERROR && \
-              make docs-clean && \
-              make docs-build SPHINXOPTS='-W --keep-going' && \
-              make docs-test && \
-              { make docs-linkcheck SPHINXOPTS='--keep-going' || \
-                echo '::warning title=Docs linkcheck failed::Sphinx linkcheck reported unreachable links. This can be a false positive (rate limiting, transient network issues, bot protection). See the step log for the offending URLs.'; } \
-            "
+          make docs-clean
+          make docs-build SPHINXOPTS='-W --keep-going'
+          make docs-test
+          make docs-linkcheck SPHINXOPTS='--keep-going' || \
+            echo '::warning title=Docs linkcheck failed::Sphinx linkcheck reported unreachable links. This can be a false positive (rate limiting, transient network issues, bot protection). See the step log for the offending URLs.'
+
+  # The jobs above run against a plain `uv sync`, not the published image, so this job
+  # is what keeps the Dockerfile from silently rotting. It only runs when a file that
+  # can actually break the image changes.
+  docker-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Decide whether to build
+        id: check
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "build=true" >> $GITHUB_OUTPUT
+            echo "Push build — always building"
+            exit 0
+          fi
+          # Unauthenticated fetch (persist-credentials: false); fine on a public repo.
+          git fetch origin "$BASE_REF"
+          # Compare against the just-fetched tip (FETCH_HEAD). On the shallow
+          # checkout used here the remote-tracking ref origin/$BASE_REF is not
+          # updated by `git fetch origin "$BASE_REF"` and may be stale or absent.
+          if git diff --quiet FETCH_HEAD -- Dockerfile .dockerignore pyproject.toml uv.lock README.md scripts/motd.sh; then
+            echo "build=false" >> $GITHUB_OUTPUT
+            echo "No image-relevant files changed — skipping"
+          else
+            echo "build=true" >> $GITHUB_OUTPUT
+            echo "Image-relevant files changed — building"
+          fi
+
+      - name: Free up disk space
+        if: steps.check.outputs.build == 'true'
+        run: |
+          sudo rm -rf "/usr/local/share/boost" "$AGENT_TOOLSDIRECTORY" /opt/hostedtoolcache
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v4
+
+      # Only needed to *write* the build cache, which fork PRs cannot do anyway.
+      # Reading it needs no credentials: the cache ref is public.
+      - name: Log in to GitHub Container Registry
+        if: steps.check.outputs.build == 'true' && github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the CPU image
+        if: steps.check.outputs.build == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            INSTALL_JAX=cpu
+            INSTALL_TORCH=cpu
+            INSTALL_TF=cpu
+            DEV=true
+          push: false
+          load: true
+          tags: zea:ci
+          cache-from: type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu
+          cache-to: ${{ github.event_name == 'push' && 'type=registry,ref=ghcr.io/tue-bmd/zea/build-cache:all-cpu,mode=max' || '' }}
+
+      # No bind mount: the point is to exercise the image's own copy of zea.
+      - name: Smoke-test the image
+        if: steps.check.outputs.build == 'true'
+        run: |
+          docker run --rm zea:ci python -c "import zea; print(zea.__version__)"
+          docker run --rm zea:ci pytest -p no:cacheprovider ./tests/test_imports.py
+          # The motd reads the installed version out of the environment; a blank one
+          # means the image lost the tooling it needs to introspect itself.
+          docker run --rm zea:ci bash /etc/motd.sh | grep -qE 'v[0-9]+\.'

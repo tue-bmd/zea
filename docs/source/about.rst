@@ -102,4 +102,8 @@ The following list contains some of the papers that have been published using ``
    stevens2026nuclear
    nolan2026task
    federici2026informative
+   afrakhteh2026heavy
    stevens2026ultrasound
+   federici2026variational
+   penninga2026deep
+   stevens2026openhrf

@@ -35,7 +35,7 @@ Besides installation through `PyPI <https://pypi.org/project/zea>`_, we also pro
 
          .. code-block:: shell
 
-               conda create -n zea python=3.12  # 3.10 - 3.13
+               conda create -n zea python=3.12  # 3.11 - 3.13
                conda activate zea
                pip install zea
 

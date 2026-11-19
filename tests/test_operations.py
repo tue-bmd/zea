@@ -20,16 +20,20 @@ from zea.beamform.delays import compute_t0_delays_focused
 from zea.func.ultrasound import (
     channels_to_complex,
     complex_to_channels,
+    compute_time_to_peak,
     compute_time_to_peak_stack,
     construct_acquisition_from_synthetic_aperture,
     decode_hadamard,
+    get_low_pass_iq_filter,
     make_tgc_curve,
+    square_wave_apodization,
 )
 from zea.ops import Pipeline, Simulate, beamformer_registry
 from zea.parameters import Parameters
 from zea.simulator import simulate_rf
 
 from . import DEFAULT_TEST_SEED, backend_equality_check
+from .helpers import is_on_gpu
 
 
 @pytest.mark.parametrize(
@@ -285,6 +289,141 @@ def test_fir_filter_complex_channels():
     return result
 
 
+def test_get_low_pass_iq_filter():
+    """Filter taps are complex, of the requested length, and reject out-of-band tones."""
+    num_taps, sampling_frequency = 63, 12.5e6
+    taps = get_low_pass_iq_filter(num_taps, sampling_frequency, 0.0, 2e6)
+
+    assert taps.shape == (num_taps,)
+    assert np.iscomplexobj(taps)
+
+    # At center_frequency 0 the modulation is a no-op, so the taps stay real-valued
+    # and sum to unit DC gain.
+    np.testing.assert_allclose(taps.imag, 0, atol=1e-12)
+    np.testing.assert_allclose(np.sum(taps.real), 1.0, atol=1e-6)
+
+    for bandwidth in (0.0, -1e6, 2 * sampling_frequency):
+        with pytest.raises(ValueError, match="Cutoff frequency"):
+            get_low_pass_iq_filter(num_taps, sampling_frequency, 0.0, bandwidth)
+
+
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_low_pass_filter_iq():
+    """LowPassFilterIQ keeps a baseband IQ tone and rejects one outside the passband."""
+    import keras
+
+    from zea import ops
+
+    n_ax, n_el = 256, 4
+    sampling_frequency, bandwidth = 12.5e6, 2e6
+
+    t = np.arange(n_ax) / sampling_frequency
+    in_band = np.exp(1j * 2 * np.pi * 0.3e6 * t)
+    out_band = np.exp(1j * 2 * np.pi * 5e6 * t)
+    iq = np.stack([in_band + out_band] * n_el, axis=-1)
+    data = np.stack([iq.real, iq.imag], axis=-1).reshape(1, n_ax, n_el, 2).astype("float32")
+
+    output = ops.LowPassFilterIQ(num_taps=63)(
+        data=keras.ops.convert_to_tensor(data),
+        bandwidth=bandwidth,
+        sampling_frequency=sampling_frequency,
+        center_frequency=0.0,
+    )["data"]
+    output = keras.ops.convert_to_numpy(output)
+    assert output.shape == data.shape
+
+    filtered = output[..., 0] + 1j * output[..., 1]
+    # Skip the edges, where the FIR transient dominates.
+    middle = slice(64, 192)
+    kept = np.abs(np.mean(filtered[0, middle, 0] * np.conj(in_band[middle])))
+    rejected = np.abs(np.mean(filtered[0, middle, 0] * np.conj(out_band[middle])))
+    assert kept > 0.9, f"passband tone attenuated to {kept:.3f}."
+    assert rejected < 0.05, f"stopband tone only attenuated to {rejected:.3f}."
+
+    return output
+
+
+def test_filter_bandwidth_from_parameters():
+    """A config-built pipeline with ``low_pass_filter`` and ``band_pass_filter`` runs without an
+    explicit ``bandwidth``: it is derived from the probe metadata, and explicit values still win.
+    """
+    from zea import Config
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    center_frequency, sampling_frequency = 2e6, 12.5e6
+    derived_bandwidth = center_frequency * 60.0 / 100
+
+    def run(operation, data, parameters, **overrides):
+        pipeline = Pipeline.from_config(
+            Config({"pipeline": {"operations": [{"name": operation, "params": {"num_taps": 63}}]}})
+        )
+        inputs = pipeline.prepare_parameters(parameters, **overrides)
+        return keras.ops.convert_to_numpy(pipeline(data=data, **inputs)["data"])
+
+    def parameters(**kwargs):
+        return Parameters(
+            center_frequency=center_frequency,
+            sampling_frequency=sampling_frequency,
+            probe_bandwidth_percent=60.0,
+            **kwargs,
+        )
+
+    for operation, n_ch in (("low_pass_filter", 2), ("band_pass_filter", 1)):
+        data = rng.standard_normal((1, 256, 4, n_ch)).astype("float32")
+
+        derived = run(operation, data, parameters())
+        explicit_derived = run(operation, data, parameters(bandwidth=derived_bandwidth))
+        np.testing.assert_allclose(derived, explicit_derived, rtol=1e-5, atol=1e-6)
+
+        # An explicit bandwidth, on the parameters or as an override, wins over the derived one.
+        parameter_level = run(operation, data, parameters(bandwidth=3e6))
+        call_level = run(operation, data, parameters(), bandwidth=3e6)
+        np.testing.assert_allclose(parameter_level, call_level, rtol=1e-5, atol=1e-6)
+        assert not np.allclose(derived, parameter_level, rtol=1e-5, atol=1e-6)
+
+        # A call-time override also wins over a bandwidth set on the parameters.
+        overridden = run(operation, data, parameters(bandwidth=derived_bandwidth), bandwidth=3e6)
+        np.testing.assert_allclose(overridden, call_level, rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "operation, kwargs",
+    [
+        (
+            ops.LowPassFilterIQ(num_taps=31),
+            {"center_frequency": 0.0, "bandwidth": np.array([2e6, 2.5e6])},
+        ),
+        (
+            ops.LowPassFilterIQ(num_taps=31),
+            {"center_frequency": 0.0, "bandwidth": None},
+        ),
+        (
+            ops.BandPassFilter(num_taps=31),
+            {"demodulation_frequency": np.array([4e6, 5e6]), "bandwidth": 2e6},
+        ),
+        (
+            ops.BandPassFilter(num_taps=31),
+            {"demodulation_frequency": 5e6, "bandwidth": None},
+        ),
+    ],
+)
+def test_filters_reject_per_transmit_inputs(operation, kwargs):
+    """The filters design one set of taps, so per-transmit or missing inputs raise clearly."""
+    n_ch = 2 if isinstance(operation, ops.LowPassFilterIQ) else 1
+    data = np.ones((1, 64, 2, n_ch), dtype=np.float32)
+    with pytest.raises(ValueError, match="bandwidth|scalar"):
+        operation(data=data, sampling_frequency=20e6, **kwargs)
+
+
+def test_fixed_band_pass_filter_without_center_frequency():
+    """A fixed passband does not require deriving a bandwidth."""
+    pipeline = Pipeline([ops.BandPassFilter(passband=(3e6, 7e6), num_taps=31)])
+    parameters = Parameters(sampling_frequency=20e6, demodulation_frequency=5e6)
+    inputs = pipeline.prepare_parameters(parameters)
+    data = np.ones((1, 64, 2, 1), dtype=np.float32)
+    assert pipeline(data=data, **inputs)["data"].shape == data.shape
+
+
 @pytest.mark.parametrize(
     "factor, batch_size",
     [
@@ -294,7 +433,13 @@ def test_fir_filter_complex_channels():
     ],
 )
 def test_up_and_down_conversion(factor, batch_size):
-    """Test rf2iq and iq2rf in sequence"""
+    """Test rf2iq and iq2rf in sequence.
+
+    Tolerance dependent on downsampling factor (no anti-alias filter in downsample, so quite lossy
+    at high factors). Tolerance is defined relative to the RF peak.
+    """
+    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+
     n_el = 128
     n_scat = 3
     n_tx = 2
@@ -387,12 +532,58 @@ def test_up_and_down_conversion(factor, batch_size):
     data = np.concatenate(data)
     _data = np.concatenate(_data)
 
-    np.testing.assert_almost_equal(
-        data,
-        _data,
-        decimal=2,
-        err_msg="Data is not equal after up and down conversion.",
+    error = np.max(np.abs(data - _data)) / np.max(np.abs(_data))
+    assert error < tolerance, (
+        f"downmix-> upmix not cycle-consistent: {error:.2%} of peak "
+        f"exceeds {tolerance:.2%} tolerance at {factor}x."
     )
+
+
+@pytest.mark.parametrize("factor", [1, 2, 4])
+@backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
+def test_demodulate_upmix_roundtrip(factor):
+    """
+    Same as test_up_and_down_conversion, but without the simulator in the loop. Force eager
+    execution so codecov doesn't falsely flag it as not covered (codecov doesn't detect tensorflow
+    jit code properly)
+    """
+    import keras
+
+    from zea import ops
+
+    tolerance = {1: 1e-3, 2: 0.08, 4: 0.25}[factor]
+
+    n_ax, n_el = 256, 8
+    sampling_frequency, center_frequency = 12.5e6, 3.125e6
+
+    t = np.arange(n_ax) / sampling_frequency
+    envelope = np.exp(-(((t - t[n_ax // 2]) * center_frequency / 2) ** 2))
+    burst = envelope * np.sin(2 * np.pi * center_frequency * t)
+    # Stagger the elements so the axes are not interchangeable.
+    rf = np.stack([np.roll(burst, 3 * el) for el in range(n_el)], axis=-1)
+    rf = rf.reshape(1, n_ax, n_el, 1).astype("float32")
+
+    pipeline = ops.Pipeline(
+        [
+            ops.Demodulate(),
+            ops.Downsample(factor=factor),
+            ops.UpMix(upsampling_rate=factor),
+        ]
+    )
+    output = pipeline(
+        data=keras.ops.convert_to_tensor(rf),
+        sampling_frequency=sampling_frequency,
+        demodulation_frequency=center_frequency,
+    )["data"]
+    output = keras.ops.convert_to_numpy(output)
+
+    error = np.max(np.abs(output - rf)) / np.max(np.abs(rf))
+    assert error < tolerance, (
+        f"downmix-> upmix not cycle-consistent: {error:.2%} of peak "
+        f"exceeds {tolerance:.2%} tolerance at {factor}x."
+    )
+
+    return output
 
 
 @pytest.mark.parametrize(
@@ -469,6 +660,215 @@ def test_hilbert_transform_invalid_N():
     # N=50 is less than n_ax=100, should raise ValueError
     with pytest.raises(ValueError, match="N must be greater or equal to n_ax"):
         func.hilbert(data, N=50, axis=-1)
+
+
+# Bounding the circular wraparound of the FFT-based hilbert: it treats the record
+# as periodic, so a strong near-field echo wraps onto the end of the record.
+# See https://github.com/tue-bmd/zea/discussions/147.
+
+
+def _near_field_burst(n_ax, sampling_frequency=20e6, center_frequency=5e6, n_burst=12):
+    """A saturated near-field echo confined to the first ``n_burst`` samples.
+
+    Every later sample is exactly zero, so any energy a transform puts into the far
+    half of the record is wraparound.
+    """
+    t = np.arange(n_ax) / sampling_frequency
+    rf = np.zeros((1, n_ax, 1, 1), dtype="float32")
+    rf[0, :n_burst, 0, 0] = 100.0 * np.sin(2 * np.pi * center_frequency * t[:n_burst])
+    return rf
+
+
+def _wrap_ratio(envelope):
+    """Peak envelope in the far half of the record, relative to the global peak."""
+    n_ax = envelope.shape[0]
+    return envelope[n_ax // 2 :].max() / envelope.max()
+
+
+def _demodulated_envelope(rf, pad_fast_time, sampling_frequency=20e6, center_frequency=5e6):
+    """Envelope of ``rf`` demodulated with and without the anti-wrap padding."""
+    import keras
+
+    from zea.func.ultrasound import demodulate
+
+    iq = keras.ops.convert_to_numpy(
+        demodulate(
+            keras.ops.convert_to_tensor(rf),
+            center_frequency,
+            sampling_frequency,
+            axis=-3,
+            pad_fast_time=pad_fast_time,
+        )
+    )
+    return np.abs(iq[0, :, 0, 0] + 1j * iq[0, :, 0, 1])
+
+
+@pytest.mark.parametrize("n_ax", [256, 512, 1000, 1024])
+def test_demodulate_pad_fast_time_bounds_wraparound(n_ax):
+    """pad_fast_time=True keeps a near-field echo from wrapping onto the end of the record."""
+    rf = _near_field_burst(n_ax)
+
+    unpadded = _wrap_ratio(_demodulated_envelope(rf, pad_fast_time=False))
+    padded = _wrap_ratio(_demodulated_envelope(rf, pad_fast_time=True))
+
+    # Unpadded, the ghost sits at ~10% of the peak, which is what makes it visible
+    # as a smooth brightness at depth once beamforming sums it across channels.
+    assert unpadded > 1e-2, (
+        f"n_ax={n_ax}: expected a wraparound ghost without padding, got {unpadded:.3e} of peak"
+    )
+    # 0.64 / n_ax is the residual bound documented on _padded_analytic.
+    assert padded < 0.64 / n_ax, (
+        f"n_ax={n_ax}: pad_fast_time=True leaves {padded:.3e} of peak at depth, over the "
+        f"documented bound {0.64 / n_ax:.3e}"
+    )
+
+
+# decimal=3: the returned value is a float32 max-abs-difference, so which sample
+# wins can differ slightly between backends. The assertions below are the real
+# check and run inside every backend worker.
+@backend_equality_check(decimal=3)
+def test_demodulate_pad_fast_time_matches_linear_hilbert():
+    """pad_fast_time=True converges to the aperiodic analytic signal, gain included.
+
+    Padding 32x further makes scipy's circular transform effectively aperiodic,
+    giving a reference the padded path should land on. This catches a gain or
+    normalization error in the pad-and-crop, which a wrap ratio would not.
+    """
+    n_ax = 512
+    sampling_frequency, center_frequency = 20e6, 5e6
+    rf = _near_field_burst(n_ax, sampling_frequency, center_frequency)
+
+    x = rf[0, :, 0, 0].astype("float64")
+    reference = hilbert_scipy(np.concatenate([x, np.zeros(31 * n_ax)]))[:n_ax]
+    reference = reference * np.exp(
+        -2j * np.pi * center_frequency * np.arange(n_ax) / sampling_frequency
+    )
+
+    errors = {}
+    for pad_fast_time in (False, True):
+        envelope = _demodulated_envelope(rf, pad_fast_time, sampling_frequency, center_frequency)
+        # Compare the envelope, which is invariant to the phase convention.
+        errors[pad_fast_time] = np.abs(envelope - np.abs(reference)).max() / np.abs(reference).max()
+
+    assert errors[True] < 1e-3, (
+        f"padded demodulation is {errors[True]:.3e} from the aperiodic analytic signal"
+    )
+    assert errors[False] > 1e-2, (
+        f"unpadded demodulation should differ from the aperiodic reference, got {errors[False]:.3e}"
+    )
+    return np.array([errors[False], errors[True]])
+
+
+@pytest.mark.parametrize("n_ax", [7, 100, 511, 512, 1000])
+def test_demodulate_pad_fast_time_preserves_shape(n_ax):
+    """Cropping restores the input length, for odd and non-power-of-two records."""
+    import keras
+
+    from zea.func.ultrasound import demodulate
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    rf = rng.standard_normal((2, n_ax, 4, 1)).astype("float32")
+
+    iq = demodulate(keras.ops.convert_to_tensor(rf), 5e6, 20e6, axis=-3, pad_fast_time=True)
+
+    assert tuple(keras.ops.shape(iq)) == (2, n_ax, 4, 2)
+
+
+@pytest.mark.parametrize("jit_options", [None, "ops", "pipeline"])
+def test_demodulate_pad_fast_time_stays_jittable(jit_options):
+    """The padded path must stay traceable; Demodulate advertises jittable=True."""
+    import keras
+
+    from zea import ops
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    n_ax, n_el = 128, 4
+    rf = rng.standard_normal((1, n_ax, n_el, 1)).astype("float32")
+
+    pipeline = ops.Pipeline([ops.Demodulate(pad_fast_time=True)], jit_options=jit_options)
+    output = pipeline(
+        data=keras.ops.convert_to_tensor(rf),
+        sampling_frequency=20e6,
+        demodulation_frequency=5e6,
+    )["data"]
+
+    assert tuple(keras.ops.shape(output)) == (1, n_ax, n_el, 2)
+
+
+def test_demodulate_pad_fast_time_gradient():
+    """Gradients flow through the pad-and-crop, leaving no sample detached."""
+    import keras
+
+    if keras.backend.backend() == "numpy":
+        pytest.skip("numpy backend has no autograd")
+
+    from zea.backend.autograd import AutoGrad
+    from zea.func.ultrasound import demodulate
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    rf = rng.standard_normal((1, 64, 2, 1)).astype("float32")
+
+    def loss(x):
+        iq = demodulate(x, 5e6, 20e6, axis=-3, pad_fast_time=True)
+        return keras.ops.sum(keras.ops.square(iq))
+
+    wrapper = AutoGrad()
+    wrapper.set_function(loss)
+    grad = keras.ops.convert_to_numpy(wrapper.gradient(rf))
+
+    assert grad.shape == rf.shape
+    assert np.isfinite(grad).all(), "padding introduced a non-finite gradient"
+    assert np.count_nonzero(grad) == grad.size, "the crop detached input samples from the loss"
+
+
+def test_demodulate_pad_fast_time_survives_serialization():
+    """pad_fast_time must round-trip, or a saved pipeline config reproduces other numerics."""
+    from zea.ops import Demodulate, Pipeline
+
+    assert Demodulate().pad_fast_time is True
+    assert Demodulate(pad_fast_time=False).get_config()["pad_fast_time"] is False
+
+    pipeline = Pipeline([Demodulate(pad_fast_time=False)])
+    restored = Pipeline.from_config(pipeline.to_config())
+
+    assert restored.operations[0].pad_fast_time is False
+
+
+@pytest.mark.parametrize("n_ax", [512, 700, 1024])
+def test_envelope_detect_bounds_wraparound(n_ax):
+    """envelope_detect must not leak a near-field echo to depth.
+
+    Regression test for padding to the next power of two, which added no samples at
+    all when n_ax was already a power of two. 512 and 1024 used to slip through.
+    """
+    import keras
+
+    from zea.func.ultrasound import envelope_detect
+
+    rf = _near_field_burst(n_ax)
+    envelope = keras.ops.convert_to_numpy(
+        envelope_detect(keras.ops.convert_to_tensor(rf), axis=-3)
+    )[0, :, 0]
+
+    ratio = _wrap_ratio(envelope)
+    assert ratio < 0.64 / n_ax, (
+        f"n_ax={n_ax}: envelope_detect leaves {ratio:.3e} of the peak at depth, "
+        f"over the documented bound {0.64 / n_ax:.3e}"
+    )
+
+
+def test_envelope_detect_iq_path_is_not_padded():
+    """Two-channel input takes the magnitude directly, with no transform involved."""
+    import keras
+
+    from zea.func.ultrasound import envelope_detect
+
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    iq = rng.standard_normal((1, 64, 4, 2)).astype("float32")
+
+    got = keras.ops.convert_to_numpy(envelope_detect(keras.ops.convert_to_tensor(iq), axis=-3))
+
+    np.testing.assert_allclose(got, np.abs(iq[..., 0] + 1j * iq[..., 1]), rtol=1e-5, atol=1e-6)
 
 
 @pytest.fixture(scope="module")
@@ -656,12 +1056,48 @@ def test_compute_time_to_peak():
     center_frequencies = np.array([center_frequency0, center_frequency1])
     waveforms = np.array([waveform0, waveform1])
 
-    t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
+    t_peak = compute_time_to_peak(waveforms, center_frequencies, 250e6)
 
     assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
+    # With a sine carrier the largest raw sample sits a quarter period away from the
+    # envelope peak, so this catches taking argmax(|waveform|) instead of the envelope.
+    waveform_sin = np.exp(-((t - 1e-6) ** 2) / (2 * (0.2e-6) ** 2)) * np.sin(
+        2 * np.pi * center_frequency0 * (t - 1e-6)
+    )
+    t_peak = compute_time_to_peak(waveform_sin, center_frequency0, 250e6)
+    assert np.allclose(t_peak, 1e-6, atol=1e-8), f"t_peak should be close to 1e-6, got {t_peak}"
 
-@pytest.mark.parametrize("beamformer_name", beamformer_registry.registered_names())
+    # Deprecated alias still works
+    t_peak = compute_time_to_peak_stack(waveforms, center_frequencies, 250e6)
+    assert np.allclose(t_peak, 1e-6, atol=1e-8)
+
+    # A size-1 frequency acts as a scalar, both for one waveform and for a stack
+    t_peak = compute_time_to_peak(waveform0, np.array([center_frequency0]), 250e6)
+    assert np.shape(t_peak) == ()
+    t_peak = compute_time_to_peak(waveforms, np.array([center_frequency0]), 250e6)
+    assert np.shape(t_peak) == (2,)
+
+    # A frequency per waveform must match the number of waveforms
+    with pytest.raises(ValueError, match="center_frequency"):
+        compute_time_to_peak(waveform0, center_frequencies, 250e6)
+    with pytest.raises(ValueError, match="center_frequency"):
+        compute_time_to_peak(np.stack([waveform0] * 3), center_frequencies, 250e6)
+
+
+# Only the beamformers zea.ops defines itself. A model-backed beamformer (such as
+# "able", registered by zea.models.able) is not comparable across backends: its
+# weights are randomly initialized per backend, and under torch its output requires
+# grad, which this harness cannot convert to numpy. Those live with their model.
+# ADMIRE needs a real imaging geometry; it is tested in test_admire.py.
+_OPS_BEAMFORMERS = [
+    name
+    for name in beamformer_registry.registered_names()
+    if beamformer_registry[name].__module__.startswith("zea.ops.") and name != "admire"
+]
+
+
+@pytest.mark.parametrize("beamformer_name", _OPS_BEAMFORMERS)
 @backend_equality_check()
 def test_beamformers(beamformer_name):
     """All beamformer operations produce the correct output shape and agree across backends."""
@@ -1650,14 +2086,18 @@ def test_decode_hadamard():
         initial_times=np.zeros((n_tx,), dtype=np.float32),
         element_width=element_width,
         attenuation_coef=0.0,
+        t_peak=np.full((n_tx,), 1.0 / center_frequency, dtype=np.float32),
     )
     raw_data_encoded = simulate_rf(tx_apodizations=tx_apodizations_hadamard, **shared_kwargs)[None]
     raw_data_synthetic_aperture = simulate_rf(
         tx_apodizations=tx_apodizations_synthetic_aperture, **shared_kwargs
     )[None]
     raw_data_decoded, tx_apodizations_decoded = decode_hadamard(raw_data_encoded, hadamard_matrix)
+    # On GPU, float32 matmul runs in TF32 on Ampere+ (~1e-3 error here), while a flipped or
+    # swapped Hadamard row deviates by ~1, so 1e-2 still catches decoding bugs.
+    tol = 1e-2 if is_on_gpu(raw_data_decoded) else 1e-5
     np.testing.assert_allclose(
-        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=1e-5, atol=1e-5
+        raw_data_decoded, raw_data_synthetic_aperture * hadamard_size, rtol=tol, atol=tol
     )
     np.testing.assert_array_equal(tx_apodizations_decoded, np.eye(hadamard_size))
 
@@ -2058,3 +2498,39 @@ def test_tissue_suppression_invalid_arguments():
 
     with pytest.raises(ValueError, match="fraction of the frames"):
         ops.TissueSuppression(cutoff=1.5)
+
+
+@backend_equality_check(decimal=6)
+def test_square_wave_apodization():
+    """Test the square wave apodization used for incoherent beamforming."""
+    n_el, block_size = 12, 4
+    apod = square_wave_apodization(n_el, block_size)
+
+    assert apod.shape == (n_el,)
+
+    # Alternating blocks of `block_size` elements, starting high (see docstring example)
+    expected = np.array([1, 1, 1, 1, -1, -1, -1, -1, 1, 1, 1, 1], dtype="float32")
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(apod), expected)
+
+    # Values are strictly +1 / -1
+    unique = np.unique(keras.ops.convert_to_numpy(apod))
+    np.testing.assert_allclose(unique, [-1.0, 1.0])
+
+    # A block size of half the aperture gives a single flip
+    half = keras.ops.convert_to_numpy(square_wave_apodization(8, 4))
+    np.testing.assert_allclose(half, [1, 1, 1, 1, -1, -1, -1, -1])
+
+    # Blocks stay exactly `block_size` wide when the aperture does not divide
+    # evenly: the trailing block is simply truncated.
+    partial = keras.ops.convert_to_numpy(square_wave_apodization(10, 4))
+    np.testing.assert_allclose(partial, [1, 1, 1, 1, -1, -1, -1, -1, 1, 1])
+    odd = keras.ops.convert_to_numpy(square_wave_apodization(7, 2))
+    np.testing.assert_allclose(odd, [1, 1, -1, -1, 1, 1, -1])
+
+    # A non-positive block size has no meaningful pattern and is rejected rather
+    # than silently dividing by zero
+    for invalid in (0, -4, float("nan")):
+        with pytest.raises(ValueError, match="block_size must be a positive number"):
+            square_wave_apodization(n_el, invalid)
+
+    return apod

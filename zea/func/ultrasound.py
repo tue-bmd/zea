@@ -4,7 +4,6 @@ import scipy.signal
 from keras import ops
 
 from zea import log
-from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
 from zea.func import split_seed
 from zea.func.tensor import (
     extend_n_dims,
@@ -154,7 +153,7 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     Returns:
         rf_data (ndarray): output real valued rf data.
     """
-    assert iq_data.dtype in [
+    assert ops.dtype(iq_data) in [
         "complex64",
         "complex128",
     ], "IQ must contain all complex signals."
@@ -188,15 +187,9 @@ def upmix(iq_data, sampling_frequency, demodulation_frequency, upsampling_rate=6
     carrier = ops.reshape(carrier, (*[1] * (n_dim - 2), n_ax_up, 1))
 
     rf_data = iq_data_upsampled * carrier
-    rf_data = ops.real(rf_data) * ops.sqrt(2)
+    rf_data = ops.real(rf_data)
 
     return ops.cast(rf_data, "float32")
-
-
-def _sinc(x):
-    """Return the normalized sinc function. Equivalent to np.sinc(x)."""
-    y = np.pi * ops.where(x == 0, 1.0e-20, x)
-    return ops.sin(y) / y
 
 
 def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
@@ -244,7 +237,7 @@ def get_band_pass_filter(num_taps, sampling_frequency, f1, f2, validate=True):
     # Build up the coefficients.
     alpha = 0.5 * (num_taps - 1)
     m = ops.arange(0, num_taps, dtype="float32") - alpha
-    h = f2 * _sinc(f2 * m) - f1 * _sinc(f1 * m)
+    h = f2 * ops.sinc(f2 * m) - f1 * ops.sinc(f1 * m)
 
     # Get and apply the window function.
     win = np.hamming(num_taps)
@@ -447,7 +440,32 @@ def hilbert(x, N: int | None = None, axis=-1):
     return x
 
 
-def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
+def _padded_analytic(x, axis):
+    """Analytic signal of ``x`` along ``axis``, without circular wraparound.
+
+    :func:`hilbert` is FFT-based and so treats the record as periodic: a strong
+    near-field echo wraps onto the end of the record, where beamforming sums it into
+    an unphysical brightness at depth. See
+    https://github.com/tue-bmd/zea/discussions/147.
+
+    Transforming at ``2 * n_ax``, the linear-convolution length, and cropping back
+    keeps that wrapped copy out of the returned samples. The ideal Hilbert kernel
+    decays as ``1 / t`` rather than terminating, so this bounds the leakage rather
+    than removing it: the residual stays below ``0.64 / n_ax`` of the peak.
+
+    Args:
+        x (Tensor): Real-valued input.
+        axis (int): Fast-time (axial) axis to transform along.
+
+    Returns:
+        Tensor: Complex analytic signal, with the same shape as ``x``.
+    """
+    n_ax = x.shape[axis]
+    analytic = hilbert(x, N=2 * n_ax, axis=axis)
+    return ops.take(analytic, ops.arange(n_ax), axis=axis)
+
+
+def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3, pad_fast_time=True):
     """Demodulates the input data to baseband. The function computes the analytical
     signal (the signal with negative frequencies removed) and then shifts the spectrum
     of the signal to baseband by multiplying with a complex exponential. Where the
@@ -460,12 +478,17 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
         demodulation_frequency (float): The center frequency of the signal.
         sampling_frequency (float): The sampling frequency of the signal.
         axis (int, optional): The axis along which to demodulate. Defaults to -3.
+        pad_fast_time (bool, optional): Avoid circular wraparound in the analytic-signal
+            transform. See :func:`_padded_analytic`. Defaults to ``True``.
 
     Returns:
         ops.Tensor: The demodulated IQ data of shape `(..., axis, ..., 2)`.
     """
     # Compute the analytical signal
-    analytical_signal = hilbert(data, axis=axis)
+    if pad_fast_time:
+        analytical_signal = _padded_analytic(data, axis)
+    else:
+        analytical_signal = hilbert(data, axis=axis)
 
     # Define frequency indices
     frequency_indices = ops.arange(analytical_signal.shape[axis])
@@ -498,8 +521,53 @@ def demodulate(data, demodulation_frequency, sampling_frequency, axis=-3):
     return iq_data_two_channel
 
 
+def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency=250e6):
+    """Compute the time of the peak of the envelope of a waveform or a stack of waveforms.
+
+    Args:
+        waveform (ndarray): The waveform of shape (n_samples), or a stack of them of
+            shape (n_waveforms, n_samples).
+        center_frequency (float or ndarray): The center frequency in Hz, either a scalar
+            (or size-1 array) or, for a stack, one per waveform of shape (n_waveforms,).
+        waveform_sampling_frequency (float): The sampling frequency of the waveform in Hz.
+
+    Returns:
+        float or ndarray: The time to peak in seconds, a scalar for a single waveform
+            or of shape (n_waveforms,) for a stack.
+    """
+    waveform = ops.convert_to_tensor(waveform)
+    n_samples = waveform.shape[-1]
+    if n_samples == 0:
+        raise ValueError("Waveform has zero samples.")
+
+    center_frequency = ops.convert_to_tensor(center_frequency)
+    batch_shape = tuple(waveform.shape[:-1])
+    if ops.size(center_frequency) == 1:
+        center_frequency = ops.reshape(center_frequency, ())
+    elif tuple(center_frequency.shape) != batch_shape:
+        raise ValueError(
+            f"center_frequency must be a scalar or have shape {batch_shape} to match the "
+            f"waveforms of shape {tuple(waveform.shape)}, got {tuple(center_frequency.shape)}."
+        )
+    # Trailing axes for the sample and channel axes of `waveform[..., None]`
+    center_frequency = ops.reshape(center_frequency, tuple(center_frequency.shape) + (1, 1))
+
+    waveforms_iq_complex_channels = demodulate(
+        waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-2
+    )
+    waveforms_iq_complex = ops.view_as_complex(waveforms_iq_complex_channels)
+    envelope = ops.abs(waveforms_iq_complex)
+    peak_idx = ops.argmax(envelope, axis=-1)
+    t_peak = ops.cast(peak_idx, dtype="float32") / waveform_sampling_frequency
+    return t_peak
+
+
+@deprecated(replacement="zea.func.ultrasound.compute_time_to_peak")
 def compute_time_to_peak_stack(waveforms, center_frequencies, waveform_sampling_frequency=250e6):
     """Compute the time of the peak of each waveform in a stack of waveforms.
+
+    .. deprecated::
+        Use :func:`compute_time_to_peak`, which also accepts a stack of waveforms.
 
     Args:
         waveforms (ndarray): The waveforms of shape (n_waveforms, n_samples).
@@ -510,36 +578,7 @@ def compute_time_to_peak_stack(waveforms, center_frequencies, waveform_sampling_
     Returns:
         ndarray: The time to peak for each waveform in seconds.
     """
-    t_peak = []
-    center_frequencies = center_frequencies * ops.ones((waveforms.shape[0],))
-    for waveform, center_frequency in zip(waveforms, center_frequencies):
-        t_peak.append(compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency))
-    return ops.stack(t_peak)
-
-
-def compute_time_to_peak(waveform, center_frequency, waveform_sampling_frequency=250e6):
-    """Compute the time of the peak of the waveform.
-
-    Args:
-        waveform (ndarray): The waveform of shape (n_samples).
-        center_frequency (float): The center frequency of the waveform in Hz.
-        waveform_sampling_frequency (float): The sampling frequency of the waveform in Hz.
-
-    Returns:
-        float: The time to peak for the waveform in seconds.
-    """
-    n_samples = waveform.shape[0]
-    if n_samples == 0:
-        raise ValueError("Waveform has zero samples.")
-
-    waveforms_iq_complex_channels = demodulate(
-        waveform[..., None], center_frequency, waveform_sampling_frequency, axis=-1
-    )
-    waveforms_iq_complex = ops.view_as_complex(waveforms_iq_complex_channels)
-    envelope = ops.abs(waveforms_iq_complex)
-    peak_idx = ops.argmax(envelope, axis=-1)
-    t_peak = ops.cast(peak_idx, dtype="float32") / waveform_sampling_frequency
-    return t_peak
+    return compute_time_to_peak(waveforms, center_frequencies, waveform_sampling_frequency)
 
 
 def channels_to_analytic(data, axis):
@@ -559,18 +598,7 @@ def channels_to_analytic(data, axis):
     if n_ch == 2:
         return ops.view_as_complex(data)
     if n_ch == 1:
-        n_ax = ops.shape(data)[axis]
-
-        # Calculate next power of 2: M = 2^ceil(log2(n_ax))
-        # see https://github.com/tue-bmd/zea/discussions/147
-        log2_n_ax = np.log2(n_ax)
-        M = int(2 ** np.ceil(log2_n_ax))
-
-        data = hilbert(data, N=M, axis=axis)
-        indices = ops.arange(n_ax)
-
-        data = ops.take(data, indices, axis=axis)
-        return ops.squeeze(data, axis=-1)
+        return ops.squeeze(_padded_analytic(data, axis), axis=-1)
     raise ValueError(f"Expected data with n_ch in {{1, 2}} (last axis), got n_ch={n_ch}.")
 
 
@@ -589,6 +617,65 @@ def envelope_detect(data, axis=-3):
         Tensor: The envelope detected data of shape (..., grid_size_z, grid_size_x).
     """
     return ops.abs(channels_to_analytic(data, axis))
+
+
+def directivity(f, theta, element_width, sound_speed, rigid_baffle=True):
+    """Computes the directivity of a single element.
+
+    Args:
+        f (array-like): The input frequencies [Hz].
+        theta (array-like): The angles [rad].
+        element_width (float): The width of the element [m].
+        sound_speed (float): The speed of sound [m/s].
+        rigid_baffle (bool): Whether the element is mounted on a rigid baffle,
+            impacting the directivity.
+
+    Returns:
+        array-like: The directivity of the element.
+    """
+
+    if element_width is None:
+        response = ops.ones_like(theta)
+        return response
+
+    # element_width / wavelength == element_width * f / sound_speed. Using the
+    # latter avoids dividing by f, so the DC bin (f == 0) stays finite: the
+    # argument is 0 and sinc(0) == 1 (isotropic directivity), the correct limit.
+    response = ops.sinc(element_width * f / sound_speed * ops.sin(theta))
+    if not rigid_baffle:
+        response *= ops.cos(theta)
+    return response
+
+
+def square_wave_apodization(n_el: int, block_size: float):
+    """Return a square wave apodization of alternating ``+1`` / ``-1`` blocks.
+
+    Used for incoherent beamforming.
+
+    Args:
+        n_el (int): Total number of elements in the array.
+        block_size (float): Number of elements that will be high/low. Can be a float.
+
+    Returns:
+        Tensor: Apodization of shape ``(n_el,)`` with values in ``{-1, +1}``.
+
+    Example:
+        .. code-block:: text
+
+            +1 +1 +1 +1             +1 +1 +1 +1
+                        -1 -1 -1 -1
+
+            <----------> block_size = 4, n_el = 12
+    """
+    if not block_size > 0:  # also rejects NaN
+        raise ValueError(f"block_size must be a positive number, got {block_size}.")
+
+    # Which block each element falls in; even blocks are high, odd blocks are low.
+    # Indexing the elements directly (rather than sampling a square wave over a
+    # normalized axis) keeps every block exactly `block_size` wide, including a
+    # partial trailing block when `n_el` is not a multiple of `block_size`.
+    block_index = ops.floor(ops.arange(n_el, dtype="float32") / block_size)
+    return ops.where(ops.mod(block_index, 2.0) == 0.0, 1.0, -1.0)
 
 
 def apply_aligned_apodization(data, apodization, with_batch_dim):
@@ -619,6 +706,9 @@ def apply_aligned_apodization(data, apodization, with_batch_dim):
 
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
 
     return data * apodization
 
@@ -651,6 +741,9 @@ def apply_receive_apodization(data, apodization, with_batch_dim):
     # Append the trailing channel axis/axes so it broadcasts over n_ch
     append_n_dims = ops.ndim(data) - ops.ndim(apodization)
     apodization = extend_n_dims(apodization, axis=-1, n_dims=append_n_dims)
+
+    # Match the signal dtype so a low-precision (bfloat16) signal is not up-cast.
+    apodization = ops.cast(apodization, data.dtype)
 
     return data * apodization
 
@@ -788,12 +881,7 @@ def dehaze_nuclear_diffusion(
         This function requires a diffusion model with Nuclear Diffusion guidance.
         Initialize your model with ``guidance="nuclear-dps"`` and ``operator="linear_interp"``.
 
-    .. admonition:: Reference
-
-        T. S. W. Stevens, O. Nolan, J.-L. Robert, and R. J. G. van Sloun,
-        "Nuclear Diffusion Models for Low-Rank Background Suppression in Videos,"
-        *IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)*, 2026.
-        https://arxiv.org/abs/2509.20886
+    .. citation:: stevens2026nuclear
 
     """  # noqa: E501
 
@@ -1184,6 +1272,10 @@ def construct_acquisition_from_synthetic_aperture(
         raw_data (ops.Tensor): The constructed raw data of shape (n_frames, 1, n_ax, n_el, n_ch).
         t0_delays (ops.Tensor): t0 delays of shape (1, n_el).
     """
+    # Imported here rather than at module level: zea.beamform imports from zea.func
+    # (see zea.beamform.pfield), so a top-level import would be circular.
+    from zea.beamform.delays import compute_t0_delays_focused, compute_t0_delays_planewave
+
     if not np.isinf(focus_distance):
         t0_delays = compute_t0_delays_focused(
             transmit_origins=np.array([transmit_origin]),

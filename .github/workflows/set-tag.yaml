@@ -1,3 +1,5 @@
+# Reusable workflow that derives the Docker image tag from the triggering event:
+# the git tag or release name where there is one, otherwise the commit SHA.
 name: Set Docker Tag
 
 on:

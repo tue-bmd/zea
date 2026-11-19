@@ -8,12 +8,19 @@ PARAMETER_DESCRIPTIONS = {
             "the user data root (set in users.yaml), and Hugging Face Hub paths "
             "(hf://org/repo/path/to/file.hdf5)."
         ),
-        "local": "true: use local data on this device, false: use data from NAS",
+        "local": (
+            "true: use local data on this device, false: use data from a remote location. "
+            "null when the users.yaml paths are single paths, shared by both."
+        ),
         "indices": (
             "Indices into the data to load. null loads the default, 'all' loads every frame, "
             "int loads a single frame, list loads specific frames."
         ),
-        "user": "User path overrides set automatically by setup_zea (null, dict).",
+        "user": (
+            "Data paths resolved from users.yaml, filled in automatically by "
+            "zea.internal.setup_zea.setup (null, dict). Do not set by hand: any value "
+            "here is overwritten, and machine-specific paths do not travel with a config."
+        ),
     },
     "parameters": {
         "description": (
@@ -28,6 +35,13 @@ PARAMETER_DESCRIPTIONS = {
         "operations": (
             "The operations to perform on the data. This is a list of dictionaries, "
             "where each dictionary contains the parameters for a single operation."
+        ),
+        "imports": (
+            "Modules defining custom operations that this pipeline uses, imported before "
+            "the operation names are resolved. Each entry is a dotted module path "
+            "(my_project.my_ops), a path to a .py file (absolute, or relative to this "
+            "config), or a Hugging Face URI (hf://org/repo/path/to/module.py). Remote "
+            "entries require --trust-remote-code. Defaults to None."
         ),
         "with_batch_dim": (
             "Whether operations should expect a batch dimension in the input. Defaults to True."

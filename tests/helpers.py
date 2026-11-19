@@ -6,7 +6,7 @@ import os
 import sys
 import traceback
 from contextlib import nullcontext
-from queue import Empty
+from queue import Empty, Full
 
 import cloudpickle as pickle
 import debugpy
@@ -16,7 +16,23 @@ import pytest
 
 from .backend_utils import format_backend_skip_reason, missing_required_backends
 
-debugging = sys.gettrace() or debugpy.is_client_connected() is not None
+# Generous: the first job to a backend also pays for spawning the process and
+# importing the framework in it.
+WORKER_TIMEOUT = 60
+
+
+def debugger_attached():
+    """Whether a debugger is driving the session, in which case timeouts are off.
+
+    Not simply ``sys.gettrace()``: ``pytest --cov`` installs a trace function too, and
+    counting that as a debugger would disable every worker timeout on CI.
+    """
+    if debugpy.is_client_connected():
+        return True
+    if sys.gettrace() is None:
+        return False
+    coverage = sys.modules.get("coverage")
+    return coverage is None or coverage.Coverage.current() is None
 
 
 def _decorate_with_required_backends(decorator_func, required_backends):
@@ -49,6 +65,31 @@ def run_in_subprocess(func):
         assert process.exitcode == 0, f"Process failed with exit code {process.exitcode}"
 
     return wrapper
+
+
+def tensor_device_name(tensor) -> str:
+    """Return a lowercase device string for a tensor (e.g. ``'cpu'``, ``'cuda:0'``)."""
+    import keras
+
+    backend = keras.backend.backend()
+    if backend == "torch":
+        import torch
+
+        if isinstance(tensor, torch.Tensor):
+            return str(tensor.device)
+    if backend == "jax":
+        import jax
+
+        return str(jax.device_put(tensor).devices().pop()).lower()
+    if backend == "tensorflow":
+        return tensor.device.lower()
+    return "unknown"
+
+
+def is_on_gpu(tensor) -> bool:
+    """Whether a tensor lives on a GPU, e.g. to allow for TF32 matmul precision."""
+    name = tensor_device_name(tensor)
+    return "gpu" in name or "cuda" in name
 
 
 class BackendEqualityCheck:
@@ -102,7 +143,9 @@ class BackendEqualityCheck:
                 result_queue.put((job_id, result))
             except Exception as e:
                 tb = traceback.format_exc()
-                result_queue.put((job_id, (e, tb)))
+                # Not `e` itself: one that fails to pickle (torch compile errors hold
+                # modules) dies in the feeder thread, leaving the parent waiting forever.
+                result_queue.put((job_id, (RuntimeError(f"{type(e).__name__}: {e}"), tb)))
 
     def start_workers(self, backends, seed=42):
         """Start workers for the specified backends."""
@@ -129,15 +172,15 @@ class BackendEqualityCheck:
         job_queue = self.job_queues[backend]
         job_queue.put((job_id, pickle.dumps(func), pickle.dumps(args), pickle.dumps(kwargs)))
 
-    def collect_results(self, result_queues, timeout: int = 30):
+    def collect_results(self, result_queues, timeout: int = WORKER_TIMEOUT):
         """
         Collect results from the result queues of the workers.
-        Will wait for all backends to return a result or raise a TimeoutError.
+        Will wait for all backends to return a result or fail the test.
 
         Returns:
             dict: Results for each backend in `result_queues.keys()`.
         """
-        timeout = timeout if not debugging else None
+        timeout = timeout if not debugger_attached() else None
         results = {}
         job_ids = []
         for backend, result_queue in result_queues.items():
@@ -145,16 +188,21 @@ class BackendEqualityCheck:
                 job_id, result = result_queue.get(timeout=timeout)
                 job_ids.append(job_id)
                 results[backend] = result
-            except Empty as exc:
+            except Empty:
+                # Silence can mean busy or dead; only a dead worker has an exit code.
+                process = self.processes.get(backend)
+                gone = process is not None and not process.is_alive()
+                exitcode = process.exitcode if gone else None
                 # stop all the workers
                 # this can be done in a more elegant way, e.g. only stopping the backend that fails
-                self.stop_workers()
                 msg = (
                     f"Timeout occurred while waiting for results from backend {backend}, "
-                    + "possibly also from other backends."
+                    "possibly also from other backends."
                 )
+                if gone:
+                    msg += f" Its worker is gone (exit code {exitcode}; negative means killed)."
+                self.stop_workers()
                 pytest.fail(msg)
-                raise TimeoutError(msg) from exc
         assert len(set(job_ids)) in [
             0,
             1,
@@ -169,11 +217,16 @@ class BackendEqualityCheck:
     def stop_workers(self, force=True):
         """Stop all workers. This should be called at the end of the test session."""
         for job_queue in self.job_queues.values():
-            job_queue.put(None)
+            try:
+                job_queue.put_nowait(None)
+            except Full:
+                # A worker that died before taking its job leaves the queue full;
+                # blocking on the sentinel would hang cleanup.
+                pass
         for process in self.processes.values():
             if force:
                 process.terminate()
-            process.join()
+            process.join(timeout=30)
         self.result_queues = {}
         self.processes = {}
         self.job_queues = {}
@@ -194,7 +247,7 @@ class BackendEqualityCheck:
         backends: list | None = None,
         gt_backend: str = "numpy",
         verbose: bool = False,
-        timeout: int = 30,
+        timeout: int = WORKER_TIMEOUT,
         allow_none: bool = False,
     ):
         """Test the processing functions of different libraries (on CPU).

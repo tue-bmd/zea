@@ -22,15 +22,7 @@ Dataset splits:
    The CAMUS dataset is available free of charge strictly for non-commercial
    scientific research purposes only.
 
-.. admonition:: Reference
-
-   S\\. Leclerc, E. Smistad, J. Pedrosa, A. Ostvik, F. Cervenansky, F. Espinosa,
-   T. Espeland, E. A. R. Berg, P.-M. Jodoin, T. Grenier, C. Lartizien,
-   J. D'hooge, L. Lovstakken and O. Bernard.
-   *Deep Learning for Segmentation Using an Open Large-Scale Dataset in
-   2D Echocardiography.*
-   IEEE Transactions on Medical Imaging, vol. 38, no. 9, pp. 2198-2210, 2019.
-   `DOI: 10.1109/TMI.2019.2900516 <https://doi.org/10.1109/TMI.2019.2900516>`_
+.. citation:: leclerc2019deep
 
 .. rubric:: Links
 
@@ -67,7 +59,7 @@ from zea.data.convert.utils import (
     download_from_girder,
     require_output_dir_ownership,
     sitk_load,
-    unzip,
+    unzip_beside,
     upload_dataset_to_hf,
     write_dataset_card,
 )
@@ -440,15 +432,26 @@ def download_camus(  # pragma: no cover
     )
 
 
+def _find_nifti_root(folder: Path) -> Path:
+    # CAMUS_public.zip nests everything under a top-level CAMUS_public/ folder.
+    for candidate in (folder / "database_nifti", folder / "CAMUS_public" / "database_nifti"):
+        if candidate.exists():
+            return candidate
+    return folder
+
+
 def _resolve_path(src: str | Path) -> Path:
     src = Path(src)
+
+    if src.is_file() and src.suffix == ".zip":
+        return _find_nifti_root(unzip_beside(src))
 
     zip_name = "CAMUS_public.zip"
     folder_name = "CAMUS_public"
     unzip_dir = src / folder_name
 
     if (src / folder_name).exists():
-        return unzip_dir
+        return _find_nifti_root(unzip_dir)
 
     # Girder download produces a database_nifti sub-folder,
     # or the user may have extracted patient* folders directly into src.
@@ -461,8 +464,7 @@ def _resolve_path(src: str | Path) -> Path:
 
     zip_path = src / zip_name
 
-    unzipped_path = unzip(zip_path, src)
-    return unzipped_path / "database_nifti"
+    return _find_nifti_root(unzip_beside(zip_path))
 
 
 def convert_camus(args):

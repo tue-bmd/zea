@@ -160,7 +160,7 @@ class AutoGrad:
 
     def get_gradient_and_value_jit_fn(self, has_aux: bool = False, disable_jit=False):
         """Returns a jitted function for calculating the gradients and function outputs."""
-        func = lambda x, **kwargs: self.gradient_and_value(x, has_aux=has_aux, **kwargs)
+        func = functools.partial(self.gradient_and_value, has_aux=has_aux)
         if disable_jit:
             return func
         if self.backend == "jax":
@@ -175,7 +175,8 @@ class AutoGrad:
                 jit_compile=True,
             )
         elif self.backend == "torch":
-            # return torch.compile(func)
-            raise NotImplementedError("Jitting not supported for torch backend.")
+            if torch is None:
+                raise ImportError("PyTorch is not installed.")
+            return torch.compile(func)
         else:
             raise UserWarning("You haven't set a jittable keras backend!")

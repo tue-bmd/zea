@@ -27,8 +27,9 @@ Architecture notes
 .. important::
 
     This is a ``zea`` implementation of the model.
-    For the original `paper <https://arxiv.org/abs/2507.06828>`_ and `
-    code <https://github.com/noseefood/speckle2self>`_.
+    For the original code, see `here <https://github.com/noseefood/speckle2self>`_.
+
+.. citation:: li2025speckle2self
 
 .. note::
 

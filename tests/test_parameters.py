@@ -20,6 +20,7 @@ import pytest
 from zea.internal.parameters import (
     BaseParameters,
     MissingDependencyError,
+    NoDependencyError,
     cache_with_dependencies,
 )
 
@@ -75,6 +76,7 @@ class DummyParameters(BaseParameters):
         computed1: A computed property depending on param1 and param2
         computed2: A computed property depending on computed1
         computed3: A computed property depending on param3 and param4
+        computed4: A computed property depending on param3, and optionally on param5
         optional_param: A property that is either set directly or computed from dependencies
     """
 
@@ -116,6 +118,11 @@ class DummyParameters(BaseParameters):
             self._computed3_count = 0
         self._computed3_count += 1
         return self.param3 / self.param4
+
+    @cache_with_dependencies("param3", optional=("param5",))
+    def computed4(self):
+        param5 = self._params.get("param5")
+        return self.param3 if param5 is None else self.param3 + param5
 
     @cache_with_dependencies("param3", "param1", "param4")
     def optional_param(self):
@@ -255,6 +262,13 @@ def test_missing_dependency_error_message():
         _ = s.computed2
     msg = str(excinfo.value)
     assert "param1" in msg and "param2" in msg
+
+
+def test_optional_dependency(dummy_params):
+    """An optional dependency is not required, but setting it invalidates the cache."""
+    assert dummy_params.computed4 == 1500.0
+    dummy_params.param5 = 10.0
+    assert dummy_params.computed4 == 1510.0
 
 
 def test_to_tensor_includes_all(dummy_params: DummyParameters):
@@ -446,6 +460,98 @@ def test_update_accepts_positional_mapping(dummy_params):
     assert dummy_params.param1 == 7
 
 
+def test_parameters_compare_by_content():
+    """Parameters are equal when they hold the same parameters, and are unhashable."""
+    params = DummyParameters(param1=1, param2=2, param4=3.0)
+    same = DummyParameters(param1=1, param2=2, param4=3.0)
+    other = DummyParameters(param1=9, param2=2, param4=3.0)
+
+    assert params == same
+    assert params != other
+    assert params != "not a parameters object"
+
+    # Content-based equality means content-based hashing would be wrong (the hash
+    # would change under mutation), so these are unhashable, like Pipeline/Operation.
+    with pytest.raises(TypeError):
+        hash(params)
+
+
+def test_parameters_compare_after_in_place_mutation():
+    """Equality reflects the current contents, also after in-place mutation.
+
+    In-place mutation does not go through `__setattr__`, so it cannot be caught by
+    invalidation; the checksum has to be recomputed on every read.
+    """
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+    same = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+
+    assert params == same
+
+    params.arr[0] = 99.0
+
+    assert params != same
+
+
+def test_serialized_is_content_based():
+    """`serialized` is the cache key the caching machinery relies on (zea.internal.cache)."""
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+    same = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+    other = DummyArrayParameters(arr=np.array([1.0, 2.0, 4.0]))
+
+    assert params.serialized == same.serialized
+    assert params.serialized != other.serialized
+
+
+def test_serialized_tracks_mutation():
+    """Both assignment and in-place mutation change the cache key.
+
+    In-place mutation never reaches `__setattr__`, so the checksum cannot be cached.
+    """
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+
+    before = params.serialized
+    params.arr[0] = 99.0
+    assert params.serialized != before
+
+    before = params.serialized
+    params.arr = np.array([4.0, 5.0, 6.0])
+    assert params.serialized != before
+
+
+def test_serialized_ignores_derived_state():
+    """Computing a cached property must not change the cache key."""
+    params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
+
+    before = params.serialized
+    _ = params.arr_sum
+
+    assert params._cache  # the computed property really was cached
+    assert params.serialized == before
+
+
+def test_serialized_distinguishes_classes():
+    """Distinct classes holding identical parameters get distinct cache keys."""
+
+    class OtherArrayParameters(DummyArrayParameters):
+        """Same parameters, different class."""
+
+    arr = np.array([1.0, 2.0, 3.0])
+    assert DummyArrayParameters(arr=arr).serialized != OtherArrayParameters(arr=arr).serialized
+
+
+def test_serialized_distinguishes_classes_across_modules():
+    """Same class name in two modules must not share a cache key."""
+
+    class SameName(DummyArrayParameters):
+        """Stand-in for the same class name defined in another module."""
+
+    SameName.__qualname__ = DummyArrayParameters.__qualname__
+    SameName.__module__ = "some.other.module"
+
+    arr = np.array([1.0, 2.0, 3.0])
+    assert DummyArrayParameters(arr=arr).serialized != SameName(arr=arr).serialized
+
+
 def test_update_ndarray_equality_skips_recompute():
     """Test update uses array equality and skips updates for equal ndarrays."""
     params = DummyArrayParameters(arr=np.array([1.0, 2.0, 3.0]))
@@ -540,3 +646,257 @@ def test_update_non_array_np_all_exception_falls_through():
 
     params.update(obj=new_obj)
     assert params.obj is new_obj
+
+
+def test_missing_valid_params_raises():
+    """A subclass without VALID_PARAMS cannot be instantiated."""
+    with pytest.raises(NotImplementedError, match="VALID_PARAMS must be defined"):
+        BaseParameters()
+
+
+def test_validate_unknown_parameter_raises():
+    """Validation rejects names that are not in VALID_PARAMS."""
+    with pytest.raises(ValueError, match="Invalid parameter: nope"):
+        DummyParameters._validate_parameter("nope", 1)
+
+
+def test_dependency_helpers_reject_plain_parameters():
+    """Dependency helpers only accept computed properties."""
+    with pytest.raises(NoDependencyError, match="not a computed property"):
+        DummyParameters._get_dependencies("param1")
+
+    params = DummyParameters(param1=5, param2=10)
+    with pytest.raises(NoDependencyError, match="not a computed property"):
+        params._current_dependency_hash("param1")
+
+
+def test_find_leaf_params_rejects_unknown_name(dummy_params):
+    """Leaf resolution fails loudly for names that are neither param nor property."""
+    with pytest.raises(AttributeError, match="not a valid parameter or computed property"):
+        dummy_params._find_leaf_params("nope")
+
+
+def test_cannot_assign_to_method(dummy_params):
+    """Assigning to a method points the user at calling it instead."""
+    with pytest.raises(AttributeError, match="Cannot assign to method 'copy'"):
+        dummy_params.copy = 1
+
+
+def test_cannot_assign_to_read_only_property(dummy_params):
+    """Plain (non-computed) properties such as `serialized` are read-only."""
+    with pytest.raises(AttributeError, match="Cannot set read-only property 'serialized'"):
+        dummy_params.serialized = "x"
+
+
+def test_getattr_falls_back_to_class_property(dummy_params):
+    """The __getattr__ fallback resolves class-level properties via the descriptor."""
+    assert dummy_params.__getattr__("computed3") == dummy_params.computed3
+
+
+def test_cache_invalidated_when_dependency_hash_fails():
+    """Unhashable dependencies conservatively invalidate the cache on every access."""
+
+    class _Unpicklable:
+        def __reduce__(self):
+            raise RuntimeError("cannot pickle")
+
+    params = DummyObjectParameters(obj=_Unpicklable())
+
+    assert params.marker == 1
+    # The stored version is None because hashing failed, so the next access recomputes
+    assert params._dependency_versions["marker"] is None
+    assert params.marker == 2
+    assert params._marker_count == 2
+
+
+@pytest.mark.parametrize("key", ["copy", "serialized"])
+def test_update_raises_on_keys_colliding_with_methods_and_properties(dummy_params, key):
+    """Names that shadow a method or property raise in update(), like __setitem__."""
+    with pytest.raises((AttributeError, ValueError)):
+        dummy_params[key] = 1
+    with pytest.raises((AttributeError, ValueError)):
+        dummy_params.update({"custom": 3, "param1": 99, key: 1})
+
+    # Keys are checked up front, so nothing was applied.
+    assert callable(dummy_params.copy)
+    assert key not in dummy_params._custom_params
+    assert "custom" not in dummy_params._custom_params
+    assert dummy_params.param1 != 99
+
+
+def test_update_sets_parameter_that_was_never_set(dummy_params):
+    """A parameter absent from _params is assigned without an equality check."""
+    assert not dummy_params._has_param("param5")
+
+    dummy_params.update(param5=3.0)
+
+    assert dummy_params.param5 == 3.0
+
+
+def test_update_non_array_arraylike_inequality_sets_value():
+    """Array-like equality that is not all-True falls through to assignment."""
+
+    class _EqPartlyEqual:
+        def __eq__(self, other):
+            return np.array([True, False], dtype=bool)
+
+    params = DummyObjectParameters(obj=_EqPartlyEqual())
+    new_obj = _EqPartlyEqual()
+
+    params.update(obj=new_obj)
+
+    assert params.obj is new_obj
+
+
+def test_update_skips_none_to_none(dummy_params):
+    """Setting an already-None parameter to None is a no-op."""
+    dummy_params.param5 = None
+    _ = dummy_params.computed1
+
+    dummy_params.update(param5=None)
+
+    assert dummy_params.param5 is None
+    assert "computed1" in dummy_params._cache
+
+
+def test_delete_parameter_invalidates_cache(dummy_params):
+    """Deleting a leaf parameter drops the computed properties that depend on it."""
+    _ = dummy_params.computed1
+    del dummy_params.param1
+
+    assert "computed1" not in dummy_params._cache
+    assert not dummy_params._has_param("param1")
+
+
+def test_delete_custom_and_invalid_parameters(dummy_params):
+    """__delattr__ handles custom params, unset params and unknown names."""
+    dummy_params.custom = 1
+    del dummy_params.custom
+    assert "custom" not in dummy_params._custom_params
+
+    with pytest.raises(ValueError, match="Cannot delete parameter 'param5'"):
+        del dummy_params.param5
+
+    with pytest.raises(AttributeError, match="has no attribute 'nope'"):
+        del dummy_params.nope
+
+
+def test_to_tensor_include_and_exclude_are_exclusive(dummy_params):
+    """Only one of include/exclude may be given."""
+    with pytest.raises(ValueError, match="Only one of 'include' or 'exclude'"):
+        dummy_params.to_tensor(include=["param1"], exclude=["param2"])
+
+
+def test_to_tensor_explicit_include_raises_on_missing_dependency():
+    """An explicitly requested property with unmet dependencies is an error."""
+    params = DummyParameters(param1=5, param2=10)  # no param4, so computed3 is unavailable
+
+    # Unavailable properties are skipped when including everything ...
+    assert "computed3" not in params.to_tensor()
+    # ... but requesting one explicitly must raise
+    with pytest.raises(MissingDependencyError):
+        params.to_tensor(include=["computed3"])
+
+
+def test_repr_and_str_include_custom_params_and_truncate_lists(dummy_params):
+    """Custom params show up in repr/str, and long lists are abbreviated."""
+    dummy_params.custom_list = list(range(10))
+
+    r = repr(dummy_params)
+    s = str(dummy_params)
+
+    assert "custom_list=[0, 1, 2, 3, ..., 8, 9] (len=10)" in r
+    assert "custom_list=[0, 1, 2, 3, ..., 8, 9] (len=10)" in s
+    # Short lists are shown in full
+    dummy_params.custom_list = [1, 2]
+    assert "custom_list=[1, 2]" in repr(dummy_params)
+
+
+def test_standardize_params_drops_invalid_keys():
+    """standardize_params keeps only names listed in VALID_PARAMS."""
+    assert DummyParameters.standardize_params(param1=5, bogus=1) == {"param1": 5}
+
+
+def test_safe_initialize_ignores_invalid_keys():
+    """safe_initialize builds an instance from the valid subset of kwargs."""
+    params = DummyParameters.safe_initialize(param1=5, param2=10, bogus=1)
+
+    assert params.param1 == 5
+    assert "bogus" not in params
+
+    # Without any valid parameter it still returns a (default-initialized) instance
+    assert isinstance(DummyParameters.safe_initialize(bogus=1), DummyParameters)
+
+
+def test_mapping_protocol(dummy_params):
+    """BaseParameters behaves like a mapping over its params and custom params."""
+    dummy_params["custom"] = "value"
+
+    assert dummy_params["param1"] == 5
+    assert dummy_params["custom"] == "value"
+    assert "param1" in dummy_params and "custom" in dummy_params
+    assert "nope" not in dummy_params
+
+    keys = set(dummy_params.keys())
+    assert {"param1", "param2", "param3", "param4", "custom"} <= keys
+    assert set(dummy_params) == keys
+    assert len(dummy_params) == len(keys)
+    assert dict(dummy_params.items())["custom"] == "value"
+    assert "value" in list(dummy_params.values())
+
+    del dummy_params["custom"]
+    assert "custom" not in dummy_params
+
+
+class DummySubParameters(DummyParameters):
+    """Subclass without its own computed properties, like the deprecated Scan."""
+
+
+def test_subclass_invalidates_inherited_properties():
+    """Dependents must be found through the MRO, not only in the subclass itself."""
+    assert DummySubParameters._find_all_dependents(
+        "param1"
+    ) == DummyParameters._find_all_dependents("param1")
+
+    params = DummySubParameters(param1=5, param2=10, param3=1500.0, param4=5e6)
+    assert params.computed2[0] == 1
+    params.param1 = 3
+    assert params.computed1[0].shape == (3, 10)
+    params.computed2
+    assert params._computed2_count == 2
+
+
+def test_setattr_looks_up_dependents_once(dummy_params, monkeypatch):
+    """The transitive dependent set is popped in one pass, not re-walked per dependent."""
+    calls = []
+    original = DummyParameters._find_all_dependents
+
+    def counting(target):
+        calls.append(target)
+        return original(target)
+
+    monkeypatch.setattr(DummyParameters, "_find_all_dependents", staticmethod(counting))
+    dummy_params.computed2  # populate computed1 and computed2
+    dummy_params.param1 = 3
+    assert calls == ["param1"]
+    assert "computed1" not in dummy_params._cache
+    assert "computed2" not in dummy_params._cache
+
+
+def test_dependents_cache_is_per_class():
+    """The memoised dependency graph lives on each class, so it is freed with the class."""
+    import gc
+    import weakref
+
+    class Temporary(DummyParameters):
+        pass
+
+    params = Temporary(param1=5, param2=10, param3=1500.0, param4=5e6)
+    params.param1 = 3  # populate the cache
+    assert "param1" in Temporary.__dict__["_dependents_cache"]
+    assert Temporary._dependents_cache is not DummyParameters._dependents_cache
+
+    ref = weakref.ref(Temporary)
+    del Temporary, params
+    gc.collect()
+    assert ref() is None

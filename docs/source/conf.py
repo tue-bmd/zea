@@ -24,6 +24,7 @@ extensions = [
     "sphinx.ext.viewcode",  # for links to source code
     "sphinx.ext.autosummary",  # for generating API documentation
     "sphinx.ext.intersphinx",  # for cross-project links
+    "sphinx.ext.extlinks",  # for the :gh: and :user: roles in the changelog
     "myst_parser",  # for markdown support
     "sphinx.ext.doctest",  # for testing code snippets in the documentation
     "nbsphinx",  # for Jupyter notebook support
@@ -32,6 +33,8 @@ extensions = [
     "sphinx_reredirects",  # for redirecting empty toc entries
     "sphinx.ext.mathjax",  # for rendering math in the documentation
     "tyroprogram",  # local: auto-documents the tyro CLI (docs/source/_ext/tyroprogram.py)
+    "citation",  # local: the .. citation:: block (docs/source/_ext/citation.py)
+    "example_gallery",  # local: example cards on the examples page (_ext/example_gallery.py)
 ]
 
 autodoc_mock_imports = [
@@ -55,6 +58,7 @@ exclude_patterns = [
     "_autosummary/zea.func.ultrasound.rst",
     "_autosummary/zea.func.usct.rst",
     "_autosummary/zea.ops.base.rst",
+    "_autosummary/zea.ops.imports.rst",
     "_autosummary/zea.ops.tensor.rst",
     "_autosummary/zea.ops.ultrasound.rst",
     "_autosummary/zea.ops.usct.rst",
@@ -76,6 +80,13 @@ autodoc_default_options = {
 }
 autoclass_content = "both"  # include both class docstring and __init__ docstring
 
+# Used by the changelog: :gh:`681` links to a pull request, :user:`handle` to a GitHub
+# profile. .github/scripts/changelog.py turns them into #681 and @handle for release notes.
+extlinks = {
+    "gh": ("https://github.com/tue-bmd/zea/pull/%s", "#%s"),
+    "user": ("https://github.com/%s", "@%s"),
+}
+
 templates_path = ["_templates"]
 
 # -- Options for HTML output -------------------------------------------------
@@ -84,14 +95,14 @@ html_theme_options = {
     "announcement": (
         "<style>"
         "@media (max-width: 600px) {"
-        "  .openh-rf-detail { display: none; }"
-        "  .openh-rf-link { font-size: 0.85em; }"
+        "  .open-h-rf-detail { display: none; }"
+        "  .open-h-rf-link { font-size: 0.85em; }"
         "}"
         "</style>"
-        '<a class="openh-rf-link" style="text-decoration: none; color: inherit;" '
-        'href="https://github.com/open-h/OpenH-RF" target="_blank">'
-        "🧩 &nbsp; <code>zea</code> &nbsp; supports the OpenH-RF Initiative"
-        '<span class="openh-rf-detail"> &mdash; a large-scale openly licensed ultrasound'
+        '<a class="open-h-rf-link" style="text-decoration: none; color: inherit;" '
+        'href="https://github.com/open-h/Open-H-RF" target="_blank">'
+        "🧩 &nbsp; <code>zea</code> &nbsp; supports the Open-H-RF Initiative"
+        '<span class="open-h-rf-detail"> &mdash; a large-scale openly licensed ultrasound'
         " dataset by Stanford, TU/e &amp; NVIDIA</span>"
         ". Learn more &rarr;</a>"
     ),
@@ -116,8 +127,11 @@ html_favicon = "../_static/zea-logo-fav-32px.png"
 # for index
 modindex_common_prefix = ["zea."]
 
-# for bibtex
-bibtex_bibfiles = ["../../paper/paper.bib"]
+# for bibtex. Both files feed :cite: and the local .. citation:: directive,
+# so keys have to stay unique across the two:
+#   paper.bib      -- zea's own citation and the papers-using-zea list
+#   references.bib -- external work cited from the API docs and docstrings
+bibtex_bibfiles = ["../../paper/paper.bib", "references.bib"]
 
 # for redirecting empty toc items to their parent
 redirects = {

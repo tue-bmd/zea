@@ -1,16 +1,28 @@
 """This file contains fixtures that are used by all tests in the tests directory."""
 
 import importlib.util
+import logging
 import os
 import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import pytest
+# Must be set before pyplot is imported, and inherited by the papermill kernels in
+# test_notebooks.py, which would otherwise pick up an interactive backend from the shell.
+os.environ["MPLBACKEND"] = "Agg"
 
-from .data import generate_example_dataset
+# Hide the GPUs before any backend initializes CUDA: init_device("cpu") below hides them too,
+# but that is a no-op once a backend has claimed them.
+_TEST_DEVICE = os.environ.get("ZEA_TEST_DEVICE", "auto:1").strip().lower()
+_TEST_ON_CPU = _TEST_DEVICE in ("cpu", "auto:0")  # the spellings init_device resolves to CPU
+if _TEST_ON_CPU:
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["JAX_PLATFORMS"] = "cpu"
+
+import pytest  # noqa: E402
+
+from .data import generate_example_dataset  # noqa: E402
 
 
 def _gpu_available() -> bool:
@@ -41,7 +53,7 @@ def _gpu_available() -> bool:
 
 
 # must be before importing anything that may call init_device()
-_GPU_AVAILABLE = _gpu_available()
+_GPU_AVAILABLE = not _TEST_ON_CPU and _gpu_available()
 
 # Warm up jax's GPU backend while all GPUs are still visible. If the first init happens when
 # a test has hidden the GPUs, jax permanently falls back to CPU.
@@ -59,8 +71,7 @@ if _GPU_AVAILABLE:
 # they remain free to select their own backend. See tests/__init__.py for details.
 from zea.internal.device import init_device  # noqa: E402
 
-device = os.environ.get("ZEA_TEST_DEVICE", "auto:1")
-device = init_device(device=device, allow_preallocate=False)
+device = init_device(device=_TEST_DEVICE, allow_preallocate=False)
 
 
 from .backend_utils import (  # noqa: E402
@@ -72,8 +83,6 @@ from .backend_utils import (  # noqa: E402
     missing_required_backends,
     unavailable_test_backends,
 )
-
-plt.rcParams["backend"] = "agg"
 
 
 def _skip_unavailable_backends_enabled(config):
@@ -121,6 +130,14 @@ def pytest_addoption(parser):
         default=False,
         help="Run tests with the torch backend. "
         "Torch support is currently in alpha, and tests are expected to fail.",
+    )
+    parser.addoption(
+        "--notebook-cell-timeout",
+        action="store",
+        type=int,
+        default=None,
+        help="Seconds a single notebook cell may run before the test fails. "
+        "Defaults to tests.test_notebooks.DEFAULT_CELL_TIMEOUT.",
     )
     parser.addoption(
         "--notebook-dir",
@@ -285,6 +302,23 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolated_hf_caches(tmp_path_factory):
+    """Keep the on-disk HF location and listing caches of this session in a temp dir.
+
+    Tests mock repos (some under real names), and CI runners share one ZEA_CACHE_DIR
+    between concurrent jobs, so those caches must never be written to or wiped there.
+    """
+    from zea.data import hf_remote
+    from zea.internal import preset_utils
+
+    root = tmp_path_factory.mktemp("hf_caches")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(hf_remote, "_CACHE_DIR", root / "locations")
+        mp.setattr(preset_utils, "_LISTING_DIR", root / "listings")
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def run_once_after_all_tests():
     """Fixture to stop workers after all tests have run."""
     yield
@@ -332,3 +366,57 @@ def dummy_dataset_path(tmp_path):
         )
 
     yield str(temp_file.parent)
+
+
+@pytest.fixture
+def reset_warning_once():
+    """Isolates ``zea.log.warning_once`` dedupe state for one test.
+
+    The dedupe set is module-global, so a ``warning_once`` already fired by an
+    earlier test would be suppressed here. It is cleared for the duration of the
+    test and restored afterwards, so neither direction leaks.
+
+    Yields:
+        The dedupe set itself, for tests that need to clear it again mid-test.
+    """
+    from zea import log
+
+    saved = set(log._warned_locations)
+    log._warned_locations.clear()
+    try:
+        yield log._warned_locations
+    finally:
+        log._warned_locations.clear()
+        log._warned_locations.update(saved)
+
+
+@pytest.fixture
+def attach_caplog(caplog, reset_warning_once):
+    """Captures ``zea.log`` records with pytest's ``caplog``.
+
+    zea's logger has ``propagate = False``, so its records never reach the root
+    logger that ``caplog`` listens on; the handler is attached directly instead.
+    Captures from DEBUG up regardless of ``ZEA_LOG_LEVEL``, and isolates
+    ``warning_once`` state via :func:`reset_warning_once`.
+    """
+    from zea import log
+
+    caplog.set_level(logging.DEBUG, logger=log.logger.name)
+    log.logger.addHandler(caplog.handler)
+    try:
+        yield caplog
+    finally:
+        log.logger.removeHandler(caplog.handler)
+
+
+@pytest.fixture
+def attach_caplog_warnings(attach_caplog):
+    """Like :func:`attach_caplog`, but captures WARNING and above only.
+
+    Use this when a test asserts on exact record counts, which unrelated info
+    and debug output would otherwise break.
+    """
+    from zea import log
+
+    attach_caplog.set_level(logging.WARNING, logger=log.logger.name)
+    return attach_caplog

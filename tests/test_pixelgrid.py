@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from zea.beamform.pixelgrid import cartesian_pixel_grid
+from zea.beamform.pixelgrid import cartesian_pixel_grid, polar_pixel_grid
 
 # --- 2D Grid Tests ---
 
@@ -380,3 +380,43 @@ def test_3d_grid_various_sizes(grid_size_x, grid_size_y, grid_size_z):
         grid_size_z=grid_size_z,
     )
     assert grid.shape == (grid_size_z, grid_size_x, grid_size_y, 3)
+
+
+# --- Polar Grid Tests ---
+
+
+@pytest.mark.parametrize("distance_to_apex", [0.0, 0.05])
+def test_polar_grid_zlims_are_depths_below_the_transducer(distance_to_apex):
+    """``zlims`` means the same thing for a polar grid as for a Cartesian one: a depth
+    below the transducer surface, regardless of where the apex sits."""
+    zlims = (0.005, 0.07)
+    grid = polar_pixel_grid(
+        polar_limits=(-0.3, 0.3),
+        zlims=zlims,
+        num_radial_pixels=256,
+        num_polar_pixels=128,
+        distance_to_apex=distance_to_apex,
+    )
+
+    # The centre ray runs straight down, from zlims[0] to zlims[1] below the transducer.
+    centre_ray_z = grid[:, 64, 2]
+    assert centre_ray_z[0] == pytest.approx(zlims[0], abs=1e-6)
+    assert centre_ray_z[-1] == pytest.approx(zlims[1], abs=1e-3)
+
+
+def test_polar_grid_rays_fan_out_from_the_apex():
+    """Every pixel sits at its own radius from the apex at ``(0, 0, -distance_to_apex)``,
+    spanning ``zlims`` shifted by that distance."""
+    distance_to_apex = 0.05
+    zlims = (0.005, 0.07)
+    grid = polar_pixel_grid(
+        polar_limits=(-0.3, 0.3),
+        zlims=zlims,
+        num_radial_pixels=256,
+        num_polar_pixels=128,
+        distance_to_apex=distance_to_apex,
+    )
+
+    radii = np.hypot(grid[..., 0], grid[..., 2] + distance_to_apex)
+    assert radii.min() == pytest.approx(zlims[0] + distance_to_apex, abs=1e-6)
+    assert radii.max() == pytest.approx(zlims[1] + distance_to_apex, abs=1e-3)

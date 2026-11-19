@@ -146,6 +146,7 @@ parameters will also work:
 """  # noqa: E501
 
 import numpy as np
+from keras import ops
 
 from zea.data.spec import ProbeSpec
 from zea.internal.core import dict_to_tensor
@@ -178,10 +179,10 @@ def create_curved_probe_geometry(n_el, pitch, radius):
     """Create the geometry of a convex (curved) array.
 
     Elements lie on an arc of the given radius of curvature in the ``x-z`` plane
-    (``y = 0``), with the apex element at the origin facing ``+z`` and the
-    peripheral elements curving back toward ``-z`` (zea's convention: the medium
-    is at ``+z``). ``pitch`` is the arc spacing between adjacent elements, so the
-    per-element angular step is ``pitch / radius``.
+    (``y = 0``), centred on ``(0, 0, -radius)``. The middle of the array sits at the
+    origin facing ``+z`` and the peripheral elements curve back toward ``-z`` (zea's
+    convention: the medium is at ``+z``). ``pitch`` is the arc spacing between adjacent
+    elements, so the per-element angular step is ``pitch / radius``.
 
     Args:
         n_el (int): Number of elements in the probe.
@@ -202,6 +203,63 @@ def create_curved_probe_geometry(n_el, pitch, radius):
         axis=1,
     ).astype(np.float32)
     return probe_geometry
+
+
+def fit_curved_probe_radius(probe_geometry, tol: float = 0.5) -> float:
+    """Recover a curved probe's radius of curvature from its element positions.
+
+    Inverse of :func:`create_curved_probe_geometry`, for curved probes whose radius is
+    only known through ``probe_geometry`` (e.g. read from a converted file) rather than
+    built from an explicit radius. For such a probe the radius is also the polar grid's
+    :attr:`~zea.Parameters.distance_to_apex`, because the centre of curvature is exactly
+    the apex the beams fan out from.
+
+    Elements are assumed to lie on an arc of radius ``R`` centred at ``(0, 0, -R)``, so
+    ``x^2 + (z + R)^2 = R^2``  =>  ``x^2 + z^2 + 2 R z = 0``. Solved as a least-squares
+    fit over all elements rather than per-element, which is ill-conditioned for the
+    elements nearest the middle of the array (``z -> 0``).
+
+    .. note::
+        The apex is the centre of curvature, at ``(0, 0, -R)``. It is not the middle of
+        the array, which sits at the origin, hence ``distance_to_apex`` for a curved
+        probe is its radius of curvature rather than zero.
+
+    Args:
+        probe_geometry (np.ndarray): Element positions in metres, shape (n_el, 3), in
+            zea's curved-probe frame (see :func:`create_curved_probe_geometry`).
+        tol (float, optional): How far an element may sit from the fitted arc before the
+            fit is rejected, as a fraction of the element pitch. Defaults to 0.5, which
+            comfortably admits the irregularity of measured and simulated geometries
+            while still rejecting an array that is off-frame by a single element.
+
+    Returns:
+        float: Fitted radius of curvature in metres.
+
+    Raises:
+        ValueError: If the elements do not lie on such an arc, either because the array
+            is not curved or because ``probe_geometry`` uses a different origin -- a
+            translated arc still fits *a* circle, just not one centred at ``(0, 0, -R)``.
+    """
+    x = probe_geometry[:, 0].astype(np.float64)
+    z = probe_geometry[:, 2].astype(np.float64)
+
+    denominator = 2.0 * np.sum(z**2)
+    radius = -np.sum(z * (x**2 + z**2)) / denominator if denominator > 0 else np.inf
+
+    # Check the fit instead of trusting it: this catches a flat array (nothing to fit) as
+    # well as a geometry in a different frame, which would otherwise fit the wrong circle.
+    if np.isfinite(radius):
+        deviation = np.max(np.abs(np.hypot(x, z + radius) - radius))
+        pitch = np.median(np.linalg.norm(np.diff(probe_geometry, axis=0), axis=1))
+        if deviation <= tol * pitch:
+            return float(radius)
+
+    raise ValueError(
+        "Cannot fit a radius of curvature: the elements do not lie on an arc centred at "
+        "(0, 0, -R). Either the array is not curved, or probe_geometry uses a different "
+        "origin and needs re-centring onto zea's curved-probe frame "
+        "(see create_curved_probe_geometry)."
+    )
 
 
 class Probe(ProbeSpec):
@@ -241,7 +299,7 @@ class Probe(ProbeSpec):
         if self.probe_bandwidth_percent is not None:
             parts.append(f"bw={float(self.probe_bandwidth_percent):.1f}%")
         if self.element_width is not None:
-            parts.append(f"pitch={float(self.element_width) * 1e3:.3f} mm")
+            parts.append(f"element_width={float(self.element_width) * 1e3:.3f} mm")
         return f"Probe({', '.join(parts)})"
 
     @classmethod
@@ -271,9 +329,12 @@ class Probe(ProbeSpec):
         """Compute the pitch (centre-to-centre element spacing) in metres from
         the probe geometry.
 
+        The pitch is always positive, also when the elements are ordered by
+        descending x.
+
         Raises :class:`ValueError` when the probe has fewer than 2 elements,
-        the geometry is not a 1-D (linear) array, or the element positions are
-        not uniformly spaced.
+        the geometry is not a 1-D (linear) array, the element positions are
+        not uniformly spaced, or the elements coincide.
         """
 
         n_el = probe_geometry.shape[0]
@@ -295,7 +356,10 @@ class Probe(ProbeSpec):
                 f"Min spacing: {spacings.min():.4e} m, max: {spacings.max():.4e} m."
             )
 
-        return float(spacings[0])
+        pitch = abs(float(spacings[0]))
+        if pitch == 0:
+            raise ValueError("Cannot compute pitch: element positions coincide.")
+        return pitch
 
     @property
     def pitch(self) -> float | None:
@@ -321,6 +385,31 @@ class Probe(ProbeSpec):
         if self.element_width is not None and self.pitch is not None:
             return float(self.pitch - self.element_width)
         return None
+
+
+def _resolve_element_width(probe_geometry, element_width):
+    """Return the element width, inferring it from the probe pitch when not given."""
+    if element_width is not None:
+        return element_width
+    try:
+        geometry = ops.convert_to_numpy(probe_geometry)
+    except (RuntimeError, ValueError, TypeError) as exc:
+        raise ValueError(
+            "Element width is not provided, and automatic inference is not available for "
+            "traced/symbolic probe geometry (for example under JAX JIT or TensorFlow graph "
+            "mode). Please provide `element_width` explicitly in the scan/probe parameters."
+        ) from exc
+
+    try:
+        pitch = Probe.get_pitch(geometry)
+    except (ValueError, IndexError, AttributeError) as exc:
+        raise ValueError(
+            "Element width is not provided and automatic estimation failed from probe "
+            "geometry. Please provide `element_width` explicitly or ensure the probe "
+            "geometry is a 1-D uniformly spaced linear array. "
+            f"Details: {exc}"
+        ) from exc
+    return pitch * 0.9  # 90% of the pitch
 
 
 @probe_registry(name="verasonics_l11_4v")

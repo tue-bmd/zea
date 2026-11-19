@@ -4,7 +4,14 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from zea.io_lib import load_image, load_video, save_video
+from zea.io_lib import (
+    compute_global_palette_by_histogram,
+    load_image,
+    load_video,
+    save_image,
+    save_to_gif,
+    save_video,
+)
 
 from . import DEFAULT_TEST_SEED
 
@@ -52,6 +59,62 @@ def test_load_image_basic(temp_image):
     assert arr.shape == (32, 32)
     arr_rgb = load_image(temp_image, mode="RGB")
     assert arr_rgb.shape == (32, 32, 3)
+
+
+def test_save_image_roundtrip(tmp_path):
+    """save_image writes an RGB image that load_image reads back unchanged."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 3), dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    assert np.array_equal(load_image(path, mode="RGB"), image)
+
+
+@pytest.mark.parametrize("shape", [(16, 24), (16, 24, 1)])
+def test_save_image_grayscale(tmp_path, shape):
+    """A grayscale image saves with or without a trailing channel axis."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, shape, dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    assert np.array_equal(load_image(path, mode="L"), image.reshape(16, 24))
+
+
+def test_save_image_rgba_png_keeps_alpha(tmp_path):
+    """PNG can hold an alpha channel, so RGBA is written through unchanged."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 4), dtype=np.uint8)
+    path = tmp_path / "frame.png"
+
+    save_image(image, path)
+
+    with Image.open(path) as saved:
+        assert saved.mode == "RGBA"
+        assert np.array_equal(np.array(saved), image)
+
+
+def test_save_image_rgba_jpeg_drops_alpha(tmp_path):
+    """JPEG has no alpha channel; PIL raises on RGBA, so the alpha is dropped first."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    image = rng.integers(0, 255, (16, 24, 4), dtype=np.uint8)
+    path = tmp_path / "frame.jpg"
+
+    save_image(image, path)
+
+    with Image.open(path) as saved:
+        assert saved.mode == "RGB"
+        assert saved.size == (24, 16)
+
+
+def test_save_image_unsupported_extension_raises(tmp_path):
+    """An extension that is not an image type is refused up front."""
+    image = np.zeros((4, 4), dtype=np.uint8)
+    with pytest.raises(ValueError, match="Unsupported file extension"):
+        save_image(image, tmp_path / "frame.gif")
 
 
 def test_load_video_gif(temp_gif):
@@ -197,6 +260,33 @@ def test_color_palette(tmp_path):
     assert loaded_with_palette_gif.shape == (n_frames, height, width)
 
 
+def test_global_palette_keeps_exact_colors():
+    """A histogram bin holding a single color is represented by exactly that color."""
+    colors = np.array([[0, 0, 0], [255, 255, 255], [130, 40, 200]], dtype=np.uint8)
+    image = Image.fromarray(np.repeat(colors[None], 4, axis=0))
+
+    palette = compute_global_palette_by_histogram([image], bits_per_channel=5, palette_size=3)
+    entries = np.array(palette.getpalette(), dtype=np.uint8).reshape(-1, 3)[:3]
+
+    assert set(map(tuple, entries.tolist())) == set(map(tuple, colors.tolist()))
+
+
+def test_save_to_gif_keeps_black_black(tmp_path):
+    """A black background stays exactly black with a shared color palette."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    frames = np.zeros((4, 16, 16, 3), dtype=np.uint8)
+    # random foreground so black is not the only color
+    frames[:, 4:12, 4:12] = rng.integers(0, 255, (4, 8, 8, 3), dtype=np.uint8)
+
+    path = tmp_path / "black_background.gif"
+    save_to_gif(frames, path, fps=10, shared_color_palette=True)
+
+    loaded = load_video(path, mode="RGB")
+    background = np.concatenate([loaded[:, :4].ravel(), loaded[:, 12:].ravel()])
+    assert background.max() == 0
+    assert loaded[:, 4:12, 4:12].max() > 0
+
+
 def test_animate_images_parameters_without_extent(tmp_path):
     """animate_images must not raise AttributeError when the parameters object has
     no extent_imshow attribute (e.g. a minimal or mock Parameters object)."""
@@ -215,3 +305,112 @@ def test_animate_images_parameters_without_extent(tmp_path):
         animate_images(images, path=str(path), parameters=MinimalParameters(), interval=100)
     except AttributeError as e:
         pytest.fail(f"animate_images raised AttributeError: {e}")
+
+
+def test_animate_images_invalid_interval_raises(tmp_path):
+    """animate_images must reject a non-positive interval."""
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(2)]
+    path = tmp_path / "anim.gif"
+
+    with pytest.raises(ValueError, match="interval must be a positive integer"):
+        animate_images(images, path=str(path), interval=0)
+
+    with pytest.raises(ValueError, match="interval must be a positive integer"):
+        animate_images(images, path=str(path), interval=-10)
+
+
+def test_animate_images_empty_images_raises(tmp_path):
+    """animate_images must reject an empty sequence of images."""
+    from zea.internal.notebooks import animate_images
+
+    path = tmp_path / "anim.gif"
+
+    with pytest.raises(ValueError, match="images must be a non-empty sequence"):
+        animate_images([], path=str(path))
+
+
+def test_animate_images_unsupported_suffix_raises(tmp_path):
+    """animate_images must reject output paths with an unsupported suffix."""
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(2)]
+    path = tmp_path / "anim.mp4"
+
+    with pytest.raises(ValueError, match="Unsupported output format"):
+        animate_images(images, path=str(path))
+
+
+def test_animate_images_without_parameters(tmp_path):
+    """animate_images must work when no parameters object is given at all
+    (the ``parameters is None`` branch, as opposed to a parameters object that is
+    merely missing ``extent_imshow``)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
+    path = tmp_path / "anim.gif"
+
+    animate_images(images, path=str(path), parameters=None, interval=100)
+
+    assert path.exists()
+
+
+def test_animate_images_parameters_with_extent(tmp_path):
+    """animate_images must use the extent when parameters.extent_imshow is set."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from zea.internal.notebooks import animate_images
+
+    images = [np.zeros((8, 8), dtype=np.uint8) for _ in range(3)]
+    path = tmp_path / "anim.gif"
+
+    class ParametersWithExtent:
+        extent_imshow = np.array([0.0, 1.0, 0.0, 1.0])
+
+    animate_images(images, path=str(path), parameters=ParametersWithExtent(), interval=100)
+
+    assert path.exists()
+
+
+def test_save_video_gif_transparent(tmp_path):
+    """RGBA frames saved with transparent=True keep (binary) transparency."""
+    from zea.io_lib import save_video
+
+    n_frames, height, width = 3, 16, 16
+    frames = np.zeros((n_frames, height, width, 4), dtype=np.uint8)
+    frames[..., 0] = np.linspace(0, 255, width, dtype=np.uint8)  # red gradient
+    frames[..., 1] = np.arange(n_frames, dtype=np.uint8)[:, None, None] * 100  # distinct frames
+    frames[..., 3] = 255
+    frames[:, :, : width // 2, 3] = 0  # left half transparent
+    frames[:, 0, -1, :3] = 0  # opaque black pixel must stay opaque
+
+    for shared_color_palette in (True, False):
+        gif_path = tmp_path / f"test_transparent_{shared_color_palette}.gif"
+        save_video(
+            frames,
+            gif_path,
+            fps=10,
+            transparent=True,
+            shared_color_palette=shared_color_palette,
+        )
+
+        with Image.open(gif_path) as gif:
+            assert gif.n_frames == n_frames
+            for i in range(n_frames):
+                gif.seek(i)
+                alpha = np.array(gif.convert("RGBA"))[..., 3]
+                assert np.all(alpha[:, : width // 2] == 0)
+                assert np.all(alpha[:, width // 2 :] == 255)
+
+
+def test_save_video_gif_transparent_requires_rgba(tmp_path):
+    from zea.io_lib import save_video
+
+    frames = np.zeros((2, 8, 8, 3), dtype=np.uint8)
+    with pytest.raises(ValueError, match="RGBA"):
+        save_video(frames, tmp_path / "rgb.gif", transparent=True)

@@ -6,10 +6,10 @@
 > it is better to not cache the result.
 
 >[!NOTE]
-> It can be useful to inherit custom classes from `zea.core.Object`, as
-> these classes will be serialized properly, just like regular python objects. Otherwise
-> custom classes will not be recognized as equal if they have the same attributes by the
-> caching mechanism.
+> Custom classes can opt into a content-based cache key by exposing a `serialized`
+> property (as `zea.Parameters` does): it is used in place of their default pickle
+> representation, which otherwise depends on attribute insertion order and includes
+> any derived state the object caches.
 
 >[!NOTE]
 > For large experiments, it can be recommended to either set a custom cache directory
@@ -22,6 +22,7 @@
 import ast
 import atexit
 import contextlib
+import functools
 import inspect
 import os
 import shutil
@@ -34,6 +35,7 @@ import keras
 
 from zea import log
 from zea.internal.core import hash_elements
+from zea.internal.utils import atomic_write
 
 _DEFAULT_ZEA_CACHE_DIR = Path.home() / ".cache" / "zea"
 
@@ -67,14 +69,19 @@ def cache_disabled():
 
 
 def _make_cache_dir(path: Path):
-    """Try to create the cache directory.
+    """Try to create the cache directory and verify it is writable.
     If it fails, disable the cache and return a temporary directory instead."""
     try:
         path.mkdir(parents=True, exist_ok=True)
+
+        # Raise if the current user cannot actually write into `path`
+        with tempfile.NamedTemporaryFile(dir=path, prefix=".zea_write_test_"):
+            pass
+
         return path
     except Exception as e:
         log.warning(
-            f"Could not create cache directory {ZEA_CACHE_DIR}: {e} \n"
+            f"Could not use cache directory {path}: {e} \n"
             + "Disabling cache globally. Set ZEA_CACHE_DIR to a different directory "
             + "to enable caching again."
         )
@@ -91,12 +98,21 @@ else:
     ZEA_CACHE_DIR = _make_cache_dir(ZEA_CACHE_DIR)
 
 
-_CACHE_DIR = ZEA_CACHE_DIR / "cached_funcs"
-_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+_CACHE_DIR = _make_cache_dir(ZEA_CACHE_DIR / "cached_funcs")
 
 
-def get_function_source(func):
-    """Recursively get the source code of a function and its nested functions."""
+def get_function_source(func, _visited=None):
+    """Recursively get the source code of a function and its nested functions.
+
+    Each function's source is included once, so recursive and mutually recursive
+    functions are supported. Decorated functions (e.g. ``@cache_output``) are unwrapped
+    so their own source is used.
+    """
+    func = inspect.unwrap(func)
+    _visited = set() if _visited is None else _visited
+    if func in _visited:
+        return ""
+    _visited.add(func)
     try:
         source = inspect.getsource(func)
     except OSError:
@@ -123,7 +139,7 @@ def get_function_source(func):
         try:
             called_func = func.__globals__.get(called_func_name)
             if inspect.isfunction(called_func) and called_func.__module__ != "zea.internal.cache":
-                nested_source = get_function_source(called_func)
+                nested_source = get_function_source(called_func, _visited)
                 if nested_source is None:
                     # If any nested function's source cannot be retrieved, do not cache
                     return None
@@ -160,6 +176,22 @@ def generate_cache_key(func, args, kwargs, arg_names):
     return f"{func.__qualname__}_" + hash_elements(key_elements)
 
 
+def _dump_to_cache(result, cache_file: Path, func):
+    """Write `result` to `cache_file`, never failing the call that produced it.
+
+    Writes to a temporary file first and moves it into place, so a crash or a full
+    disk cannot leave a truncated pickle behind that later runs would try to load.
+    """
+    try:
+        with atomic_write(cache_file) as tmp_file:
+            joblib.dump(result, tmp_file)
+    except Exception as e:
+        log.warning(
+            f"Could not cache result for {func.__qualname__} to {cache_file}: {e}. "
+            "Continuing without caching this result."
+        )
+
+
 def cache_output(*arg_names, verbose=False):
     """Decorator to cache function outputs using joblib."""
     assert all(isinstance(arg_name, str) for arg_name in arg_names), (
@@ -169,6 +201,7 @@ def cache_output(*arg_names, verbose=False):
     )
 
     def decorator(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
             if is_cache_disabled():
                 if verbose:
@@ -178,9 +211,9 @@ def cache_output(*arg_names, verbose=False):
                 cache_key = generate_cache_key(func, args, kwargs, arg_names)
             except Exception as e:
                 log.warning(
-                    f"Could not cache result for {func.__qualname__}: {e}. "
-                    "Running the function without caching. "
-                    "Often happens for a function wrapped with jax.jit or tf.function."
+                    f"Could not generate a cache key for {func.__qualname__} "
+                    f"({type(e).__name__}: {e}). Running the function without caching. "
+                    "This is expected when its arguments are traced by jax.jit or tf.function."
                 )
                 return func(*args, **kwargs)
             if cache_key is None:
@@ -193,7 +226,7 @@ def cache_output(*arg_names, verbose=False):
             elif verbose:
                 log.info(f"Running {func.__qualname__} and caching the result to {cache_file}.")
             result = func(*args, **kwargs)
-            joblib.dump(result, cache_file)
+            _dump_to_cache(result, cache_file, func)
             return result
 
         return wrapper

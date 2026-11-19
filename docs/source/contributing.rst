@@ -61,12 +61,20 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          See the :ref:`Docker <docker-information>` section of the installation guide
          for build and run instructions. Images built with ``DEV=true`` (the default)
-         already include the ``dev`` dependency-group (tests, docs and lint tools). If
-         you're in a container built with ``DEV=false``, install it first:
+         already include the ``dev`` dependency-group (tests, docs and lint tools).
+
+         Every shell prints a message of the day ending in the ``uv sync`` command for
+         that image. Use that one rather than copying from here: it names the backend
+         groups the image was built with, and ``uv sync`` removes any group you leave
+         out. Run it whenever ``uv.lock`` changes, after a rebase or a backend bump, to
+         update a running container without rebuilding it.
+
+         On a ``DEV=false`` image the command also has ``--no-default-groups``. Drop that
+         flag to add the ``dev`` group. For ``zeahub/all`` it becomes:
 
          .. code-block:: shell
 
-               pip install -e . --group dev
+               uv sync --group jax-gpu --group torch-gpu --group tf-gpu
                pre-commit install
 
     .. tab-item:: uv
@@ -80,10 +88,17 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
 
          This creates a ``.venv`` with the exact locked dependencies and installs
          ``zea`` itself in **editable** mode, so your changes to the source take
-         effect immediately without reinstalling. This will also install the ``dev`` 
-         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands 
+         effect immediately without reinstalling. This will also install the ``dev``
+         dependency-group, i.e. the ``tests``, ``docs`` and ``lint`` groups. Prefix commands
          with ``uv run`` (e.g. ``uv run pytest``) or activate the environment with
          ``source .venv/bin/activate``.
+
+         Backends are groups too, so add the ones you want — ``cpu`` or ``gpu``, and a
+         single backend is enough to run the test suite:
+
+         .. code-block:: shell
+
+               uv sync --group jax-cpu     # or jax-gpu, torch-cpu, tf-gpu, ...
 
     .. tab-item:: pip
 
@@ -96,8 +111,9 @@ a local environment, use `uv <https://docs.astral.sh/uv/>`_ or ``pip``.
                pip install -e . --group dev
                pre-commit install
 
-For local environments (uv or pip), you also need to install a machine learning
-backend: JAX, PyTorch, or TensorFlow. See the
+The Docker images already come with a machine learning backend. For the uv and ``pip``
+routes you need one of JAX, PyTorch or TensorFlow: with uv use the backend groups shown
+above, with ``pip`` install it yourself — see the
 :ref:`backend installation <backend-installation>` guide.
 
 .. _running-tests:
@@ -138,6 +154,27 @@ require a missing backend with:
 .. code-block:: shell
 
    pytest -m 'not heavy and not notebook' --skip-unavailable-backends
+
+.. dropdown:: Choosing the backend and device
+
+   Tests run on TensorFlow by default. They use one free GPU when one is available and
+   fall back to CPU otherwise. ``KERAS_BACKEND`` is ignored; use these environment
+   variables instead:
+
+   .. code-block:: shell
+
+      # Backend: tensorflow, jax or torch
+      ZEA_TEST_BACKEND=jax pytest -m 'not heavy and not notebook'
+
+      # Device: auto:1 (default), cpu, gpu:0, auto:-1 (all GPUs), ...
+      ZEA_TEST_DEVICE=cpu pytest -m 'not heavy and not notebook'
+
+      # or a specific test file or function, e.g.:
+      ZEA_TEST_BACKEND=jax ZEA_TEST_DEVICE=gpu:0 pytest tests/test_io_lib.py::test_load_video_gif
+
+   Parts of tests that only apply to other backends are skipped and counted in the
+   summary. Cross-backend comparisons always run every installed backend on CPU,
+   whichever backend you pick.
 
 .. dropdown:: Heavy tests
 
@@ -242,6 +279,29 @@ The documentation uses `Sphinx <https://www.sphinx-doc.org/>`_ and generally is 
             raise ValueError("param1 must be non-negative")
          return True
 
+.. _citing-papers:
+
+**Citing papers.** If your contribution implements a method, model, algorithm or
+dataset from a paper, attribute the authors with the ``.. citation::`` directive
+instead of writing the reference out by hand:
+
+1. Add the paper to `docs/source/references.bib
+   <https://github.com/tue-bmd/zea/blob/main/docs/source/references.bib>`_, using a
+   ``<surname><year><first title word>`` key (``paper/paper.bib`` is only for
+   ``zea``'s own citation and the papers-using-``zea`` list).
+2. Cite it from the docstring:
+
+   .. code-block:: rst
+
+      .. citation:: luijten2020adaptive
+
+   Pass several keys at once with ``.. citation:: key1, key2``, and add a note --
+   a link to the reference implementation, say -- as an indented block below.
+3. Build the docs; an unknown key is reported as a warning.
+
+Keep any "this is a ``zea`` implementation" remark in its own ``.. important::``
+block, so the citation block holds nothing but the reference.
+
 The overall structure of the documentation is manually designed, but the API documentation is auto-generated based on the docstrings in the code. To generate the docs locally you can run:
 
 .. code-block:: shell
@@ -257,7 +317,34 @@ The overall structure of the documentation is manually designed, but the API doc
 See the `README.md <https://github.com/tue-bmd/zea/blob/main/docs/README.md>`_ for more information.
 
 
-6. Make a pull request
+.. _changelog-entry:
+
+6. Log your changes
+~~~~~~~~~~~~~~~~~~~
+
+Add a line about your change to the :doc:`changelog` in `docs/source/changelog.rst
+<https://github.com/tue-bmd/zea/blob/main/docs/source/changelog.rst>`_. Put it under the
+**Current** section, in the subsection that fits: **New Features**, **Changed** or **Fixed**.
+The release notes are generated from these entries, so write them for users: what changed and
+how it affects them, in one or two sentences.
+
+- Reference the API with roles, such as ``:class:`zea.ops.Normalize``` or ``:func:`zea.func.vmap```,
+  so the entry links to its documentation.
+- End with the pull request number and your GitHub handle: ``(:gh:`681` by :user:`your-handle`)``.
+  You can add the number once the pull request is open.
+- Start breaking changes with "(Breaking)". Deprecations go under **Changed**, starting with "Deprecate".
+
+.. code-block:: rst
+
+   Fixed
+   ^^^^^
+   - :class:`zea.ops.Normalize` clips its output instead of its input, so results stay within ``output_range`` (:gh:`681` by :user:`tristan-deep`)
+
+A check on each pull request looks for a changelog entry that ends with the pull request number and your handle. Changes that users will not notice,
+such as CI, tooling or refactors, need none: a maintainer labels the pull request
+``skip changelog`` (``dev`` and ``documentation`` work as well).
+
+7. Make a pull request
 ~~~~~~~~~~~~~~~~~~~~~~
 Once your changes are ready and all tests pass, push your branch to your forked repository:
 
@@ -267,20 +354,7 @@ Once your changes are ready and all tests pass, push your branch to your forked 
    git commit -m "Description of your changes"
    git push origin <your_feature_branch_name>
 
-Then, go to the original repository on GitHub and open a Pull Request (PR) from your branch. In your PR description, clearly explain what changes you made and reference any related issues.
-
-.. dropdown:: Example Pull Request Template
-
-   .. code-block:: markdown
-
-      **Title:** [Bug/Feature]: Brief summary of changes
-
-      **Description:**
-      - What changes were made?
-      - Why were these changes made?
-      - How do these changes address the issue or feature request?
-      - Any additional context or references.
-      - How to test the changes.
+Then, go to the original repository on GitHub and open a Pull Request (PR) from your branch. The description starts from a `template <https://github.com/tue-bmd/zea/blob/main/.github/pull_request_template.md>`_: explain what you changed and why as short bullets, reference any related issues, and go through the checklist.
 
 The maintainers will review your PR and may request changes or ask questions. Please respond to feedback and update your PR as needed. Once everything looks good, your changes will be merged!
 
@@ -299,16 +373,59 @@ where we especially welcome contributions. Browse the
 `open issues <https://github.com/tue-bmd/zea/issues>`_ to see what is being
 worked on, or open a new one to propose something new.
 
-Adding notebooks
-~~~~~~~~~~~~~~~~
+Adding an example notebook
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-New tutorial or example notebooks are always welcome! Please add them to the
-`docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_
-directory. Make sure to follow the naming conventions and structure of existing
-notebooks. If you are adding a new tutorial, please also update :doc:`examples`
-to check if your notebook is included. See the `docs README
-<https://github.com/tue-bmd/zea/tree/main/docs#readme>`_ for notebook link
-conventions and how to check the docs for broken links.
+New example notebooks are always welcome! Each one shows up on the
+:doc:`examples` page as a card with a thumbnail and tags.
+
+1. **Add the notebook** to one of the groups in
+   `docs/source/notebooks <https://github.com/tue-bmd/zea/tree/main/docs/source/notebooks>`_.
+   Copy the structure of an existing notebook: a title, the Colab and GitHub
+   badges, ``%pip install zea`` as the first cell, and all cells run in order.
+
+2. **Add tags and a level** to the notebook metadata (*Edit → Edit
+   Notebook Metadata* in Jupyter):
+
+   .. code-block:: json
+
+      "zea": {"tags": ["beamforming", "cardiac"], "level": "beginner"}
+
+   Use lowercase tags, and reuse the ones already on the examples page where
+   possible. The level is ``beginner``, ``intermediate`` or ``advanced``.
+
+3. **Add a thumbnail** at ``docs/_static/thumbnails/<notebook name>.webp``: the
+   image only, without axes, titles or colorbars. Make it from the image array
+   in a scratch cell (don't commit it):
+
+   .. code-block:: python
+
+      import sys
+
+      sys.path.insert(0, "../..")  # docs/source
+      from make_thumbnail import make_thumbnail
+
+      make_thumbnail(image, "my_example", mode="fill")  # rectangular image, cut to 4:3
+      make_thumbnail(image, "my_example", mode="cone")  # sector scan, transparent background
+
+   For ``mode="cone"``, scan convert with ``fill_value=np.nan`` so everything
+   outside the cone becomes transparent.
+
+4. **Check it**: ``pre-commit run --files <notebook>``, then ``make docs-serve``
+   in ``docs/`` to see the card.
+
+To link to an example outside ``zea`` (a blog post or another library's docs),
+add an ``external-example`` to ``docs/source/examples.rst`` with a thumbnail in
+the same folder:
+
+.. code-block:: rst
+
+   .. external-example:: Title of the example
+      :link: https://example.org/the-example
+      :thumbnail: my_external_example.webp
+      :source: Name of the library or blog
+      :tags: beamforming, inverse problems
+      :level: intermediate
 
 Adding to ``zea.models``
 ~~~~~~~~~~~~~~~~~~~~~~~~

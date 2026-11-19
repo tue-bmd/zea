@@ -4,24 +4,29 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Generator
+from unittest.mock import patch
 
 import h5py
+import keras
 import numpy as np
 import pytest
 
 from zea import Parameters
-from zea.data.file import CustomElement, File, validate_file
+from zea.data import spec as spec_module
+from zea.data.file import ChunkedDataset, CustomElement, File, validate_file
 from zea.data.file_operations import (
     _prepare_output_path,
     compound_frames,
     compound_transmits,
     decode_hadamard_file_operation,
     extract_frames_transmits,
+    main,
     resave,
     sum_data,
 )
-from zea.data.spec import Spec
+from zea.data.spec import SINGLE_CHUNK_BYTES, Spec
 
+from ..helpers import is_on_gpu
 from . import generate_dummy_scan, generate_example_dataset
 
 HF_INPUT_PATH = "hf://zeahub/pytest/case_0.hdf5"
@@ -276,6 +281,24 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     data_dict = SimpleNamespace(**_load_data_dict(output_path))
     assert data_dict.raw_data.shape[1] == 1  # Only one transmit should remain
     assert data_dict.aligned_data["values"].shape[1] == 1
+
+
+def test_file_operations_main_dispatches_to_run(tmp_path, monkeypatch):
+    """zea.data.file_operations.main() (``python -m zea.data``) parses argv and runs the
+    selected subcommand. The other CLI tests above shell out, so this is the only one that
+    exercises the in-process entry point."""
+    output_path = tmp_path / "summed_dataset.hdf5"
+    monkeypatch.setattr(
+        "sys.argv", ["zea-data", "sum", "a.hdf5", "b.hdf5", "--output-path", str(output_path)]
+    )
+
+    with patch("zea.data.file_operations.sum_data") as mock_sum:
+        main()
+
+    assert mock_sum.call_count == 1
+    _, kwargs = mock_sum.call_args
+    assert kwargs["input_paths"] == ["a.hdf5", "b.hdf5"]
+    assert kwargs["output_path"] == str(output_path)
 
 
 def test_file_operations_folder_resave(tmp_path):
@@ -752,9 +775,180 @@ def test_decode_hadamard_file_operation(tmp_path):
         decoded = f.data.raw_data[:]
         tx_apodizations = f.scan.tx_apodizations[:]
 
-    np.testing.assert_allclose(
-        decoded, synthetic_aperture_data * hadamard_size, rtol=1e-4, atol=1e-4
-    )
+    # decode_hadamard runs a matmul on the active Keras backend, and on an NVIDIA GPU
+    # that defaults to TF32 (10 mantissa bits, so ~1e-3 relative error) rather than full
+    # float32. The GPU tolerance covers that reduced precision and is still three orders
+    # of magnitude tighter than any genuine decoding error, which would be O(10) on data
+    # of this scale. decode_hadamard gets numpy input from the file, so it runs on the
+    # default device, which is where a fresh tensor lands too.
+    tol = 1e-2 if is_on_gpu(keras.ops.zeros(())) else 1e-5
+    np.testing.assert_allclose(decoded, synthetic_aperture_data * hadamard_size, rtol=tol, atol=tol)
     # Each decoded transmit activates a single participating channel, so the decoded
     # apodizations form an identity over the participating (first ``hadamard_size``) channels.
     np.testing.assert_array_equal(tx_apodizations, np.eye(hadamard_size, n_el, dtype=np.float32))
+
+
+class TestStreamingOperations:
+    """Operations that rewrite a file do so slab by slab, never loading it whole.
+
+    The results must be exactly what building the spec in memory produces, whatever slab
+    size the data happens to be cut into.
+    """
+
+    @pytest.fixture
+    def input_path(self, tmp_path):
+        """A file whose raw_data is over SINGLE_CHUNK_BYTES, so it is loaded lazily."""
+        path = tmp_path / "streaming_input.hdf5"
+        generate_example_dataset(
+            path,
+            add_optional_dtypes=True,
+            image_dtype=np.float32,
+            n_frames=4,
+            n_tx=3,
+            n_ax=2048,
+            n_el=16,
+            grid_size_z=64,
+            grid_size_x=64,
+        )
+        with File(path) as f:
+            assert f["data/raw_data"].nbytes > SINGLE_CHUNK_BYTES
+        return path
+
+    @staticmethod
+    def _datasets(path) -> dict:
+        """Every dataset in the file, keyed by its full path."""
+        datasets = {}
+        with h5py.File(path, "r") as f:
+            f.visititems(
+                lambda name, obj: (
+                    datasets.__setitem__(name, obj[()]) if isinstance(obj, h5py.Dataset) else None
+                )
+            )
+        return datasets
+
+    @staticmethod
+    def _assert_files_equal(expected, actual):
+        """Assert two files hold the same datasets, with the same contents."""
+        left, right = (
+            TestStreamingOperations._datasets(expected),
+            TestStreamingOperations._datasets(actual),
+        )
+        assert set(left) == set(right)
+        for key in left:
+            np.testing.assert_array_equal(left[key], right[key], err_msg=key)
+
+    @pytest.fixture
+    def reads(self, monkeypatch):
+        """Record the size of every read that goes through a lazy dataset."""
+        recorded: list[tuple[str, int]] = []
+        original = ChunkedDataset.__getitem__
+
+        def record(self, selection):
+            values = original(self, selection)
+            recorded.append((self._dset.name, np.asarray(values).nbytes))
+            return values
+
+        monkeypatch.setattr(ChunkedDataset, "__getitem__", record)
+        return recorded
+
+    def test_resave_matches_an_in_memory_resave(self, input_path, tmp_path):
+        """The streamed copy is byte-for-byte what holding the whole spec in RAM gives."""
+        with File(input_path) as f:
+            eager = f._to_file_spec()
+        eager.save(str(tmp_path / "eager.hdf5"))
+
+        resave(input_path, tmp_path / "streamed.hdf5")
+
+        self._assert_files_equal(tmp_path / "eager.hdf5", tmp_path / "streamed.hdf5")
+
+    def test_resave_never_reads_more_than_one_slab(self, input_path, tmp_path, reads, monkeypatch):
+        """Peak memory is one slab: no single read pulls in more than the budget."""
+        monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 64 * 1024)
+
+        resave(input_path, tmp_path / "streamed.hdf5")
+
+        raw_data_reads = [size for name, size in reads if name.endswith("raw_data")]
+        assert max(raw_data_reads) <= 64 * 1024
+        assert sum(raw_data_reads) > 64 * 1024, "the test file should need several slabs"
+
+    @pytest.mark.parametrize("max_slab_bytes", [4096, 64 * 1024, 64 << 20])
+    def test_results_do_not_depend_on_the_slab_size(
+        self, input_path, tmp_path, monkeypatch, max_slab_bytes
+    ):
+        """How an array is cut up is an implementation detail, not part of the result."""
+        monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 64 << 20)
+        reference = tmp_path / "reference.hdf5"
+        resave(input_path, reference)
+        compound_frames(input_path, tmp_path / "frames_reference.hdf5")
+        compound_transmits(input_path, tmp_path / "transmits_reference.hdf5")
+        extract_frames_transmits(
+            input_path, tmp_path / "extract_reference.hdf5", frame_indices=[1, 3]
+        )
+
+        monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", max_slab_bytes)
+        resave(input_path, tmp_path / "out.hdf5")
+        compound_frames(input_path, tmp_path / "frames.hdf5")
+        compound_transmits(input_path, tmp_path / "transmits.hdf5")
+        extract_frames_transmits(input_path, tmp_path / "extract.hdf5", frame_indices=[1, 3])
+
+        self._assert_files_equal(reference, tmp_path / "out.hdf5")
+        self._assert_files_equal(tmp_path / "frames_reference.hdf5", tmp_path / "frames.hdf5")
+        self._assert_files_equal(tmp_path / "transmits_reference.hdf5", tmp_path / "transmits.hdf5")
+        self._assert_files_equal(tmp_path / "extract_reference.hdf5", tmp_path / "extract.hdf5")
+
+    def test_extract_reads_only_the_requested_frames(self, input_path, tmp_path, reads):
+        """Extracting costs the size of the extraction, not that of the input."""
+        extract_frames_transmits(input_path, tmp_path / "extracted.hdf5", frame_indices=[1])
+
+        with File(input_path) as f:
+            frame_bytes = f["data/raw_data"].nbytes / f["data/raw_data"].shape[0]
+        raw_data_read = sum(size for name, size in reads if name.endswith("raw_data"))
+        assert raw_data_read == frame_bytes, "only the extracted frame should be read"
+
+    def test_extract_selects_the_requested_data(self, input_path, tmp_path):
+        """Partial reads still honour an out-of-order selection, HDF5 or not."""
+        with File(input_path) as f:
+            # h5py only takes increasing selections; index the loaded array instead.
+            raw_data = f["data/raw_data"][()]
+        expected = raw_data[[3, 1]][:, [0, 2]]
+
+        extract_frames_transmits(
+            input_path,
+            tmp_path / "extracted.hdf5",
+            frame_indices=[3, 1],
+            transmit_indices=[0, 2],
+        )
+
+        with File(tmp_path / "extracted.hdf5") as f:
+            np.testing.assert_array_equal(f["data/raw_data"][()], expected)
+
+    def test_compound_frames_averages_every_frame(self, input_path, tmp_path, monkeypatch):
+        """A frame average accumulated over slabs is still the average of all frames."""
+        monkeypatch.setattr(spec_module, "MAX_SLAB_BYTES", 4096)
+        with File(input_path) as f:
+            expected = f["data/raw_data"][()].mean(axis=0, keepdims=True)
+
+        compound_frames(input_path, tmp_path / "compounded.hdf5")
+
+        with File(tmp_path / "compounded.hdf5") as f:
+            np.testing.assert_allclose(f["data/raw_data"][()], expected, rtol=1e-6)
+
+    def test_lazy_spec_keeps_data_on_disk(self, input_path):
+        """The lazy spec reports shapes and dtypes without reading the arrays."""
+        with File(input_path) as f:
+            spec = f._to_file_spec(lazy=True)
+            raw_data = spec.tracks[0].data.raw_data
+            assert isinstance(raw_data, ChunkedDataset)
+            assert raw_data.shape == f["data/raw_data"].shape
+            # Scan parameters are small and always read, so specs can compute with them.
+            assert isinstance(spec.tracks[0].scan.t0_delays, np.ndarray)
+
+    @pytest.mark.parametrize(
+        "operation", [resave, compound_frames, compound_transmits, extract_frames_transmits]
+    )
+    def test_writing_back_over_the_input_is_refused(self, input_path, operation):
+        """The input is read while the output is written, so in place would lose the data."""
+        with pytest.raises(ValueError, match="is the input file"):
+            operation(input_path, input_path, overwrite=True)
+        assert input_path.exists()
+        validate_file(input_path)

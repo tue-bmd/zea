@@ -13,30 +13,57 @@ from . import DEFAULT_TEST_SEED, backend_equality_check
 from .backend_utils import runs_on
 
 
-@pytest.mark.tensorflow
+@backend_equality_check(decimal=3)
 def test_smsle():
     """Test SMSLE loss function"""
-    from zea.backend.tensorflow.losses import SMSLE
-
-    # Create random y_true and y_pred data
     rng = np.random.default_rng(DEFAULT_TEST_SEED)
-    y_true = rng.standard_normal((1, 11, 128, 512, 2)).astype(np.float32)
-    y_pred = rng.standard_normal((1, 11, 128, 512, 2)).astype(np.float32)
+    y_true = rng.standard_normal((2, 32, 32, 1)).astype(np.float32)
+    y_pred = rng.standard_normal((2, 32, 32, 1)).astype(np.float32)
 
-    # Calculate SMSLE loss
-    smsle = SMSLE()
-    loss = smsle(y_true, y_pred)
+    loss = metrics.smsle(y_true, y_pred)
 
-    # Check if loss is a scalar
+    # Loss reduces to a scalar, is non-negative, and is zero for identical inputs
     assert loss.shape == ()
+    assert float(loss) > 0
+    assert float(metrics.smsle(y_true, y_true)) == pytest.approx(0.0, abs=1e-5)
+
+    # The metric is scale invariant: both inputs are normalized by their own maximum
+    np.testing.assert_allclose(
+        ops.convert_to_numpy(metrics.smsle(y_true * 10, y_pred)),
+        ops.convert_to_numpy(loss),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    # Sign matters: flipping the sign of the prediction changes the loss
+    assert float(metrics.smsle(y_true, -y_true)) > 0
+
+    # A smaller dynamic range compresses the errors, so the loss must not grow
+    assert float(metrics.smsle(y_true, y_pred, dynamic_range=20)) < float(loss)
+
+    return loss
+
+
+@pytest.fixture(scope="module")
+def ultrapips_preset(tmp_path_factory):
+    """Local UltraPIPS preset with random weights, so no (gated) download is needed."""
+    from zea.models.ultrapips import UltraPIPS
+
+    model = UltraPIPS()
+    model.build()
+    preset = tmp_path_factory.mktemp("ultrapips")
+    model.save_to_preset(str(preset))
+    return str(preset)
 
 
 @pytest.mark.parametrize("metric_name", metrics_registry.registered_names())
 @backend_equality_check(decimal=3)
-def test_metrics(metric_name):
+def test_metrics(metric_name, ultrapips_preset):
     """Test all losses and metrics.
     Most metrics do not have a batch axis, so we test with single images."""
-    if metric_name == "lpips":
+    if metric_name == "ultrapips":
+        metric = metrics.get_metric(metric_name, image_range=[0, 255], preset=ultrapips_preset)
+    elif metric_name == "lpips":
         metric = metrics.get_metric(metric_name, image_range=[0, 255])
     else:
         metric = metrics.get_metric(metric_name)
@@ -55,17 +82,8 @@ def test_metrics(metric_name):
 
     assert metric_value.shape == (), f"Metric {metric_name} did not return a scalar value"
 
-    # Regression test against TensorFlow implementations for SSIM and PSNR
-    if metric_name == "ssim" and runs_on("tensorflow"):
-        import tensorflow as tf
-
-        expected_value = tf.image.ssim(
-            ops.convert_to_numpy(y_true),
-            ops.convert_to_numpy(y_pred),
-            max_val=255.0,
-        )
-        np.testing.assert_allclose(metric_value, expected_value, rtol=1e-5, atol=1e-5)
-    elif metric_name == "psnr" and runs_on("tensorflow"):
+    # Regression test against the TensorFlow implementation of PSNR
+    if metric_name == "psnr" and runs_on("tensorflow"):
         import tensorflow as tf
 
         expected_value = tf.image.psnr(
@@ -103,6 +121,31 @@ def test_metrics_class():
 
     # Compare backends for a single metric
     return results_no_avg["mse"]
+
+
+def test_metrics_class_image_range():
+    """Metrics class gives the same results for the same images in a different image_range."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.uniform(-1, 1, (2, 32, 32, 1)).astype(np.float32)
+    y_pred = np.clip(y_true + 0.2 * rng.normal(size=y_true.shape), -1, 1).astype(np.float32)
+
+    METRIC_NAMES = ["mse", "psnr", "lpips"]
+    # clip=True is a no-op here (data within range), but also covers the clipping branch
+    results = metrics.Metrics(METRIC_NAMES, [-1, 1], clip=True)(
+        y_true, y_pred, average_batches=False
+    )
+    results_255 = metrics.Metrics(METRIC_NAMES, [0, 255])(
+        (y_true + 1) * 127.5, (y_pred + 1) * 127.5, average_batches=False
+    )
+
+    for name in METRIC_NAMES:
+        np.testing.assert_allclose(
+            results[name],
+            results_255[name],
+            rtol=1e-4,
+            atol=1e-4,
+            err_msg=f"Metric {name} depends on image_range",
+        )
 
 
 @backend_equality_check(decimal=2)
@@ -167,3 +210,37 @@ def test_sector_reweight_image():
     expected_reweighting_per_depth = np.pi  # (180 / 360) * 2 * pi = pi
     expected_result = cube_of_ones * expected_depths[:, None] * expected_reweighting_per_depth
     assert np.all(expected_result == reweighted_cube)
+
+
+@backend_equality_check(decimal=4)
+def test_ssim():
+    """Test the properties SSIM should satisfy, on single images and on batches."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.uniform(0, 1, (3, 32, 32, 1)).astype(np.float32)
+    y_pred = rng.uniform(0, 1, (3, 32, 32, 1)).astype(np.float32)
+
+    def ssim(a, b, max_val=1.0):
+        return ops.convert_to_numpy(metrics.ssim(a, b, max_val=max_val))
+
+    # One value per image for a batch, a scalar for a single image
+    value = ssim(y_true, y_pred)
+    assert value.shape == (3,)
+    assert ssim(y_true[0], y_pred[0]).shape == ()
+
+    # Bounded by 1, and exactly 1 for identical images
+    assert np.all(value <= 1.0)
+    np.testing.assert_allclose(ssim(y_true, y_true), np.ones(3), rtol=1e-5, atol=1e-5)
+
+    # Symmetric in its arguments
+    np.testing.assert_allclose(ssim(y_pred, y_true), value, rtol=1e-5, atol=1e-5)
+
+    # Invariant to the scale of the inputs, as long as max_val scales along
+    np.testing.assert_allclose(ssim(y_true * 255, y_pred * 255, 255.0), value, rtol=1e-4, atol=1e-4)
+
+    # Decreases as more noise is added
+    mild = ssim(y_true, y_true + rng.normal(0, 0.05, y_true.shape).astype(np.float32))
+    severe = ssim(y_true, y_true + rng.normal(0, 0.3, y_true.shape).astype(np.float32))
+    assert np.all(mild > severe)
+    assert np.all(severe > value)  # noise still beats an unrelated image
+
+    return value

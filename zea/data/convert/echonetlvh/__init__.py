@@ -33,9 +33,10 @@ from tqdm import tqdm
 
 from zea import File, log
 from zea.backend import jit
-from zea.data.convert.utils import load_avi, unzip
+from zea.data.convert.utils import load_avi, unzip_beside
 from zea.display import cartesian_to_polar_matrix, polar_to_cartesian_matrix
 from zea.func.tensor import vmap
+from zea.internal.utils import atomic_write
 from zea.tools.fit_scan_cone import (
     _load_first_frame,
     crop_and_center_cone,
@@ -312,9 +313,7 @@ def overwrite_splits(csv_path: Path, rejection_path=None):
     with open(rejection_path) as f:
         rejected_hashes = [line.strip() for line in f]
 
-    # Write to a temp dir on the same filesystem so the final replace is atomic.
-    with tempfile.TemporaryDirectory(dir=csv_path.parent) as tmp_dir:
-        temp_path = Path(tmp_dir) / "MeasurementsList_temp.csv"
+    with atomic_write(csv_path) as temp_path:
         rejection_counter = 0
         with (
             csv_path.open("r", newline="", encoding="utf-8") as infile,
@@ -333,7 +332,6 @@ def overwrite_splits(csv_path: Path, rejection_path=None):
                 assert rejection_counter == expected_num_rejections, (
                     f"Expected {expected_num_rejections} rejections, but applied only {rejection_counter}."
                 )
-        temp_path.replace(csv_path)
     log.info(f"Applied {rejection_counter} rejections to {csv_path}")
 
 
@@ -867,9 +865,7 @@ def convert_echonetlvh(
 
     # Check if unzip is needed
     if src.suffix == ".zip":
-        tmp_dir = dst / "unzipped_original_files"
-        tmp_dir.mkdir(exist_ok=True)
-        src = unzip(src, tmp_dir)
+        src = unzip_beside(src)
 
     # Check the required files exist
     for folder in ["Batch1", "Batch2", "Batch3", "Batch4"]:

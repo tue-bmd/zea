@@ -2,13 +2,14 @@
 
 import os
 import tempfile
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from zea.data.file import File
 from zea.internal.registry import probe_registry
-from zea.probes import Probe
+from zea.probes import Probe, _resolve_element_width
 
 
 @pytest.mark.parametrize("probe_name", probe_registry.registered_names())
@@ -79,6 +80,8 @@ def test_probe_repr():
     assert "\n" not in r
     assert "name=" in r
     assert "MHz" in r
+    assert "element_width=" in r
+    assert "pitch=" not in r
 
 
 def test_file_create_probe_wrong_type():
@@ -120,8 +123,42 @@ def test_pitch_derived_from_probe_geometry():
         _ = probe.pitch
 
 
+def test_pitch_positive_for_descending_geometry():
+    """Elements ordered by descending x still give a positive pitch."""
+    pg = np.zeros((4, 3), dtype=np.float32)
+    pg[:, 0] = np.arange(4)[::-1] * 0.3e-3
+    assert Probe.get_pitch(pg) == pytest.approx(0.3e-3, rel=1e-4)
+
+
+def test_pitch_rejects_coinciding_elements():
+    """Coinciding element positions have no pitch."""
+    with pytest.raises(ValueError, match="element positions coincide"):
+        Probe.get_pitch(np.zeros((4, 3), dtype=np.float32))
+
+
+def test_resolve_element_width():
+    """An explicit element width is returned as is; otherwise 90% of the pitch."""
+    pg = np.zeros((4, 3), dtype=np.float32)
+    pg[:, 0] = np.arange(4) * 0.3e-3
+    assert _resolve_element_width(pg, 1e-3) == 1e-3
+    assert _resolve_element_width(pg, None) == pytest.approx(0.27e-3, rel=1e-4)
+
+
+def test_resolve_element_width_invalid_geometry():
+    """Inference from a geometry without a pitch raises a helpful error."""
+    with pytest.raises(ValueError, match="automatic estimation failed"):
+        _resolve_element_width(np.zeros((1, 3), dtype=np.float32), None)
+
+
+def test_resolve_element_width_unconvertible_geometry():
+    """Inference from geometry that cannot be converted to numpy raises a helpful error."""
+    with patch("zea.probes.ops.convert_to_numpy", side_effect=RuntimeError("traced")):
+        with pytest.raises(ValueError, match="traced/symbolic probe geometry"):
+            _resolve_element_width(np.zeros((4, 3), dtype=np.float32), None)
+
+
 def test_verasonics_c5_2v_curved_probe():
-    """The C5-2v built-in is a 128-element convex arc (curved, y=0, apex at +z)."""
+    """The C5-2v built-in is a 128-element convex arc (curved, y=0, facing +z)."""
     from zea.probes import create_curved_probe_geometry
 
     probe = Probe.from_name("verasonics_c5_2v")
@@ -132,7 +169,7 @@ def test_verasonics_c5_2v_curved_probe():
     # Imaging plane is x-z; the array is genuinely curved (z varies), not flat.
     assert np.allclose(pg[:, 1], 0.0)
     assert np.ptp(pg[:, 2]) > 1e-3
-    # Apex element faces +z (z ~= 0); peripheral elements curve back toward -z.
+    # The middle of the array sits at z ~= 0; peripheral elements curve back toward -z.
     assert pg[:, 2].max() == pytest.approx(0.0, abs=1e-4)
     assert pg[:, 2].min() < 0.0
     # Arc spacing (pitch) is uniform at 0.508 mm.
@@ -142,6 +179,48 @@ def test_verasonics_c5_2v_curved_probe():
     # The helper reproduces the same geometry from (n_el, pitch, radius).
     regenerated = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
     assert np.allclose(pg, regenerated)
+
+
+@pytest.mark.parametrize(
+    "n_el, pitch, radius",
+    [
+        (128, 0.508e-3, 49.57e-3),  # C5-2v
+        (192, 0.30e-3, 60.0e-3),  # more elements, tighter pitch
+        (64, 0.50e-3, 20.0e-3),  # short, strongly curved array
+        (128, 0.30e-3, 1.0),  # nearly flat: z barely varies over the aperture
+    ],
+)
+def test_fit_curved_probe_radius(n_el, pitch, radius):
+    """fit_curved_probe_radius is the inverse of create_curved_probe_geometry."""
+    from zea.probes import create_curved_probe_geometry, fit_curved_probe_radius
+
+    pg = create_curved_probe_geometry(n_el=n_el, pitch=pitch, radius=radius)
+    assert fit_curved_probe_radius(pg) == pytest.approx(radius, rel=1e-5)
+
+
+def test_fit_curved_probe_radius_on_builtin_probe():
+    """The fit recovers the C5-2v's documented radius from the shipped geometry."""
+    from zea.probes import fit_curved_probe_radius
+
+    probe = Probe.from_name("verasonics_c5_2v")
+    assert fit_curved_probe_radius(np.asarray(probe.probe_geometry)) == pytest.approx(
+        49.57e-3, rel=1e-5
+    )
+
+
+def test_fit_curved_probe_radius_errors():
+    """fit_curved_probe_radius raises on empty, flat, or off-frame geometry."""
+    from zea.probes import create_curved_probe_geometry, fit_curved_probe_radius
+
+    flat = np.zeros((64, 3), dtype=np.float32)
+    flat[:, 0] = np.arange(64) * 0.3e-3
+
+    translated = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
+    translated[:, 0] += 1e-3  # off zea's curved-probe frame, but still on *a* circle
+
+    for geometry in (np.zeros((0, 3), dtype=np.float32), flat, translated):
+        with pytest.raises(ValueError, match="do not lie on an arc"):
+            fit_curved_probe_radius(geometry)
 
 
 def test_verasonics_p4_2v_phased_probe():

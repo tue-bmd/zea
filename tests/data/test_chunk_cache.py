@@ -24,8 +24,10 @@ class TestGetPut:
     def test_roundtrip(self, root):
         cache = ChunkCache("deadbeef", root)
         assert cache.get(0, 4) is None
+        assert not cache.contains(0, 4)
         cache.put(0, 4, b"data")
         assert cache.get(0, 4) == b"data"
+        assert cache.contains(0, 4) and not cache.contains(0, 5)
 
     def test_offset_and_size_are_both_part_of_the_key(self, root):
         cache = ChunkCache("deadbeef", root)

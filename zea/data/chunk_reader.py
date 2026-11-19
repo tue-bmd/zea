@@ -27,17 +27,28 @@ Two details carry most of the win and are easy to lose in a refactor:
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import logging
 import os
+import random
+import re
 import threading
+import warnings
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Callable, Sequence, cast
+from typing import TYPE_CHECKING, Any, Callable, Protocol, Sequence, cast
 
 import h5py
 import numpy as np
+
+from zea.data.chunk_cache import _count_network_bytes
+
+if TYPE_CHECKING:
+    from zea.data.hf_remote import SignedURL
 
 #: Called with the byte size of each chunk as it arrives. Runs on worker threads.
 Ticker = Callable[[int], None] | None
@@ -55,16 +66,255 @@ SHUFFLE = 2
 DECODABLE = (BLOSC, LZ4, ZSTD, GZIP, SHUFFLE)
 
 
-# Reads below this are served by h5py: the thread hand-off costs more than it saves.
+# Local reads below this are served by h5py: the thread hand-off costs more than it saves.
+# Remote reads below this go through the file's block cache (see Fetcher.fetch_small), not
+# through h5py, which would fetch serially and under its global lock.
 MIN_BYTES = 1 << 20  # 1 MiB
 
 # Ceiling on compressed bytes held in memory at once. Bounded by bytes and not by chunk
-# *count*, because chunk sizes vary hugely across files (12 MB to 166 MB).
+# *count*, because chunk sizes vary hugely across files (12 MB to 166 MB). Merged requests
+# (see _merge) download at most as many gap bytes as chunk bytes, so at most twice this.
 MAX_BYTES_IN_FLIGHT = 512 << 20  # 512 MiB
 
 # Decode threads. Blosc and zlib release the GIL, so these scale with cores; but the work
 # is memory-bandwidth-bound long before it is core-bound, hence the cap.
 MAX_WORKERS = min(16, (os.cpu_count() or 4))
+
+#: Statuses worth another attempt at a range request.
+RETRY_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+#: Attempts after the first, per range request.
+MAX_RETRIES = 5
+
+#: Backoff bounds in seconds. Doubles per attempt up to the cap, unless Hugging Face says how
+#: long to wait. Matches huggingface_hub's defaults.
+BASE_BACKOFF = 1.0
+MAX_BACKOFF = 8.0
+
+
+#: Range requests in flight at once, across every fetcher sharing fsspec's event loop, i.e.
+#: per process (``ZEA_MAX_CONCURRENT_REQUESTS``). Streamed reads go to the CDN, which is not
+#: rate limited, so this only bounds connections and memory (at most this many merged
+#: requests of up to :data:`MERGE_MAX` each). Measured with five streaming dataloaders in one
+#: process: 16 gave ~37 MB/s, 32 to 128 gave ~45-50 MB/s.
+def _max_concurrent_requests(default: int = 64) -> int:
+    """``ZEA_MAX_CONCURRENT_REQUESTS``, or ``default`` if unset or not a positive integer.
+
+    Zero must not get through: it would make a semaphore no request can ever acquire. Warns
+    with :mod:`warnings`, as ``zea.log`` cannot be imported yet when this module loads.
+    """
+    value = os.environ.get("ZEA_MAX_CONCURRENT_REQUESTS")
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        parsed = 0
+    if parsed < 1:
+        warnings.warn(
+            f"Ignoring ZEA_MAX_CONCURRENT_REQUESTS={value!r}: expected a positive integer. "
+            f"Using {default}.",
+            stacklevel=2,
+        )
+        return default
+    return parsed
+
+
+MAX_CONCURRENT_REQUESTS = _max_concurrent_requests()
+
+#: Merge ranges into one request when the gap between them is at most this many bytes,
+#: and the request then downloads no more gap bytes than requested ones. The chunks of a
+#: frame are stored almost back to back, so a frame (or a block of consecutive frames)
+#: becomes one request instead of one per chunk, while a sparse read is not inflated.
+MERGE_GAP = 1 << 20  # 1 MiB
+
+#: Maximum size of a merged request, so large reads are still split over a few parallel
+#: requests.
+MERGE_MAX = 32 << 20  # 32 MiB
+
+_limiters: "dict[Any, asyncio.Semaphore]" = {}
+_limiters_lock = threading.Lock()
+
+
+@functools.cache
+def _transient_errors() -> tuple[type, ...]:
+    """Failures worth another attempt that never carried a status: the connection itself.
+
+    A socket reset, dropped or timed out mid-body fails a read as surely as a 503, and grows
+    likelier with every chunk streamed. ``ClientConnectionError`` is aiohttp's umbrella over
+    reset, disconnect, connector and server-timeout; ``ClientPayloadError`` is a body that
+    stopped arriving mid-transfer.
+    """
+    types: list[type] = [ConnectionError, TimeoutError]  # stdlib, for a non-aiohttp backend
+    try:
+        import aiohttp
+    except ImportError:
+        return tuple(types)
+    return (*types, aiohttp.ClientConnectionError, aiohttp.ClientPayloadError)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Whether this failure is worth another attempt.
+
+    Matched off the exception rather than caught at the call site: which one fsspec's HTTP
+    filesystem raises is fsspec's business, and aiohttp is fsspec's dependency, not one zea
+    declares. Retrying is safe whatever the cause — a range request is an idempotent GET.
+
+    A status outside :data:`RETRY_STATUS` is an answer, not a stall, and never retried: fsspec
+    turns 404 and 403 into ``FileNotFoundError``/``PermissionError``, and retrying those would
+    hang on for a file that is simply not there.
+    """
+    status = getattr(exc, "status", None)
+    if status is not None:
+        return status in RETRY_STATUS
+    return isinstance(exc, _transient_errors())
+
+
+def _is_refused(exc: BaseException) -> bool:
+    """Whether the server rejected the URL itself, e.g. because a signed URL expired.
+
+    fsspec raises ``FileNotFoundError`` for a 404 and keeps the status on other errors.
+    """
+    from zea.data.hf_remote import REFUSED_STATUS
+
+    if isinstance(exc, (FileNotFoundError, PermissionError)):
+        return True
+    return getattr(exc, "status", None) in REFUSED_STATUS
+
+
+class _Location(Protocol):
+    """Where a :class:`HTTPFetcher` sends its requests: :class:`_FixedURL` or ``SignedURL``."""
+
+    def current(self) -> tuple[str, dict[str, str]]: ...
+
+    def refresh(self, stale_url: str) -> bool: ...
+
+
+class _RedactQueryStrings(logging.Filter):
+    """Strip query strings from URLs in log records: they carry the signature of a CDN URL."""
+
+    _url = re.compile(r"(https?://[^\s?'\"]+)\?[^\s'\"]*")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = self._url.sub(r"\1?<redacted>", message)
+        if redacted != message:
+            record.msg, record.args = redacted, ()
+        return True
+
+
+class RemoteReadError(OSError):
+    """A range request that still failed after all retries.
+
+    It subclasses ``OSError`` so that code which reopens a file on ``OSError`` (such as
+    :class:`~zea.data.dataloader.H5DataSource`) also recovers from network failures.
+    Any signed URL in the message is redacted.
+    """
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+def _as_os_error(exc: Exception) -> OSError:
+    """Convert a failed range request into an ``OSError`` that is safe to show.
+
+    Signed URLs are credentials, so query strings are removed from the message. A 404
+    stays a ``FileNotFoundError``, and errors that are not ``OSError``s (like aiohttp's) or
+    are timeouts become a :class:`RemoteReadError`. Other ``OSError``s pass through as is.
+    """
+    message = str(exc)
+    redacted = _RedactQueryStrings._url.sub(r"\1?<redacted>", message)
+    if redacted == message and isinstance(exc, OSError) and not isinstance(exc, TimeoutError):
+        return exc
+    if isinstance(exc, FileNotFoundError):
+        error = FileNotFoundError(redacted)
+    else:
+        error = RemoteReadError(f"{type(exc).__name__}: {redacted}", getattr(exc, "status", None))
+    # Hide the original from the traceback only if it shows the signed URL.
+    error.__suppress_context__ = redacted != message
+    return error
+
+
+_redaction_lock = threading.Lock()
+
+
+def _redact_fsspec_http_logs() -> None:
+    """Keep signed URLs out of fsspec's HTTP debug log, which logs every requested URL."""
+    logger = logging.getLogger("fsspec.http")
+    with _redaction_lock:
+        if not any(isinstance(f, _RedactQueryStrings) for f in logger.filters):
+            logger.addFilter(_RedactQueryStrings())
+
+
+class _FixedURL:
+    """A plain URL that is never refreshed."""
+
+    def __init__(self, url: str, headers: dict[str, str]):
+        self._url = url
+        self._headers = headers
+
+    def current(self) -> tuple[str, dict[str, str]]:
+        return self._url, self._headers
+
+    def refresh(self, stale_url: str) -> bool:
+        return False
+
+
+def _merge(misses: Sequence[tuple[int, int, int]]) -> list[tuple[int, int, list]]:
+    """Group ``(index, offset, size)`` ranges into ``(start, end, members)`` requests.
+
+    A range joins the previous request if the gap is at most :data:`MERGE_GAP`, the request
+    stays within :data:`MERGE_MAX`, and it downloads no more gap bytes than range bytes.
+    Overlapping ranges are allowed.
+    """
+    spans: list[tuple[int, int, list]] = []
+    wanted = gaps = 0  # range and gap bytes of the last request
+    for miss in sorted(misses, key=lambda m: m[1]):
+        _, offset, size = miss
+        if spans:
+            start, end, members = spans[-1]
+            gap = max(0, offset - end)
+            if (
+                offset - end <= MERGE_GAP
+                and max(end, offset + size) - start <= MERGE_MAX
+                and gaps + gap <= wanted + size
+            ):
+                spans[-1] = (start, max(end, offset + size), members + [miss])
+                wanted, gaps = wanted + size, gaps + gap
+                continue
+        spans.append((offset, offset + size, [miss]))
+        wanted, gaps = size, 0
+    return spans
+
+
+def _limiter(loop) -> asyncio.Semaphore:
+    """The semaphore bounding the requests in flight on ``loop``.
+
+    Global rather than per read, because it is all dataloader threads together that open
+    connections and hold bytes in memory. fsspec keeps a single event loop for all its async
+    filesystems, so in practice every fetcher shares this one semaphore.
+    """
+    with _limiters_lock:
+        semaphore = _limiters.get(loop)
+        if semaphore is None:
+            semaphore = _limiters[loop] = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+        return semaphore
+
+
+def _retry_delay(attempt: int, headers=None) -> float:
+    """Seconds to wait before retrying ``attempt`` (0-based), per ``Retry-After`` if sent.
+
+    Jittered rather than a flat doubling: the throttled requests went out together, so a fixed
+    backoff would send them back together, into the same limit.
+    """
+    after = (headers or {}).get("Retry-After")
+    if after is not None:
+        try:
+            return min(float(after), MAX_BACKOFF)
+        except (TypeError, ValueError):
+            pass  # the HTTP-date form; fall through to the exponential backoff
+    return random.uniform(0, min(BASE_BACKOFF * 2**attempt, MAX_BACKOFF))
 
 
 class _Unsupported(Exception):
@@ -101,6 +351,12 @@ class Fetcher:
         thread-safe.
         """
         raise NotImplementedError
+
+    def fetch_small(
+        self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None
+    ) -> list[bytes]:
+        """:meth:`fetch` for a read below :data:`MIN_BYTES`. See :meth:`HTTPFetcher.fetch_small`."""
+        return self.fetch(ranges, on_bytes)
 
     def pending_bytes(self, ranges: Sequence[tuple[int, int]]) -> int:
         """Bytes of ``ranges`` that :meth:`fetch` would actually have to stream or download.
@@ -172,21 +428,76 @@ class HTTPFetcher(Fetcher):
     does its own batching and periodically stalls (measured at 20 ms/request: 32 ranges in
     1.06 s against 0.06 s here) — and it is what makes per-chunk progress possible at all,
     since ``cat_ranges`` only returns once every range is done.
+
+    Neither fsspec nor aiohttp retries anything, so retries for 429s, 5xx and dropped
+    connections live here (:func:`_is_transient`), along with the cap on requests in flight
+    (:data:`MAX_CONCURRENT_REQUESTS`).
+
+    ``url`` is a plain URL or a :class:`~zea.data.hf_remote.SignedURL` (the CDN URL of an
+    ``hf://`` file). A ``SignedURL`` that gets rejected is resolved again and the request retried.
+
+    Nearby ranges in one :meth:`fetch` call are merged into one request (see :data:`MERGE_GAP`
+    and :data:`MERGE_MAX`) and split again afterwards.
     """
 
-    def __init__(self, url: str, token: str | None = None, cache=None):
+    def __init__(self, url: "str | SignedURL", token: str | None = None, cache=None):
         import fsspec
 
-        self.url = url
+        if isinstance(url, str):
+            headers = {"Authorization": f"Bearer {token}"} if token else {}
+            self.location: _Location = _FixedURL(url, headers)
+        else:
+            self.location = url
         self.cache = cache  # zea.data.chunk_cache.ChunkCache, or None
-        headers = {"Authorization": f"Bearer {token}"} if token else None
-        self._fs = fsspec.filesystem(
-            "http", client_kwargs={"headers": headers} if headers else None
-        )
+        #: The file object h5py reads through, if it keeps its blocks (see fetch_small).
+        self.blocks = None
+        self._fs = fsspec.filesystem("http")
+        _redact_fsspec_http_logs()
+
+    @property
+    def url(self) -> str:
+        return self.location.current()[0]
+
+    async def _cat_range(self, offset: int, size: int, url: str, headers: dict) -> bytes:
+        """One range request: bounded by the shared limiter, retried through rate limits.
+
+        What counts as worth retrying is :func:`_is_transient`. The limiter is released
+        before sleeping — holding a slot through the backoff would starve the requests that
+        are not being throttled. If the URL is rejected (:func:`_is_refused`), it is resolved
+        again once, in a thread so the event loop is not blocked.
+        """
+        attempt = 0
+        refreshed = False
+        while True:
+            try:
+                async with _limiter(asyncio.get_running_loop()):
+                    return await self._fs._cat_file(
+                        url, start=offset, end=offset + size, headers=headers
+                    )
+            except Exception as exc:
+                if not refreshed and _is_refused(exc):
+                    refreshed = True
+                    if await asyncio.to_thread(self.location.refresh, url):
+                        url, headers = await asyncio.to_thread(self.location.current)
+                        continue
+                if not _is_transient(exc) or attempt >= MAX_RETRIES:
+                    raise _as_os_error(exc)
+                from zea import log  # local, like the fallback warning below: zea imports us
+
+                status = getattr(exc, "status", None)
+                reason = f"HTTP {status}" if status is not None else type(exc).__name__
+                delay = _retry_delay(attempt, getattr(exc, "headers", None))
+                # The local url, not self.url: that may refresh it, which would block the
+                # event loop. Named by its hf:// source, since a signed URL is a credential.
+                name = self.source or url.split("?", 1)[0]
+                log.debug(
+                    f"{reason} for {size} bytes at {offset} of {name}; "
+                    f"retrying in {delay:.1f}s ({attempt + 1}/{MAX_RETRIES})"
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
 
     def fetch(self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None) -> list[bytes]:
-        import asyncio
-
         from fsspec.asyn import sync
 
         out: list[bytes | None] = [None] * len(ranges)
@@ -205,25 +516,83 @@ class HTTPFetcher(Fetcher):
         if not misses:
             return cast(list[bytes], out)
 
-        async def one(index: int, offset: int, size: int) -> None:
-            data = await self._fs._cat_file(self.url, start=offset, end=offset + size)
-            out[index] = data
-            if self.cache is not None:
-                self.cache.put(offset, size, data)
-            if on_bytes is not None:
-                on_bytes(size)
+        # Get the URL here, not in the event loop: refreshing it may make a blocking request.
+        url, headers = self.location.current()
+
+        async def one(start: int, end: int, members: list[tuple[int, int, int]]) -> None:
+            data = await self._cat_range(start, end - start, url, headers)
+            _count_network_bytes(len(data))
+            for index, offset, size in members:
+                piece = data[offset - start : offset - start + size]
+                out[index] = piece
+                if self.cache is not None:
+                    self.cache.put(offset, size, piece)
+                if on_bytes is not None:
+                    on_bytes(size)
 
         async def gather() -> None:
-            await asyncio.gather(*(one(*miss) for miss in misses))
+            await asyncio.gather(*(one(*span) for span in _merge(misses)))
 
         sync(self._fs.loop, gather)
         return cast(list[bytes], out)
+
+    def fetch_small(
+        self, ranges: Sequence[tuple[int, int]], on_bytes: Ticker = None
+    ) -> list[bytes]:
+        """Serve the chunks of a small read that are smaller than a block from the blocks of
+        :attr:`blocks`, like h5py would.
+
+        Small chunks are often many to a block (e.g. ~70 frames per 1 MiB), so a run of small
+        reads then costs one request per block instead of one per read, and the blocks land in
+        the same in-memory and on-disk caches h5py's own reads use. Larger chunks (e.g. one
+        transmit stored in a 7 MB chunk) go through :meth:`fetch`, as one request instead of a
+        request per block.
+        """
+        blocks = self.blocks
+        if blocks is None:
+            return self.fetch(ranges, on_bytes)
+        out: list[bytes | None] = [None] * len(ranges)
+        block_size = blocks.blocksize
+        large = [i for i, (_, size) in enumerate(ranges) if size >= block_size]
+        for i, data in zip(large, self.fetch([ranges[i] for i in large], on_bytes)):
+            out[i] = data
+
+        # Fetch the blocks of the small chunks together, so a read spread over many blocks
+        # costs one round trip instead of one per block. read_at keeps them for the reads below.
+        starts = {
+            start
+            for i, (offset, size) in enumerate(ranges)
+            if out[i] is None
+            for start in range(offset - offset % block_size, offset + size, block_size)
+        }
+        if len(starts) > 1:
+            workers = min(len(starts), MAX_CONCURRENT_REQUESTS)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(lambda start: blocks.read_at(start, 1), sorted(starts)))
+
+        for i, (offset, size) in enumerate(ranges):
+            if out[i] is None:
+                out[i] = blocks.read_at(int(offset), int(size))
+                if on_bytes is not None:
+                    on_bytes(int(size))
+        return cast(list[bytes], out)
+
+    def read_range(self, offset: int, size: int) -> bytes:
+        """Fetch one range without the chunk cache, merging or byte counting.
+
+        Used by :class:`~zea.data.hf_remote.RemoteFile`; :class:`~zea.data.chunk_cache.CachedFile`
+        does its own caching and counting.
+        """
+        from fsspec.asyn import sync
+
+        url, headers = self.location.current()
+        return sync(self._fs.loop, self._cat_range, offset, size, url, headers)
 
     def pending_bytes(self, ranges: Sequence[tuple[int, int]]) -> int:
         if self.cache is None:
             return super().pending_bytes(ranges)
         return sum(
-            size for offset, size in ranges if self.cache.get(int(offset), int(size)) is None
+            size for offset, size in ranges if not self.cache.contains(int(offset), int(size))
         )
 
 
@@ -234,19 +603,27 @@ def fetcher_for(file: h5py.File) -> Fetcher | None:
     descriptor. Anything else (an in-memory file, a driver we do not recognise) has no
     fast path, and its datasets fall back to h5py.
     """
+    from huggingface_hub import get_token
+
     from zea.data.chunk_cache import cache_for
     from zea.internal.preset_utils import HF_PREFIX, _hf_stream_url
 
     source = getattr(file, "_source_name", None)
     if source is not None and str(source).startswith(HF_PREFIX):
-        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        url = _hf_stream_url(str(source), **getattr(file, "_hf_kwargs", {}))
+        stream = getattr(file, "_stream_fileobj", None)
+        # Reuse the CDN URL the file was opened with (see zea.data.hf_remote). Fall back to
+        # the resolve URL if the file object has none.
+        location = getattr(stream, "location", None) or _hf_stream_url(
+            str(source), **getattr(file, "_hf_kwargs", {})
+        )
         # The streamed file object already carries HF's metadata (fetched on open), so the
         # content hash that keys the cache costs no extra request.
-        details = getattr(getattr(file, "_stream_fileobj", None), "details", None) or {}
+        details = getattr(stream, "details", None) or {}
         cache = cache_for(details) if getattr(file, "_cache_chunks", True) else None
-        fetcher = HTTPFetcher(url, token, cache)
+        fetcher = HTTPFetcher(location, get_token(), cache)
         fetcher.source = str(source)  # the hf:// path, not the resolved streaming url
+        if getattr(stream, "keeps_blocks", False):
+            fetcher.blocks = stream
         return fetcher
 
     if getattr(file, "_stream_fileobj", None) is not None:
@@ -389,14 +766,18 @@ def _fallback_note(
 ) -> None:
     """Nudge, once per dataset, when a read misses the concurrent path and goes to h5py.
 
-    Serial reads happen locally too, not only when streaming, so this fires whether or not
-    progress was requested. ``cause`` completes "Reading '{name}' {cause}" and ``fix`` says how
-    to avoid it; ``kind`` scopes the once-only dedupe so the resave and selection notes do not
-    silence each other. The name is the file — that is what a user would actually act on —
-    with the dataset's path in brackets (as the user indexes it, see :func:`_display_path`),
-    so notes for different datasets of the same file read as distinct rather than as repeats.
-    Anything that could break here is swallowed; a message is never worth failing a read over.
+    Args:
+        dset (h5py.Dataset): The dataset the note is about.
+        fetcher (Fetcher, optional): Source of the chunk bytes; names the file when set.
+        kind (str): Scopes the once-only dedupe, so the resave and selection notes do not
+            silence each other.
+        cause (str): Completes "Reading '{name}' {cause}".
+        fix (str): How to avoid the fallback.
     """
+    # Silent below, h5py serves every such read anyway (see :func:`read`)
+    if dset.nbytes < MIN_BYTES:
+        return
+
     try:
         from zea import log
 
@@ -552,6 +933,9 @@ def read(
     naming the cause and the fix, regardless of ``progress``, since the serial
     fallback is slower on disk too (see :func:`_resave_note`, :func:`_selection_note`).
 
+    Safe to call while h5py's global lock is held — from inside a ``group.items()`` loop,
+    say: nothing the workers touch reaches h5py.
+
     Args:
         dset (h5py.Dataset): The dataset to read from.
         selection: Any NumPy-style index. Ints, unit-step slices and increasing index
@@ -575,15 +959,21 @@ def read(
         _selection_note(dset, fetcher)
         return dset[selection]
 
-    itemsize = dset.dtype.itemsize
+    # Read every h5py attribute the decode needs *here*, on the calling thread, and keep
+    # the workers off ``dset`` entirely to avoid h5py's global lock. A caller can already
+    # hold it (``Group.items()`` holds it across its yields), causing a deadlock.
+    dtype = dset.dtype
+    itemsize = dtype.itemsize
     n_selected = int(np.prod([len(indices) for indices, _ in axes]))
-    if n_selected * itemsize < MIN_BYTES:
+    small = n_selected * itemsize < MIN_BYTES
+    if fetcher.per_chunk and small:
         return dset[selection]
+    fetch = fetcher.fetch_small if small else fetcher.fetch
 
     chunks = dset.chunks
     out = np.empty(
         tuple(len(indices) for indices, keep in axes if keep),
-        dtype=dset.dtype,
+        dtype=dtype,
     )
 
     # Every chunk that the selection touches, with the output region it fills.
@@ -623,7 +1013,8 @@ def read(
             blosc.decompress(raw, dest=view)
             return
         buf = _decode(raw, filters, mask, itemsize)
-        block = np.frombuffer(buf, dtype=dset.dtype, count=n_elem).reshape(chunks)
+        # ``dtype`` is the hoisted local, never ``dset.dtype``: see the note above.
+        block = np.frombuffer(buf, dtype=dtype, count=n_elem).reshape(chunks)
         # ``source`` has one entry per *dataset* axis, so it keeps a length-1 axis wherever the
         # selection used an int, while ``view`` has dropped it. Same elements in the same order
         # (_normalize allows at most one advanced index, which does not move axes), so reshape.
@@ -638,6 +1029,8 @@ def read(
     # total before a single byte moves — it measures the bytes actually transferred, not a
     # guess. Ticks arrive from worker threads; tqdm.update is thread-safe.
     total = sum(int(task[0].size) for task in tasks)
+    if small and not callable(progress):
+        progress = False  # one quick request at most: a bar would only flash by
     all_ranges = [(int(task[0].byte_offset), int(task[0].size)) for task in tasks]
     with _ticker(progress, total, all_ranges, fetcher) as on_bytes:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -650,7 +1043,7 @@ def read(
                 # Bounded by *bytes*, since chunk sizes vary hugely across files.
                 for batch in _batched(tasks, MAX_BYTES_IN_FLIGHT):
                     ranges = [(int(t[0].byte_offset), int(t[0].size)) for t in batch]
-                    raws = fetcher.fetch(ranges, on_bytes)
+                    raws = fetch(ranges, on_bytes)
                     list(pool.map(place, batch, raws))
 
     return out

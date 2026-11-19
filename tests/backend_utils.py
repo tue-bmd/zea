@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from collections import Counter
-
-from zea import log
 
 ML_BACKENDS = ("tensorflow", "torch", "jax")
 DEFAULT_TEST_BACKEND = "tensorflow"
@@ -33,8 +32,18 @@ def all_test_backends_available() -> bool:
 
 
 def get_test_backend() -> str:
-    """Return the backend the test suite should use for regular imports."""
+    """Return the backend the test suite should use for regular imports.
+
+    Set ``ZEA_TEST_BACKEND`` to pick one. ``KERAS_BACKEND`` is ignored on purpose: the zea
+    Docker images set it by default, which would silently change the backend under test.
+    """
     available = available_test_backends()
+    requested = os.environ.get("ZEA_TEST_BACKEND", "").strip().lower()
+    if requested:
+        assert requested in available, (
+            f"ZEA_TEST_BACKEND={requested!r} is not installed. Available: {', '.join(available)}."
+        )
+        return requested
     if DEFAULT_TEST_BACKEND in available:
         return DEFAULT_TEST_BACKEND
     if FALLBACK_TEST_BACKEND in available:
@@ -68,6 +77,10 @@ def format_backend_skip_reason(missing_backends) -> str:
 
 
 def _record_backend_guard_skip(active_backend, required_backends, inclusive=True):
+    # Imported here, not at module level: this module runs before tests/__init__.py sets
+    # KERAS_BACKEND, and importing zea that early makes it resolve a backend on its own.
+    from zea import log
+
     if inclusive:
         msg = (
             f"Assert skipped. Only available on {required_backends}, "

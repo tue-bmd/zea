@@ -1,15 +1,17 @@
 """Tests for the Parameters class."""
 
 import pickle
-from unittest.mock import patch
 
 import numpy as np
 import pytest
+from keras import ops
 
-import zea
 from zea import Parameters
+from zea.beamform.pfield import compute_pfield
+from zea.beamform.pixelgrid import aliasing_limits, check_for_aliasing, transmit_direction_bounds
 from zea.data.spec import ProbeSpec, ScanSpec
 from zea.internal.dummy_scan import get_parameters
+from zea.probes import Probe, create_curved_probe_geometry
 
 scan_args = {
     "n_tx": 10,
@@ -32,8 +34,8 @@ scan_args = {
     "tx_apodizations": np.ones((10, 10)),
     "focus_distances": np.ones(10) * 0.04,
     "initial_times": np.zeros((10,)),
-    "waveforms_one_way": np.zeros((2, 64)),
-    "waveforms_two_way": np.zeros((2, 64)),
+    "waveforms_one_way": np.zeros((10, 64)),
+    "waveforms_two_way": np.zeros((10, 64)),
     "tgc_gain_curve": np.ones((3328,)),
     "probe_geometry": np.column_stack(
         (
@@ -178,33 +180,445 @@ def test_scan_erroneous_set_transmits():
         parameters.set_transmits("invalid_string")
 
 
-def test_grid_warns_on_aliasing():
-    """An under-sized cartesian grid (pixel pitch > wavelength/2) warns about aliasing."""
-    # scan_args sets grid_size_x=64, grid_size_z=128, which under-sample the imaging region.
-    parameters = Parameters(**scan_args)
-    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
-        _ = parameters.grid
-    msgs = " ".join(str(c.args[0]) for c in mock_warn.call_args_list)
-    assert "wavelength/2" in msgs
+def _aliasing_args(parameters, grid=True):
+    """The attributes of ``parameters`` that the aliasing functions take."""
+    args = {
+        "sound_speed": parameters.sound_speed,
+        "center_frequency": parameters.center_frequency,
+        "f_number": parameters.f_number,
+        "demodulation_frequency": parameters.demodulation_frequency,
+    }
+    if grid:
+        args.update(
+            xlims=parameters.xlims,
+            zlims=parameters.zlims,
+            grid_size_x=parameters.grid_size_x,
+            grid_size_z=parameters.grid_size_z,
+        )
+    return args
 
 
-def test_grid_no_aliasing_warning_when_well_sampled():
-    """A sufficiently dense cartesian grid does not warn."""
-    args = scan_args.copy()
-    args["grid_size_x"] = 512
-    args["grid_size_z"] = 512
+# `scan_args` steers its focused transmits over +-90 deg, which opens the transmit
+# aperture to the full half-space; the aliasing tests want an unsteered one.
+focused_scan_args = {**scan_args, "polar_angles": np.zeros(10)}
+
+
+def _transmit_args(parameters):
+    return {
+        "focus_distances": parameters.focus_distances,
+        "probe_geometry": parameters.probe_geometry,
+        "tx_apodizations": parameters.tx_apodizations,
+        "polar_angles": parameters.polar_angles,
+        "transmit_origins": parameters.transmit_origins,
+    }
+
+
+def test_check_for_aliasing_rf_grid():
+    """An under-sized cartesian grid carrying RF warns on both axes."""
+    # scan_args sets grid_size_x=64, grid_size_z=128, which under-sample the region.
+    parameters = Parameters(**focused_scan_args)
+    msgs = check_for_aliasing(
+        **_aliasing_args(parameters), **_transmit_args(parameters), demodulated=False
+    )
+    assert any("Lateral" in m for m in msgs)
+    assert any("Axial" in m and "RF, top of the band" in m for m in msgs)
+
+
+def test_aliasing_limits_rf_axial_is_strict_nyquist():
+    """RF needs lambda_min / 4 axially: the round trip doubles k_z, the real image mirrors it."""
+    limits = aliasing_limits(1540.0, 5e6, 1.0, **_plane_waves(0), bandwidth=2e6)
+    assert limits["dz_max"] == pytest.approx(1540.0 / (4 * 6e6))
+
+
+def test_check_for_aliasing_pitch_counts_both_endpoints():
+    """Pixels sit on both limits, so n pixels span n - 1 pitches."""
+    dz_max = aliasing_limits(1540.0, 5e6, 1.0, **_plane_waves(0))["dz_max"]
+    args = dict(
+        xlims=(0.0, 1e-3),
+        grid_size_x=1024,
+        sound_speed=1540.0,
+        center_frequency=5e6,
+        f_number=1.0,
+        **_plane_waves(0),
+    )
+    # 100 pitches of exactly dz_max need 101 pixels; 100 pixels are too coarse.
+    assert check_for_aliasing(zlims=(0.0, 100 * dz_max), grid_size_z=101, **args) == []
+    assert check_for_aliasing(zlims=(0.0, 100 * dz_max), grid_size_z=100, **args) != []
+
+
+def test_check_for_aliasing_reversed_limits():
+    """Reversed limits give the same pitch, and so the same warnings, as ordered ones."""
+    parameters = Parameters(**focused_scan_args)
+    args = {**_aliasing_args(parameters), **_transmit_args(parameters), "demodulated": False}
+    flipped = {**args, "xlims": args["xlims"][::-1], "zlims": args["zlims"][::-1]}
+    assert check_for_aliasing(**flipped) == check_for_aliasing(**args) != []
+
+
+def test_check_for_aliasing_accepts_automatic_grid_size():
+    """A grid sized from ``pixels_per_wavelength`` passes the check it is meant to satisfy."""
+    args = {k: v for k, v in scan_args.items() if k not in ("grid_size_x", "grid_size_z")}
     parameters = Parameters(**args)
-    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
-        _ = parameters.grid
-    assert mock_warn.call_count == 0
+    assert (
+        check_for_aliasing(
+            **_aliasing_args(parameters), **_transmit_args(parameters), demodulated=False
+        )
+        == []
+    )
 
 
-def test_polar_grid_no_aliasing_warning():
-    """The cartesian aliasing check is not applied to polar grids."""
-    parameters = Parameters(**scan_args, grid_type="polar")
-    with patch("zea.beamform.pixelgrid.log.warning") as mock_warn:
-        _ = parameters.grid
-    assert mock_warn.call_count == 0
+def test_check_for_aliasing_no_warning_when_well_sampled():
+    """A sufficiently dense cartesian grid does not warn."""
+    args = focused_scan_args.copy()
+    args["grid_size_x"] = 1024
+    args["grid_size_z"] = 1024
+    parameters = Parameters(**args)
+    assert (
+        check_for_aliasing(
+            **_aliasing_args(parameters), **_transmit_args(parameters), demodulated=False
+        )
+        == []
+    )
+
+
+def test_check_for_aliasing_axial_relaxed_by_demodulation():
+    """Demodulation removes the carrier, so the axial limit follows the bandwidth.
+
+    The lateral limit has no carrier to remove and must be unaffected.
+    """
+    args = focused_scan_args.copy()
+    args["grid_size_z"] = 128  # dz = 312 um: aliases at 7 MHz RF (110 um)...
+    parameters = Parameters(**args)
+
+    rf = check_for_aliasing(
+        **_aliasing_args(parameters), **_transmit_args(parameters), demodulated=False
+    )
+    assert any("Axial" in m for m in rf)
+
+    # ...but a 1 MHz band is only ~2155 cycles/m tall in k_z (464 um), even with the
+    # oblique paths of this wide aperture, so IQ fits comfortably.
+    iq = check_for_aliasing(
+        **_aliasing_args(parameters), **_transmit_args(parameters), demodulated=True, bandwidth=1e6
+    )
+    assert not any("Axial" in m for m in iq)
+    assert any("Lateral" in m for m in iq)
+
+
+def test_aliasing_limits_transmit_angle_from_geometry():
+    """The lateral limit uses the real transmit aperture, not a symmetric guess."""
+    parameters = Parameters(**focused_scan_args)
+    limits = aliasing_limits(
+        **_aliasing_args(parameters, grid=False),
+        **_transmit_args(parameters),
+        demodulated=True,
+        bandwidth=2e6,
+    )
+    # 38 mm aperture focused at 40 mm -> sin(theta_t) spans +-19 / hypot(40, 19).
+    sin_theta_t = 19 / np.hypot(40, 19)
+    x_bounds = limits["transmit_direction"][0]
+    assert x_bounds == pytest.approx((-sin_theta_t, sin_theta_t), rel=1e-6)
+    # f_number defaults to 1.0 -> sin(theta_r) = 1 / sqrt(5).
+    assert limits["sin_theta_r"] == pytest.approx(1 / np.sqrt(5), rel=1e-6)
+
+
+def test_transmit_direction_bounds_steered_focus():
+    """A steered focus skews the range to the edge rays through the focal point."""
+    transmits = _plane_waves(20, n_el=3, pitch=10e-3)
+    focus, angle = 40e-3, transmits["polar_angles"][0]
+    transmits["focus_distances"] = np.array([focus])
+    x_bounds = transmit_direction_bounds(**transmits)[0][:, 0]
+
+    focus_x, focus_z = focus * np.sin(angle), focus * np.cos(angle)
+    edge_rays = [(focus_x - x) / np.hypot(focus_x - x, focus_z) for x in (10e-3, -10e-3)]
+    np.testing.assert_allclose(x_bounds, [edge_rays])
+
+    # Unsteered it reduces to the symmetric +-s; mirrored for a diverging wave.
+    transmits["polar_angles"] = np.zeros(1)
+    s = 10 / np.hypot(40, 10)
+    np.testing.assert_allclose(transmit_direction_bounds(**transmits)[0][:, 0], [[-s, s]])
+    transmits["focus_distances"] = -transmits["focus_distances"]
+    np.testing.assert_allclose(transmit_direction_bounds(**transmits)[0][:, 0], [[-s, s]])
+
+
+def test_aliasing_limits_symmetric_fallback_without_active_elements():
+    """Without an active transmit element the textbook symmetric aperture is assumed."""
+    transmits = {**_plane_waves(0), "focus_distances": np.array([40e-3])}
+    transmits["tx_apodizations"] = np.zeros_like(transmits["tx_apodizations"])
+    limits = aliasing_limits(1540.0, 7e6, 1.0, **transmits, demodulated=False)
+    sin_theta_r = limits["sin_theta_r"]
+    np.testing.assert_allclose(limits["transmit_direction"][:2], [[-sin_theta_r, sin_theta_r]] * 2)
+
+
+def _plane_waves(degrees, n_el=128, pitch=0.15e-3):
+    """Transmit geometry of plane waves at the given angles."""
+    angles = np.deg2rad(np.atleast_1d(degrees))
+    return {
+        "focus_distances": np.full(len(angles), np.inf),
+        "probe_geometry": np.column_stack(
+            [(np.arange(n_el) - (n_el - 1) / 2) * pitch, np.zeros(n_el), np.zeros(n_el)]
+        ),
+        "tx_apodizations": np.ones((len(angles), n_el)),
+        "polar_angles": angles,
+        "transmit_origins": np.zeros((len(angles), 3)),
+    }
+
+
+def test_aliasing_limits_single_steered_plane_wave_not_widened():
+    """A single steered plane wave shifts the lateral band but does not widen it.
+
+    With sin(alpha) < sin(theta_r) the band spans exactly 2 * f_max * sin(theta_r) / c,
+    whatever the angle, so the lateral limit matches the unsteered one.
+    """
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=1.0, bandwidth=4e6)
+    unsteered = aliasing_limits(**args, **_plane_waves(0))
+    steered = aliasing_limits(**args, **_plane_waves(15))
+    assert steered["dx_max"] == pytest.approx(unsteered["dx_max"])
+    assert unsteered["dx_max"] == pytest.approx(1540.0 / 7e6 / (2 / np.sqrt(5)))
+
+
+def test_aliasing_limits_compounding_widens_lateral_band():
+    """Compounding over +-alpha gives the symmetric lambda_min / (2 (sin a + sin r))."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=1.0, bandwidth=4e6)
+    limits = aliasing_limits(**args, **_plane_waves([-15, 0, 15]))
+    expected = 1540.0 / 7e6 / (2 * (np.sin(np.deg2rad(15)) + 1 / np.sqrt(5)))
+    assert limits["dx_max"] == pytest.approx(expected)
+
+
+def _matrix_plane_waves(polar_degrees, azimuth_degrees, n_side=32, pitch=0.3e-3):
+    """Transmit geometry of plane waves from a square matrix probe."""
+    side = (np.arange(n_side) - (n_side - 1) / 2) * pitch
+    x, y = np.meshgrid(side, side)
+    transmits = _plane_waves(polar_degrees, n_el=n_side**2)
+    transmits["probe_geometry"] = np.column_stack([x.ravel(), y.ravel(), np.zeros(n_side**2)])
+    transmits["azimuth_angles"] = np.deg2rad(np.atleast_1d(azimuth_degrees))
+    return transmits
+
+
+def test_aliasing_limits_azimuth_compounding_widens_elevational_band():
+    """Plane waves steered over +-alpha in y widen the y band, not the x band."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=1.0, bandwidth=4e6)
+    limits = aliasing_limits(**args, **_matrix_plane_waves([15, 0, 15], [-90, 0, 90]))
+    expected = 1540.0 / 7e6 / (2 * (np.sin(np.deg2rad(15)) + 1 / np.sqrt(5)))
+    assert limits["dy_max"] == pytest.approx(expected)
+    assert limits["dx_max"] == pytest.approx(1540.0 / 7e6 / (2 / np.sqrt(5)))
+
+
+def test_transmit_direction_bounds_matrix_focus():
+    """An unsteered focus on a square aperture spans +-s in x and y; on axis in z."""
+    transmits = _matrix_plane_waves(0, 0, n_side=3, pitch=10e-3)
+    transmits["focus_distances"] = np.array([40e-3])
+    (x_bounds, y_bounds, z_bounds) = transmit_direction_bounds(**transmits)[0][0]
+    s = 10 / np.hypot(40, 10)
+    np.testing.assert_allclose(x_bounds, [-s, s])
+    np.testing.assert_allclose(y_bounds, [-s, s])
+    # The corner elements give the most oblique ray.
+    np.testing.assert_allclose(z_bounds, [40 / np.sqrt(40**2 + 2 * 10**2), 1.0])
+
+
+def test_check_for_aliasing_3d_grid_checks_elevation():
+    """A coarse y pitch warns only when the grid has a y extent."""
+    args = dict(
+        xlims=(-5e-3, 5e-3),
+        zlims=(0.0, 1e-3),
+        grid_size_x=1024,
+        grid_size_z=1024,
+        sound_speed=1540.0,
+        center_frequency=5e6,
+        f_number=1.0,
+        **_matrix_plane_waves(0, 0),
+    )
+    msgs = check_for_aliasing(**args, ylims=(-5e-3, 5e-3), grid_size_y=11)
+    assert len(msgs) == 1 and "Elevational" in msgs[0] and "grid_size_y" in msgs[0]
+    assert check_for_aliasing(**args, ylims=(-5e-3, 5e-3), grid_size_y=1024) == []
+    assert check_for_aliasing(**args) == []
+
+
+def test_aliasing_limits_iq_axial_includes_oblique_paths():
+    """Oblique paths make the IQ band taller in k_z than 2 B / c."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, bandwidth=4e6, demodulated=True)
+    limits = aliasing_limits(**args, f_number=0.5, **_plane_waves(0))
+    # k_z from 3 MHz * (1 + cos(theta_r)) / c to 7 MHz * 2 / c, sin(theta_r) = 1 / sqrt(2).
+    expected = 1540.0 / (2 * 7e6 - 3e6 * (1 + 1 / np.sqrt(2)))
+    assert limits["dz_max"] == pytest.approx(expected)
+    assert limits["dz_max"] < 1540.0 / (2 * 4e6)
+
+
+def test_grid_checks_aliasing(monkeypatch):
+    """Building a cartesian grid runs the aliasing check, assuming IQ data."""
+    calls = []
+    monkeypatch.setattr(
+        Parameters, "check_for_aliasing", lambda self, **kwargs: calls.append(kwargs) or []
+    )
+    _ = Parameters(**focused_scan_args).grid
+    assert calls == [{}]
+
+    _ = Parameters(**focused_scan_args, grid_type="polar").grid
+    assert len(calls) == 1
+
+
+def test_grid_warns_on_lateral_aliasing(attach_caplog_warnings):
+    """An under-sized grid warns when it is built, without a pipeline."""
+    _ = Parameters(**focused_scan_args).grid
+    messages = [record.message for record in attach_caplog_warnings.records]
+    assert any("Lateral grid pitch" in m for m in messages)
+
+
+def test_grid_automatic_size_does_not_warn(attach_caplog_warnings):
+    """An automatically sized grid passes the IQ check, and the check itself does not
+    trigger the "No ... provided" fallback warnings of the transmit parameters."""
+    parameters = get_parameters()
+    parameters.update(grid_size_x=None, grid_size_z=None)
+    _ = parameters.grid
+    assert attach_caplog_warnings.records == []
+
+
+def test_parameters_check_for_aliasing_follows_transmit_selection():
+    """Only the selected transmits set the limit, here a single unsteered plane wave."""
+    transmits = _plane_waves([-30, 0, 30])
+    args = dict(
+        xlims=(-5e-3, 5e-3),
+        zlims=(0.0, 10e-3),
+        sound_speed=1540.0,
+        center_frequency=5e6,
+        n_el=128,
+        n_tx=3,
+        **transmits,
+    )
+    # A pitch between the compounded and the single plane-wave lateral limits.
+    limit = 1540.0 / 7.5e6 / (2 / np.sqrt(5))
+    size_x = int(np.ceil(10e-3 / (0.8 * limit))) + 1
+    parameters = Parameters(**args, grid_size_x=size_x, grid_size_z=1024)
+    assert any("Lateral" in m for m in parameters.check_for_aliasing())
+    parameters.set_transmits([1])
+    assert parameters.check_for_aliasing() == []
+
+
+def test_parameters_check_for_aliasing_rf_vs_iq():
+    """The axial limit depends on whether the grid carries RF or IQ."""
+    parameters = Parameters(**focused_scan_args)  # dz = 315 um: aliases for RF only
+    rf = parameters.check_for_aliasing(demodulated=False, bandwidth=1e6)
+    iq = parameters.check_for_aliasing(demodulated=True, bandwidth=1e6)
+    assert any("Axial" in m for m in rf)
+    assert not any("Axial" in m for m in iq)
+
+
+def test_parameters_check_for_aliasing_uses_bandwidth_parameter():
+    """The ``bandwidth`` parameter is used when no ``bandwidth`` argument is passed."""
+    without = Parameters(**focused_scan_args).check_for_aliasing(demodulated=True)
+    with_bandwidth = Parameters(**focused_scan_args, bandwidth=1e6).check_for_aliasing(
+        demodulated=True
+    )
+    assert any("Axial" in m for m in without)
+    assert not any("Axial" in m for m in with_bandwidth)
+
+
+def test_parameters_check_for_aliasing_assumes_probe_bandwidth():
+    """Without a ``bandwidth``, RF on a lambda / 4 grid warns: the band reaches past fc."""
+    wavelength = focused_scan_args["sound_speed"] / focused_scan_args["center_frequency"]
+    grid_size_z = int(np.ceil(0.04 / (wavelength / 4.1))) + 1  # just finer than lambda / 4
+    args = {**focused_scan_args, "grid_size_z": grid_size_z}
+    assert any("Axial" in m for m in Parameters(**args).check_for_aliasing(demodulated=False))
+
+    narrow = Parameters(**args, probe_bandwidth_percent=1.0).check_for_aliasing(demodulated=False)
+    assert not any("Axial" in m for m in narrow)
+
+
+def test_parameters_check_for_aliasing_skips_polar_grid():
+    """Non-cartesian grids are not checked."""
+    assert Parameters(**focused_scan_args, grid_type="polar").check_for_aliasing() == []
+
+
+def test_aliasing_limits_directivity_caps_receive():
+    """Element directivity caps the receive term at 0.603 c / w, at any frequency."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    width = 0.3e-3
+    uncapped = aliasing_limits(**args, **_plane_waves(0))
+    capped = aliasing_limits(**args, **_plane_waves(0), element_width=width)
+    assert uncapped["dx_max"] == pytest.approx(1540.0 / 7e6 / 2)
+    assert capped["dx_max"] == pytest.approx(width / (2 * 0.603))
+    # A tiny element caps nothing within the band.
+    tiny = aliasing_limits(**args, **_plane_waves(0), element_width=1e-6)
+    assert tiny["dx_max"] == pytest.approx(uncapped["dx_max"])
+
+
+def test_aliasing_limits_directivity_spares_plane_wave_steering():
+    """A steered plane wave keeps its direction; only the receive term is capped."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    width = 0.3e-3
+    limits = aliasing_limits(**args, **_plane_waves([-60, 60]), element_width=width)
+    k_edge = (7e6 * np.sin(np.deg2rad(60)) + 0.603 * 1540.0 / width) / 1540.0
+    assert limits["dx_max"] == pytest.approx(1 / (2 * k_edge))
+
+
+def test_aliasing_limits_directivity_caps_diverging_transmit():
+    """Diverging rays are capped like receive paths, which relaxes the lateral limit."""
+    transmits = {**_plane_waves(0), "focus_distances": np.array([-1e-3])}
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    width = 0.3e-3
+    uncapped = aliasing_limits(**args, **transmits)
+    capped = aliasing_limits(**args, **transmits, element_width=width)
+    # Both terms at their cap: k_x spans +-2 * 0.603 / w.
+    assert capped["dx_max"] == pytest.approx(width / (4 * 0.603))
+    assert capped["dx_max"] > uncapped["dx_max"]
+
+
+def test_aliasing_limits_curved_probe_widens_receive_cone():
+    """A curved array's receive cone opens around tilted normals, as in fnumber_mask."""
+    n_el, pitch, radius = 128, 0.3e-3, 40e-3
+    transmits = _plane_waves(0, n_el=n_el, pitch=pitch)
+    transmits["probe_geometry"] = create_curved_probe_geometry(n_el, pitch, radius)
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=1.0, bandwidth=2e6)
+    flat = aliasing_limits(**args, **_plane_waves(0, n_el=n_el, pitch=pitch))
+    curved = aliasing_limits(**args, **transmits, element_width=pitch)
+    # The edge normal comes from a one-sided difference, so it sits half a pitch in
+    # from the edge element on the arc.
+    tilt = (n_el - 2) / 2 * pitch / radius
+    assert curved["sin_theta_r"] == pytest.approx(np.sin(np.arctan(0.5) + tilt), rel=1e-3)
+    assert curved["dx_max"] < flat["dx_max"]
+    # Directivity is relative to each tilted normal, so it no longer caps the band.
+    assert curved["sin_theta_directivity"] == (1.0, 1.0)
+
+
+def test_aliasing_limits_directivity_reported_per_axis():
+    """The elevational directivity is reported from the element height."""
+    args = dict(sound_speed=1540.0, center_frequency=5e6, f_number=0.0, bandwidth=4e6)
+    limits = aliasing_limits(**args, **_plane_waves(0), element_width=0.3e-3, element_height=5e-3)
+    assert limits["sin_theta_directivity"] == pytest.approx(
+        (0.603 * 1540.0 / 0.3e-3 / 7e6, 0.603 * 1540.0 / 5e-3 / 7e6)
+    )
+
+
+def test_parameters_check_for_aliasing_without_polar_angles():
+    """Missing ``polar_angles`` are treated as unsteered transmits."""
+    args = {k: v for k, v in focused_scan_args.items() if k != "polar_angles"}
+    without = Parameters(**args).check_for_aliasing(demodulated=False)
+    assert without == Parameters(**focused_scan_args).check_for_aliasing(demodulated=False)
+
+
+def test_transmit_direction_bounds_skips_nan_focus():
+    """A ``NaN`` focus distance marks no transmit type, so that transmit is left out."""
+    transmits = {**_plane_waves([0, 0]), "focus_distances": np.array([np.nan, 40e-3])}
+    bounds = transmit_direction_bounds(**transmits)[0]
+    assert bounds.shape == (1, 3, 2)
+    assert np.all(np.isfinite(bounds))
+
+
+def test_transmit_direction_bounds_skips_inactive_plane_waves():
+    """A plane wave without active elements never fires, so it does not widen the range."""
+    transmits = _plane_waves([0, 20])
+    transmits["tx_apodizations"][1] = 0.0
+    bounds, plane = transmit_direction_bounds(**transmits)
+    np.testing.assert_allclose(bounds[:, 0], [[0.0, 0.0]], atol=1e-12)
+    np.testing.assert_array_equal(plane, [True])
+
+
+def test_transmit_direction_bounds_keeps_horizontal_rays():
+    """A ray level with the focus (z component 0) keeps its direction."""
+    transmits = _plane_waves(0, n_el=2, pitch=20e-3)
+    transmits["probe_geometry"][0, 2] = 10e-3  # first element at the focal depth
+    transmits["focus_distances"] = np.array([10e-3])
+    x_bounds, _, z_bounds = transmit_direction_bounds(**transmits)[0][0]
+    np.testing.assert_allclose(x_bounds, [-1 / np.sqrt(2), 1.0])
+    assert z_bounds[0] == pytest.approx(0.0)
 
 
 def test_set_transmits_focused_excludes_plane_waves():
@@ -220,6 +634,123 @@ def test_set_transmits_focused_excludes_plane_waves():
 
     assert list(parameters.selected_transmits) == list(range(scan_args["n_tx"] // 2))
     assert np.all(np.isfinite(parameters.focus_distances))
+
+
+def _xlims_scan_args(focus_distances, polar_angles):
+    """Build scan args for computing ``xlims`` (no explicit xlims/grid sizes)."""
+    n_tx = len(focus_distances)
+    aperture = np.linspace(-0.019, 0.019, 10)
+    args = {
+        "n_tx": n_tx,
+        "n_el": 10,
+        "n_ch": 1,
+        "zlims": (0, 0.12),
+        "center_frequency": 7e6,
+        "sampling_frequency": 28e6,
+        "sound_speed": 1540.0,
+        "n_ax": 1024 * 16,
+        "pixels_per_wavelength": 4,
+        "polar_angles": np.asarray(polar_angles, dtype=np.float32),
+        "focus_distances": np.asarray(focus_distances, dtype=np.float32),
+        "probe_geometry": np.column_stack((aperture, np.zeros(10), np.zeros(10))),
+    }
+    return args
+
+
+@pytest.mark.parametrize("focus", [np.inf, 0.0, -np.inf, 0.04])
+def test_xlims_unsteered_hugs_aperture(focus):
+    parameters = Parameters(**_xlims_scan_args([focus], [0.0]))
+
+    aperture = (
+        float(np.min(parameters.probe_geometry[:, 0])),
+        float(np.max(parameters.probe_geometry[:, 0])),
+    )
+    assert np.allclose(parameters.xlims, aperture)
+
+
+@pytest.mark.parametrize(
+    "focus_distances, polar_angles",
+    [
+        ([-np.inf], [0.25]),
+        ([0.05, 0.05], [0.75, 0]),
+        ([-0.05], [0.0]),
+    ],
+)
+def test_xlims_fans_out_by_fnumber(focus_distances, polar_angles):
+    """Steered or diverging transmits use the f-number cone to select xlims."""
+    parameters = Parameters(**_xlims_scan_args(focus_distances, polar_angles))
+
+    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
+    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
+    reach = max(parameters.zlims) / (2 * parameters.f_number)
+    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
+
+
+def test_xlims_scales_with_fnumber():
+    args = _xlims_scan_args([-0.02], [0.0])
+    narrow = Parameters(**args, f_number=2.0)
+    wide = Parameters(**args, f_number=1.0)
+
+    assert narrow.xlims[0] > wide.xlims[0]
+    assert narrow.xlims[1] < wide.xlims[1]
+
+
+def test_xlims_zero_fnumber_uses_45_degree_cone():
+    """``f_number=0`` disables the receive mask, so a 45 degree cone is used instead."""
+    args = _xlims_scan_args([-0.02], [0.0])
+    parameters = Parameters(**args, f_number=0.0)
+
+    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
+    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
+    reach = max(parameters.zlims)
+    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
+
+
+def test_xlims_limited_by_record_length():
+    args = _xlims_scan_args([-0.02], [0.0])
+    args["n_ax"] = 1024
+    parameters = Parameters(**args, f_number=0.0)  # 45 degree cone
+
+    max_range = args["sound_speed"] * args["n_ax"] / args["sampling_frequency"] / 2
+    reach = max_range * np.sin(np.pi / 4)
+    aperture_min = float(np.min(parameters.probe_geometry[:, 0]))
+    aperture_max = float(np.max(parameters.probe_geometry[:, 0]))
+
+    assert reach < max(parameters.zlims)  # the depth-limited cone would reach further
+    assert np.allclose(parameters.xlims, (aperture_min - reach, aperture_max + reach))
+
+
+def test_xlims_curved_probe_widens_with_element_tilt():
+    """A curved array's edge elements tilt outward, so xlims should also widen."""
+    n_el, pitch, radius = 64, 1.6e-4, 0.03  # arc of +-10 degrees
+    args = _xlims_scan_args([np.inf, np.inf], np.asarray([-0.3, 0.0], dtype=np.float32))
+    args.update(
+        n_el=n_el,
+        n_ax=16384,
+        zlims=(0, 0.15),
+        probe_geometry=create_curved_probe_geometry(n_el=n_el, pitch=pitch, radius=radius),
+    )
+    parameters = Parameters(**args)
+
+    tilt = (n_el - 1) * pitch / 2 / radius
+    edge_x, edge_z = radius * np.sin(tilt), radius * np.cos(tilt) - radius
+    half_angle = np.arctan(1 / (2 * parameters.f_number))
+    expected = edge_x + (max(parameters.zlims) - edge_z) * np.tan(tilt + half_angle)
+
+    assert np.allclose(parameters.xlims, (-expected, expected), rtol=1e-2)
+    assert expected > edge_x + max(parameters.zlims) / (2 * parameters.f_number)
+
+
+def test_xlims_unsteered_ignores_angle_noise():
+    """Converted data stores a nominally unsteered scan as float noise, not exact zeros."""
+    noise = np.full(4, 1e-9, dtype=np.float32)
+    parameters = Parameters(**_xlims_scan_args([np.inf] * 4, noise))
+
+    aperture = (
+        float(np.min(parameters.probe_geometry[:, 0])),
+        float(np.max(parameters.probe_geometry[:, 0])),
+    )
+    assert np.allclose(parameters.xlims, aperture)
 
 
 def test_initialization():
@@ -257,6 +788,8 @@ def test_initialization():
         ("tx_apodizations", (10, 10)),
         ("focus_distances", (10,)),
         ("initial_times", (10,)),
+        ("waveforms_one_way", (10, 64)),
+        ("waveforms_two_way", (10, 64)),
     ],
 )
 def test_selected_transmits_affects_shape(attr, expected_shape):
@@ -303,6 +836,137 @@ def test_selected_transmits_affects_shape(attr, expected_shape):
     val = getattr(parameters, attr)
     val_tensor = parameters.to_tensor(include=[attr])[attr]
     assert val.shape[0] == val_tensor.shape[0] == 3
+
+
+def test_rx_aperture_indices_absent_by_default():
+    """Without a receive sub-aperture there is no mapping, and n_rx is n_el."""
+    parameters = Parameters(**scan_args)
+    assert parameters.rx_aperture_indices is None
+    assert parameters.n_rx == parameters.n_el == scan_args["n_el"]
+
+
+def test_rx_aperture_indices_follows_transmit_selection():
+    """The mapping is stored over the full transmit axis, so a selection slices it."""
+    n_tx, n_el, n_rx = scan_args["n_tx"], scan_args["n_el"], 4
+    # A sliding receive window: transmit i receives on elements i .. i + n_rx - 1.
+    indices = (np.arange(n_rx)[None] + np.arange(n_tx)[:, None]) % n_el
+    indices = indices.astype(np.int32)
+
+    parameters = Parameters(**scan_args, rx_aperture_indices=indices)
+    np.testing.assert_array_equal(parameters.rx_aperture_indices, indices)
+    assert parameters.n_rx == n_rx
+    assert parameters.n_el == n_el
+
+    selection = [1, 3]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.rx_aperture_indices, indices[selection])
+    # The mapping stays aligned with the other per-transmit parameters.
+    assert parameters.rx_aperture_indices.shape == (parameters.n_tx, parameters.n_rx)
+    assert parameters.t0_delays.shape[0] == parameters.rx_aperture_indices.shape[0]
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.rx_aperture_indices, indices)
+
+
+def test_waveforms_follow_transmit_selection():
+    """Waveforms are stored over the full transmit axis, so a selection slices them."""
+    n_tx = scan_args["n_tx"]
+    # A distinct waveform per transmit, so the selected rows can be identified.
+    one_way = np.arange(n_tx)[:, None] + np.zeros((1, 64))
+    two_way = -np.arange(n_tx)[:, None] + np.zeros((1, 128))
+    parameters = Parameters(
+        **{**scan_args, "waveforms_one_way": one_way, "waveforms_two_way": two_way}
+    )
+    assert parameters.n_waveforms == n_tx
+
+    selection = [1, 3, 7]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.waveforms_one_way, one_way[selection])
+    np.testing.assert_array_equal(parameters.waveforms_two_way, two_way[selection])
+    assert parameters.n_waveforms == parameters.n_tx == len(selection)
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.waveforms_one_way, one_way)
+    assert parameters.n_waveforms == n_tx
+
+
+def test_waveforms_absent_stay_none_under_selection():
+    args = {k: v for k, v in scan_args.items() if not k.startswith("waveforms_")}
+    parameters = Parameters(**args)
+    parameters.set_transmits(3)
+    assert parameters.waveforms_one_way is None
+    assert parameters.waveforms_two_way is None
+
+
+def test_flat_aligned_apodization_derived():
+    """Derived: None, unless scanline mode, where it is the one-hot transmit mask."""
+    assert Parameters(**scan_args).flat_aligned_apodization is None
+
+    scanline = Parameters(**scan_args, enable_scanline=True)
+    n_tx, grid_size_z = scan_args["n_tx"], scan_args["grid_size_z"]
+    assert scanline.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
+
+
+def test_flat_aligned_apodization_explicit_value_wins():
+    """An explicit mask overrides the derived default, and follows the selection.
+
+    It is stored over the full transmit axis, so a transmit selection slices it
+    (and invalidates the cached value). The pixel axis matches the grid, which
+    does not depend on the selection outside of scanline mode.
+    """
+    n_tx = scan_args["n_tx"]
+    n_pix = scan_args["grid_size_z"] * scan_args["grid_size_x"]
+    apodization = np.arange(n_pix * n_tx, dtype=np.float32).reshape(n_pix, n_tx)
+
+    parameters = Parameters(**scan_args, flat_aligned_apodization=apodization)
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    selection = [1, 3]
+    parameters.set_transmits(selection)
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization[:, selection])
+    # The mask stays aligned with the active grid: (n_pix, n_tx).
+    assert parameters.flat_aligned_apodization.shape == (
+        np.prod(parameters.grid.shape[:-1]),
+        parameters.n_tx,
+    )
+
+    parameters.set_transmits("all")
+    np.testing.assert_array_equal(parameters.flat_aligned_apodization, apodization)
+
+    # Explicitly unsetting it falls back to the derived value.
+    parameters.flat_aligned_apodization = None
+    assert parameters.flat_aligned_apodization is None
+
+
+def test_flat_aligned_apodization_rejected_in_scanline_mode():
+    """A scanline grid derives its own mask; an explicit one cannot stay aligned with it."""
+    n_tx, grid_size_z = scan_args["n_tx"], scan_args["grid_size_z"]
+    apodization = np.ones((grid_size_z * n_tx, n_tx), dtype=np.float32)
+
+    parameters = Parameters(
+        **scan_args,
+        enable_scanline=True,
+        flat_aligned_apodization=apodization,
+    )
+    with pytest.raises(ValueError, match="enable_scanline"):
+        _ = parameters.flat_aligned_apodization
+
+    # Unsetting it (or disabling scanline mode) resolves the conflict either way.
+    parameters.flat_aligned_apodization = None
+    assert parameters.flat_aligned_apodization.shape == (grid_size_z * n_tx, n_tx)
+
+
+def test_flat_aligned_apodization_transmit_axis_is_validated():
+    """A mask over the selection instead of the full transmit axis is rejected."""
+    n_pix = scan_args["grid_size_z"] * scan_args["grid_size_x"]
+
+    parameters = Parameters(
+        **scan_args,
+        flat_aligned_apodization=np.ones((n_pix, 2), dtype=np.float32),
+    )
+    parameters.set_transmits([1, 3])
+    with pytest.raises(ValueError, match="full transmit axis"):
+        _ = parameters.flat_aligned_apodization
 
 
 def test_set_attributes():
@@ -370,7 +1034,7 @@ def test_t_peak_default_and_waveform_derived():
     assert np.allclose(parameters.t_peak, 1 / center_frequency)
 
 
-def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
+def test_missing_transmit_defaults_warn_once_on_access(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
     local_scan_args.pop("t0_delays", None)
@@ -381,9 +1045,6 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     local_scan_args.pop("tgc_gain_curve", None)
 
     warnings = []
-
-    # Reset warning_once state to make this test deterministic.
-    zea.log._warned_locations.clear()
 
     def _capture_warning(message, *args, **kwargs):
         warnings.append(message)
@@ -415,13 +1076,11 @@ def test_missing_transmit_defaults_warn_once_on_access(monkeypatch):
     assert warnings.count("No ``tgc_gain_curve`` provided, using ones") == 1
 
 
-def test_missing_defaults_warn_once_per_scan_instance(monkeypatch):
+def test_missing_defaults_warn_once_per_scan_instance(monkeypatch, reset_warning_once):
     local_scan_args = scan_args.copy()
     local_scan_args.pop("azimuth_angles", None)
 
     warnings = []
-
-    zea.log._warned_locations.clear()
 
     def _capture_warning(message, *args, **kwargs):
         warnings.append(message)
@@ -502,7 +1161,12 @@ def test_inplace_modification():
         parameters.zlims[1] += 0.01
         return parameters
 
-    for edit_fn in (edit1, edit2, edit3):
+    def edit4(parameters):
+        """edit a direct dependency that is a scalar parameter"""
+        parameters.element_width = parameters.element_width * 0.5
+        return parameters
+
+    for edit_fn in (edit1, edit2, edit3, edit4):
         parameters = get_parameters(pfield_kwargs={"norm": True})
         original_pfield = parameters.pfield.copy()
         assert "pfield" in parameters._cache, "pfield should be cached after first access"
@@ -527,6 +1191,50 @@ def test_inplace_modification_tensor_cache():
     assert not np.array_equal(tensor_dict["pfield"], tensor_dict2["pfield"]), (
         "_tensor_cache['pfield'] seems to be unaffected by in-place modification"
     )
+
+
+def test_pfield_rejects_curved_probe():
+    """Pfield computation only supports linear arrays."""
+    parameters = get_parameters()
+    parameters.probe_geometry = create_curved_probe_geometry(parameters.n_el, 3e-4, 40e-3)
+    with pytest.raises(NotImplementedError, match="linear"):
+        _ = parameters.pfield
+
+
+@pytest.mark.parametrize("field", ["t0_delays", "tx_apodizations"])
+def test_pfield_rejects_non_finite_transmit_parameters(field):
+    """NaN transmit delays or apodizations are rejected rather than silently zeroed."""
+    parameters = get_parameters()
+    kwargs = dict(
+        sound_speed=parameters.sound_speed,
+        center_frequency=parameters.center_frequency,
+        probe_bandwidth_percent=parameters.probe_bandwidth_percent,
+        probe_geometry=parameters.probe_geometry,
+        tx_apodizations=np.array(parameters.tx_apodizations),
+        grid=parameters.grid,
+        t0_delays=np.array(parameters.t0_delays),
+    )
+    kwargs[field][0, 0] = np.nan
+    with pytest.raises(ValueError, match=f"`{field}` must be finite"):
+        compute_pfield(**kwargs)
+
+
+def test_pfield_infers_element_width():
+    """Without an element width, the pfield uses 90% of the pitch."""
+    parameters = get_parameters()
+    kwargs = dict(
+        sound_speed=parameters.sound_speed,
+        center_frequency=parameters.center_frequency,
+        probe_bandwidth_percent=parameters.probe_bandwidth_percent,
+        probe_geometry=parameters.probe_geometry,
+        tx_apodizations=parameters.tx_apodizations,
+        grid=parameters.grid,
+        t0_delays=parameters.t0_delays,
+    )
+    pitch = Probe.get_pitch(parameters.probe_geometry)
+    inferred = ops.convert_to_numpy(compute_pfield(**kwargs))
+    explicit = ops.convert_to_numpy(compute_pfield(**kwargs, element_width=0.9 * pitch))
+    np.testing.assert_allclose(inferred, explicit)
 
 
 def test_update_behaviour_and_cache_invalidation():
@@ -606,3 +1314,118 @@ def test_custom_parameters_passthrough_to_tensor():
     assert "my_custom_parameter" in tensors
     # Derived properties still compute (custom params don't interfere).
     assert parameters.wavelength == parameters.sound_speed / parameters.center_frequency
+
+
+def test_bandwidth_derived_from_probe():
+    """Left unset, the bandwidth is center_frequency * probe_bandwidth_percent / 100."""
+    parameters = Parameters(center_frequency=5e6, probe_bandwidth_percent=60.0)
+    assert parameters.bandwidth == pytest.approx(3e6)
+
+    # Changing a dependency invalidates the cached value.
+    parameters.probe_bandwidth_percent = 80.0
+    assert parameters.bandwidth == pytest.approx(4e6)
+
+    # Without probe_bandwidth_percent in the file, its 100 % default applies.
+    assert Parameters(center_frequency=5e6).bandwidth == pytest.approx(5e6)
+
+    assert "bandwidth" in Parameters(**scan_args).to_tensor(include=["bandwidth"])
+
+
+def test_bandwidth_follows_in_place_changes():
+    """In-place changes to center_frequency refresh the derived bandwidth."""
+    parameters = Parameters(center_frequency=np.full(3, 5e6), probe_bandwidth_percent=60.0)
+    assert parameters.bandwidth == pytest.approx(3e6)
+
+    parameters.center_frequency[:] = 6e6
+    assert parameters.bandwidth == pytest.approx(3.6e6)
+
+
+def test_bandwidth_explicit_value_wins():
+    """An explicit bandwidth overrides the derived one, and unsetting it falls back."""
+    parameters = Parameters(center_frequency=5e6, probe_bandwidth_percent=60.0, bandwidth=1e6)
+    assert parameters.bandwidth == pytest.approx(1e6)
+
+    # Dependencies do not affect an explicit value.
+    parameters.center_frequency = 7e6
+    assert parameters.bandwidth == pytest.approx(1e6)
+
+    parameters.update(bandwidth=2e6)
+    assert parameters.bandwidth == pytest.approx(2e6)
+    assert "bandwidth" in parameters._params
+
+    parameters.bandwidth = None
+    assert parameters.bandwidth == pytest.approx(4.2e6)
+
+
+def test_bandwidth_per_transmit_center_frequency():
+    """A per-transmit center_frequency that is the same everywhere gives a scalar bandwidth."""
+    uniform = Parameters(center_frequency=np.full(3, 5e6), probe_bandwidth_percent=60.0)
+    assert np.ndim(uniform.bandwidth) == 0
+    assert uniform.bandwidth == pytest.approx(3e6)
+
+    # Varying per transmit: no bandwidth is derived, but an explicit one is still used.
+    varying = Parameters(center_frequency=np.array([4e6, 5e6]), probe_bandwidth_percent=50.0)
+    assert varying.bandwidth is None
+    varying.bandwidth = 2e6
+    assert varying.bandwidth == pytest.approx(2e6)
+
+
+# --- distance_to_apex ---
+
+
+def test_distance_to_apex_fitted_from_curved_probe():
+    """Left unset, the apex distance is the curved probe's radius of curvature."""
+    from zea.probes import create_curved_probe_geometry
+
+    radius = 49.57e-3
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius)
+    )
+    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
+
+
+def test_distance_to_apex_is_zero_for_a_flat_probe():
+    """A linear or phased array fans out from the transducer surface itself."""
+    from zea.probes import create_probe_geometry
+
+    parameters = Parameters(probe_geometry=create_probe_geometry(n_el=128, pitch=0.3e-3))
+    assert parameters.distance_to_apex == 0.0
+
+
+def test_distance_to_apex_is_zero_without_probe_geometry():
+    """Nothing to fit, so fall back to an apex at the transducer surface."""
+    assert Parameters().distance_to_apex == 0.0
+
+
+def test_distance_to_apex_explicit_value_wins():
+    """An explicit value overrides the fit, and both paths agree bit for bit."""
+    from zea.probes import create_curved_probe_geometry
+
+    probe_geometry = create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=49.57e-3)
+    assert Parameters(probe_geometry=probe_geometry, distance_to_apex=0.0).distance_to_apex == 0.0
+
+    fitted = Parameters(probe_geometry=probe_geometry).distance_to_apex
+    explicit = Parameters(probe_geometry=probe_geometry, distance_to_apex=fitted)
+    assert explicit.distance_to_apex == fitted
+
+
+def test_polar_grid_uses_the_fitted_apex():
+    """The fitted apex reaches the grid: rays start one zlims[0] below the transducer."""
+    from zea.probes import create_curved_probe_geometry
+
+    radius = 49.57e-3
+    parameters = Parameters(
+        probe_geometry=create_curved_probe_geometry(n_el=128, pitch=0.508e-3, radius=radius),
+        grid_type="polar",
+        polar_limits=(-0.3, 0.3),
+        zlims=(0.005, 0.07),
+        grid_size_z=256,
+        grid_size_x=128,
+        center_frequency=3.5e6,
+        sampling_frequency=20e6,
+        n_ax=4096,
+    )
+    assert parameters.distance_to_apex == pytest.approx(radius, rel=1e-5)
+    assert parameters.rho_range[0] == pytest.approx(0.005 + radius, rel=1e-5)
+    # Centre ray starts at zlims[0] below the transducer, not at the apex.
+    assert parameters.grid[0, 64, 2] == pytest.approx(0.005, abs=1e-6)

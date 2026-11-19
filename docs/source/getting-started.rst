@@ -189,9 +189,9 @@ To use ``zea``, you need to install one of the supported machine learning backen
 - `Install PyTorch <https://pytorch.org/get-started/locally/>`__
 - `Install TensorFlow <https://www.tensorflow.org/install>`__
 
-If you are unsure which backend to use, we recommend JAX as it is currently the fastest backend.
+If you are unsure which backend to use, we recommend JAX as it is currently the fastest backend; set ``KERAS_BACKEND=jax`` to select it.
 
-After installing a backend, set the ``KERAS_BACKEND`` environment variable to one of the following:
+If neither ``KERAS_BACKEND`` nor your ``keras.json`` selects a backend, ``zea`` picks an installed one on import (preferring TensorFlow, then JAX, then PyTorch, following Keras). To choose the backend explicitly, for instance when several are installed, set the ``KERAS_BACKEND`` environment variable to one of the following:
 
 .. tab-set::
 
