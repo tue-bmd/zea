@@ -29,6 +29,7 @@ Changed
 
 Fixed
 ^^^^^
+- :class:`zea.ops.LowPassFilterIQ` assumes baseband input and no longer reads ``center_frequency``, which filtered out stored IQ data and rotated the phase. :class:`zea.ops.Demodulate` no longer sets ``center_frequency`` to 0 (:gh:`716` by :user:`tristan-deep`)
 - :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
 
 

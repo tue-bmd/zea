@@ -307,6 +307,33 @@ def test_get_low_pass_iq_filter():
             get_low_pass_iq_filter(num_taps, sampling_frequency, 0.0, bandwidth)
 
 
+def test_low_pass_iq_filter_shift_keeps_phase():
+    """A shifted filter passes a tone at the shift frequency without rotating its phase."""
+    num_taps, sampling_frequency, shift = 63, 12.5e6, 1e6
+    taps = get_low_pass_iq_filter(num_taps, sampling_frequency, shift, 1e6)
+
+    tone = np.exp(2j * np.pi * shift * np.arange(512) / sampling_frequency)
+    filtered = np.convolve(tone, taps, mode="same")
+    middle = slice(64, 448)
+    np.testing.assert_allclose(filtered[middle], tone[middle], atol=1e-2)
+
+
+def test_demodulate_keeps_center_frequency():
+    """Demodulate passes center_frequency through unchanged."""
+    from zea import ops
+
+    pipeline = Pipeline([ops.Demodulate()], with_batch_dim=False)
+    rf = np.random.default_rng(DEFAULT_TEST_SEED).standard_normal((1, 128, 2, 1))
+    outputs = pipeline(
+        data=rf.astype("float32"),
+        center_frequency=5e6,
+        demodulation_frequency=5e6,
+        sampling_frequency=20e6,
+    )
+    assert float(outputs["center_frequency"]) == 5e6
+    assert outputs["n_ch"] == 2
+
+
 @backend_equality_check(decimal=4, backends=["tensorflow", "jax"])
 def test_low_pass_filter_iq():
     """LowPassFilterIQ keeps a baseband IQ tone and rejects one outside the passband."""
@@ -327,7 +354,7 @@ def test_low_pass_filter_iq():
         data=keras.ops.convert_to_tensor(data),
         bandwidth=bandwidth,
         sampling_frequency=sampling_frequency,
-        center_frequency=0.0,
+        center_frequency=5e6,
     )["data"]
     output = keras.ops.convert_to_numpy(output)
     assert output.shape == data.shape
