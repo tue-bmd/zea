@@ -180,6 +180,19 @@ def test_binary_frame_count_and_order(tmp_path, num_frames, expected_order):
         np.testing.assert_array_equal(vf.get_raw_data_order(0), expected_order)
 
 
+def test_binary_buffer_without_rcvbuffer_entry_keeps_order(tmp_path):
+    """A second .bin with only one RcvBuffer struct is assumed to be in order."""
+    full = [np.zeros((3, 2, 4), np.int16), np.zeros((2, 2, 4), np.int16)]
+    mat = tmp_path / "Parameters.mat"
+    _write_binary_workspace(mat, full, [np.ones(2, bool)] * 2, saved=[True, True])
+    with h5py.File(mat, "a") as f:
+        rcv_buffer = f.create_group("Resource/RcvBuffer")
+        rcv_buffer.create_dataset("numFrames", data=np.array([[3]], np.float64))
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        np.testing.assert_array_equal(vf.get_raw_data_order(1), [0, 1])
+
+
 def test_binary_dimension_mismatch_raises(tmp_path):
     """A ``.bin`` whose size disagrees with the stored dimensions is rejected."""
     n_frames, n_channels, n_samples = 2, 4, 4

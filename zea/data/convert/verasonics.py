@@ -1011,7 +1011,7 @@ class VerasonicsFile(h5py.File):
             # binary holds every frame of it.
             try:
                 n_buffer_frames = self._rcvbuffer_frame_count(buffer_index)
-            except KeyError:
+            except (KeyError, IndexError):  # no RcvBuffer, or fewer entries than .bin files
                 n_buffer_frames = None
             if n_buffer_frames != n_frames:
                 log.warning(
