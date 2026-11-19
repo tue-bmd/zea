@@ -1681,6 +1681,10 @@ class VerasonicsFile(h5py.File):
 
         available = self.available_buffers()
         buffers = available if buffers is None else list(buffers)
+        repeated = sorted({k for k in buffers if buffers.count(k) > 1})
+        if repeated:
+            # Each buffer becomes the track rf_buffer_{k}, so a repeat would duplicate a label.
+            raise ValueError(f"RF buffers {repeated} (0-based) are selected more than once.")
         missing = sorted(set(buffers) - set(available))
         if missing:
             names = ", ".join(_rf_buffer_name(k) for k in available) or "none"

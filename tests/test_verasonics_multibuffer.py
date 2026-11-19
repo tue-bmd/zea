@@ -277,6 +277,8 @@ def test_unknown_buffer_is_rejected(tmp_path):
             vf.read_verasonics_file(buffers=[1])
         with pytest.raises(ValueError, match="No RF buffers"):
             vf.read_verasonics_file(buffers=[])
+        with pytest.raises(ValueError, match=r"\[0\] \(0-based\) are selected more than once"):
+            vf.read_verasonics_file(buffers=[0, 0])
         with pytest.raises(ValueError, match="No Receive entries"):
             vf.receive_indices_for_buffer(3)
 
