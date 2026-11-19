@@ -22,6 +22,7 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+- The Verasonics converter supports workspaces with several RF buffers (``RcvData{1}``, ``RcvData{2}``, …): each buffer becomes a track labelled ``rf_buffer_{k}`` in one zea file, and every ``ImgDataP`` image buffer is kept (:gh:`538` by :user:`lvknippenberg`)
 
 Changed
 ^^^^^^^
