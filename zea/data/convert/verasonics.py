@@ -978,18 +978,21 @@ class VerasonicsFile(h5py.File):
         """
         if _verasonics_bin.is_binary_workspace(self):
             return _verasonics_bin.available_buffers(self)
-        return list(range(self.get_reference_size(self["RcvData"])))
+        return list(range(self.get_reference_size(self._rcvdata())))
 
-    def read_raw_buffer_array(self, buffer_index):
-        """Return ``RcvData{buffer_index + 1}`` as ``(n_frames, n_channels, n_samples)`` int16."""
-        if _verasonics_bin.is_binary_workspace(self):
-            return _verasonics_bin.read_buffer(self, buffer_index)
+    def _rcvdata(self):
         if "RcvData" not in self:
             raise KeyError(
                 f"'RcvData' not found in {self.filename}. Save the full workspace "
                 "after the acquisition, e.g. save('raw_data.mat', '-v7.3')."
             )
-        raw_data = self.dereference_index(self["RcvData"], buffer_index)
+        return self["RcvData"]
+
+    def read_raw_buffer_array(self, buffer_index):
+        """Return ``RcvData{buffer_index + 1}`` as ``(n_frames, n_channels, n_samples)`` int16."""
+        if _verasonics_bin.is_binary_workspace(self):
+            return _verasonics_bin.read_buffer(self, buffer_index)
+        raw_data = self.dereference_index(self._rcvdata(), buffer_index)
         return np.asarray(raw_data, dtype=np.int16)
 
     def read_raw_data(self, frames="all", buffer_index=0, first_frame_idx=None):

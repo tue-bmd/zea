@@ -468,6 +468,8 @@ def test_missing_rcvdata_and_image_buffer(tmp_path):
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(KeyError, match="'RcvData' not found"):
             vf.read_raw_buffer_array(0)
+        with pytest.raises(KeyError, match="'RcvData' not found"):
+            vf.read_verasonics_file()
         with pytest.raises(ValueError, match="image_buffer_index=1 is out of range"):
             vf.read_image_data_p(image_buffer_index=1)
 
