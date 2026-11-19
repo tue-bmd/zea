@@ -617,6 +617,12 @@ a Doppler / shear-wave buffer. Each buffer becomes a track, labelled
         print(f.track_labels)                     # ['rf_buffer_1', 'rf_buffer_2']
         raw = f.get_track("rf_buffer_2").data.raw_data[:]
 
+To convert only some buffers, pass their 0-based indices, e.g.
+``zea convert verasonics <src> <dst> --buffers 0`` for ``RcvData{1}``, or set
+``buffers: [0]`` for the file in ``convert.yaml``. Selecting frames
+(``--frames``, or ``frames`` / ``first_frame`` in ``convert.yaml``) needs a
+single buffer.
+
 **us4us**
 
 Record data with us4us software (ARRUS + gui4us), save the capture to ``.pkl``, then convert:

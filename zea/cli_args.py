@@ -817,6 +817,10 @@ class _Verasonics:
     frames: list[str] | None = None
     """The frames to add to the file. This can be a list of integers, a range of integers
     (e.g. 4-8), or 'all'. Defaults to 'all', unless specified in a convert.yaml file."""
+    buffers: list[int] | None = None
+    """The 0-based RF buffers to convert, e.g. 0 for RcvData{1}. Defaults to every
+    buffer, unless specified in a convert.yaml file. Selecting frames needs a single
+    buffer."""
     allow_accumulate: bool = False
     """Sometimes, some transmits are already accumulated on the Verasonics system (e.g.
     harmonic imaging through pulse inversion). In this case, the mode in the Receive

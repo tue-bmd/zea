@@ -275,6 +275,7 @@ def _validate_convert_config(data):
             first_frame: <int >= 0>          # optional
             frames: all | "N" | "N-M" | [N, ...] # optional
             transmits: all | [N, ...]         # optional
+            buffers: [N, ...]                 # optional
     """
     if not isinstance(data, dict) or "files" not in data:
         raise ValueError("convert.yaml must have a top-level 'files' key")
@@ -319,6 +320,13 @@ def _validate_convert_config(data):
                 raise ValueError(
                     f"'transmits' must be 'all' or a list of non-negative ints, got {tr!r}"
                 )
+        if "buffers" in entry:
+            bu = entry["buffers"]
+            if not (
+                isinstance(bu, list)
+                and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0 for x in bu)
+            ):
+                raise ValueError(f"'buffers' must be a list of non-negative ints, got {bu!r}")
     return data
 
 
@@ -943,11 +951,15 @@ class VerasonicsFile(h5py.File):
             - name: raw_data.mat
               first_frame: 26  # 0-based indexing
               frames: 30-99  # 0-based indexing
+              buffers: [0]  # 0-based indexing, so RcvData{1}
 
         If ``first_frame`` is provided, it will reorder the frames first and use
         the ``frames`` key to subsample afterwards.
 
         In the example ``frames: 30-99`` means frames 30 to 99 inclusive.
+
+        ``buffers`` selects the RF buffers to convert. ``frames`` and ``first_frame``
+        need a single buffer when the file has several.
 
         Returns:
             dict: The configuration for the current file, or an empty dict if no
@@ -1629,8 +1641,8 @@ class VerasonicsFile(h5py.File):
                 In this case, the mode in the Receive structure is set to 1 (accumulate).
                 If this flag is set to False, an error is raised when such a mode is detected.
             buffers (list[int], optional): 0-based RF buffers (``RcvData{k + 1}``) to read,
-                one track each. Defaults to every buffer in the file
-                (see :meth:`available_buffers`).
+                one track each. Defaults to the ``buffers`` in a `convert.yaml` file, or
+                else every buffer in the file (see :meth:`available_buffers`).
             additional_functions (list, optional): A list of functions that read additional
                 data from the file. Each function should take the `VerasonicsFile` as input
                 and return a `CustomElement`. Defaults to None.
@@ -1648,6 +1660,13 @@ class VerasonicsFile(h5py.File):
         if additional_functions is None:
             additional_functions = []
 
+        convert_config = self.load_convert_config()
+        first_frame = convert_config.get("first_frame", None)
+        if frames is None:
+            frames = convert_config.get("frames", "all")
+        if buffers is None:
+            buffers = convert_config.get("buffers", None)
+
         available = self.available_buffers()
         buffers = available if buffers is None else list(buffers)
         missing = sorted(set(buffers) - set(available))
@@ -1659,16 +1678,12 @@ class VerasonicsFile(h5py.File):
         if not buffers:
             raise ValueError("No RF buffers to convert.")
 
-        convert_config = self.load_convert_config()
-        first_frame = convert_config.get("first_frame", None)
-        if frames is None:
-            frames = convert_config.get("frames", "all")
-
         if len(buffers) > 1 and (not _is_all_frames(frames) or first_frame is not None):
             raise NotImplementedError(
                 "Selecting frames ('frames' / 'first_frame') is not supported for files "
                 f"with several RF buffers ({len(buffers)} buffers): the buffers generally "
-                "hold different numbers of frames."
+                "hold different numbers of frames. Select one buffer with 'buffers' in "
+                "convert.yaml or with --buffers."
             )
 
         tracks = []
@@ -1838,8 +1853,9 @@ class VerasonicsFile(h5py.File):
                 Used to convert ``Trans.lensCorrection`` (wavelengths) into
                 ``lens_thickness`` and ``lens_sound_speed`` fields on the probe. Defaults
                 to 1000.0.
-            buffers (list[int], optional): 0-based RF buffers to convert. Defaults to every
-                buffer in the file (see :meth:`available_buffers`).
+            buffers (list[int], optional): 0-based RF buffers to convert. Defaults to the
+                ``buffers`` in a `convert.yaml` file, or else every buffer in the file
+                (see :meth:`available_buffers`).
         """
         log.warning(
             "ASSUMPTION: all receives within an RF buffer are assumed to share the "
@@ -2109,6 +2125,7 @@ def convert_verasonics(args):
             - dst (str): Destination folder path.
             - frames (list[str]): MATLAB frames spec (e.g., ["all"], integers, or ranges like "4-8")
             - allow_accumulate (bool): Whether to allow accumulate mode.
+            - buffers (list[int] | None): 0-based RF buffers to convert (all if None).
             - device (str): Device to use for processing.
     """
 
@@ -2194,6 +2211,7 @@ def convert_verasonics(args):
                 file_output_path,
                 frames=args.frames,
                 allow_accumulate=args.allow_accumulate,
+                buffers=getattr(args, "buffers", None),
             )
             num_converted += 1
         except Exception:

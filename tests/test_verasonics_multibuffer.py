@@ -19,7 +19,7 @@ import h5py
 import numpy as np
 import pytest
 
-from zea.data.convert.verasonics import VerasonicsFile
+from zea.data.convert.verasonics import VerasonicsFile, _validate_convert_config
 
 _REF_DTYPE = h5py.special_dtype(ref=h5py.Reference)
 
@@ -213,6 +213,32 @@ def test_frame_selection_with_several_buffers_is_not_implemented(tmp_path, frame
         with pytest.raises(Exception) as excinfo:
             vf.read_verasonics_file(frames=frames, buffers=[0])
         assert not isinstance(excinfo.value, NotImplementedError)
+
+
+def test_convert_yaml_selects_buffers(tmp_path):
+    """'buffers' in convert.yaml picks the buffer, so its frame selection is allowed."""
+    buffers = [np.zeros((2, 2, 4), np.int16), np.zeros((3, 2, 4), np.int16)]
+    mat = tmp_path / "raw_data.mat"
+    _write_rcvdata_workspace(mat, buffers, bufnums=[1, 2])
+    (tmp_path / "convert.yaml").write_text(
+        "files:\n  - name: raw_data.mat\n    frames: 0-1\n    buffers: [1]\n"
+    )
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        assert vf.load_convert_config()["buffers"] == [1]
+        # Fails later on the missing metadata of this synthetic file.
+        with pytest.raises(Exception) as excinfo:
+            vf.read_verasonics_file()
+        assert not isinstance(excinfo.value, NotImplementedError)
+        assert "RF buffer 2" in "".join(getattr(excinfo.value, "__notes__", []))
+
+
+@pytest.mark.parametrize("buffers", [0, [-1], ["0"], [True]])
+def test_convert_yaml_rejects_invalid_buffers(buffers):
+    """'buffers' in convert.yaml must be a list of non-negative ints."""
+    config = {"files": [{"name": "raw_data.mat", "buffers": buffers}]}
+    with pytest.raises(ValueError, match="'buffers'"):
+        _validate_convert_config(config)
 
 
 @pytest.mark.parametrize("frames", ["all", ["all"], ("all",)])
@@ -575,3 +601,25 @@ def test_convert_existing_output(tmp_path, monkeypatch, answer, overwritten):
 
     assert dst.exists() != overwritten
     assert converted == ([dst] if overwritten else [])
+
+
+def test_convert_forwards_buffers(tmp_path, monkeypatch):
+    """The CLI's --buffers reaches the conversion."""
+    from zea.data.convert import verasonics
+
+    src = tmp_path / "raw_data.mat"
+    _write_rcvdata_workspace(src, [np.zeros((1, 2, 4), np.int16)], bufnums=[1])
+    dst = tmp_path / "raw_data.hdf5"
+
+    calls = []
+    monkeypatch.setattr(verasonics, "init_device", lambda *_: None)
+    monkeypatch.setattr(
+        verasonics, "_zea_from_verasonics_workspace", lambda src, dst, **kw: calls.append(kw)
+    )
+    args = argparse.Namespace(
+        src=str(src), dst=str(dst), frames=None, allow_accumulate=False, device="cpu", buffers=[0]
+    )
+    args.hf_repo_id = None
+    verasonics.convert_verasonics(args)
+
+    assert [kw["buffers"] for kw in calls] == [[0]]
