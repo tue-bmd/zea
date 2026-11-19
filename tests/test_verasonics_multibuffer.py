@@ -178,3 +178,28 @@ def test_binary_dimension_mismatch_raises(tmp_path):
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(ValueError, match="inconsistent"):
             vf.read_raw_buffer_array(0)
+
+
+@pytest.mark.parametrize("n_buffers", [1, 2])
+def test_cli_helper_writes_one_file_per_buffer(tmp_path, monkeypatch, n_buffers):
+    """The CLI keeps one output for a single buffer and writes ``_buffer{k}`` otherwise."""
+    from zea.data.convert import verasonics
+
+    buffers = [np.zeros((1, 2, 4), np.int16) for _ in range(n_buffers)]
+    mat = tmp_path / "raw_data.mat"
+    _write_rcvdata_workspace(mat, buffers, bufnums=list(range(1, n_buffers + 1)))
+
+    def fake_to_zea(self, output_path, buffer_index=0, **kwargs):
+        Path(output_path).write_text(str(buffer_index))
+
+    monkeypatch.setattr(VerasonicsFile, "to_zea", fake_to_zea)
+
+    out = tmp_path / "out" / "raw_data.hdf5"
+    written = verasonics._zea_from_verasonics_workspace(mat, out)
+
+    if n_buffers == 1:
+        assert written == [out]
+    else:
+        assert [p.name for p in written] == ["raw_data_buffer1.hdf5", "raw_data_buffer2.hdf5"]
+        assert [p.read_text() for p in written] == ["0", "1"]
+    assert verasonics._buffer_output_paths(out) == written

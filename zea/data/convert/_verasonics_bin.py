@@ -31,21 +31,6 @@ from zea import log
 _BINARY_TEMPLATE = "RF_data_{k}.bin"
 
 
-def find_binary_workspace(directory):
-    """Return the metadata ``.mat`` if ``directory`` uses the ``.bin`` layout, else ``None``."""
-    directory = Path(directory)
-    if not any(directory.glob(_BINARY_TEMPLATE.format(k="*"))):
-        return None
-    mat_files = sorted(directory.glob("*.mat"))
-    if len(mat_files) != 1:
-        raise ValueError(
-            f"{directory} contains {_BINARY_TEMPLATE.format(k='*')} files, so it is "
-            f"read as one acquisition with external RF binaries. That needs exactly "
-            f"one .mat, but {len(mat_files)} were found."
-        )
-    return mat_files[0]
-
-
 def is_binary_workspace(file):
     """Whether an open ``VerasonicsFile`` stores its RF in external ``.bin`` files."""
     return "RcvData" not in file and "RF_frames" in file

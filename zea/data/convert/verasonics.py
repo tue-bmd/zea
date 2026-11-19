@@ -38,6 +38,10 @@ Or alternatively, use the CLI to convert all .mat files in a directory:
 
         zea convert verasonics "C:/path/to/source" "C:/path/to/output"
 
+A ``.mat`` with several RF buffers (``RcvData{1}``, ``RcvData{2}``, ...) is written
+to one file per buffer, named ``<name>_buffer{k}.hdf5`` with ``k`` the MATLAB
+buffer number.
+
 ---------------
 
 By default the zea dataformat saves all the data to an hdf5 file with the following structure:
@@ -52,6 +56,7 @@ By default the zea dataformat saves all the data to an hdf5 file with the follow
 The data is stored in the ``data`` group and the scan parameters are stored in the ``scan``.
 """  # noqa: E501
 
+import glob
 import os
 import re
 import sys
@@ -2236,22 +2241,40 @@ class VerasonicsProbe:
         }
 
 
-def _zea_from_verasonics_workspace(input_path, output_path, **kwargs):
-    """Helper function around ``VerasonicsFile.to_zea``"""
+def _buffer_output_paths(output_path):
+    """Existing outputs of one ``.mat``: ``output_path`` and its per-buffer siblings."""
+    output_path = Path(output_path)
+    pattern = re.compile(rf"{re.escape(output_path.stem)}_buffer\d+\.hdf5")
+    siblings = output_path.parent.glob(f"{glob.escape(output_path.stem)}_buffer*.hdf5")
+    siblings = sorted(p for p in siblings if pattern.fullmatch(p.name))
+    return [p for p in [output_path, *siblings] if p.is_file()]
 
-    # Create the output directory if it does not exist
+
+def _zea_from_verasonics_workspace(input_path, output_path, **kwargs):
+    """Convert one ``.mat`` and return the written paths.
+
+    A file with only the first RF buffer is written to ``output_path``. A file with
+    several RF buffers is written to ``{output_path.stem}_buffer{k}.hdf5`` (``k`` is
+    the 1-based MATLAB buffer number) next to ``output_path``.
+    """
     input_path = Path(input_path)
     output_path = Path(output_path)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    assert input_path.is_file(), log.error(f"Input file {log.yellow(input_path)} does not exist.")
-
-    # Load the data
     with VerasonicsFile(input_path, "r") as file:
-        file.to_zea(output_path, **kwargs)
+        buffers = file.available_buffers()
+        if buffers == [0]:
+            file.to_zea(output_path, **kwargs)
+            written = [output_path]
+        else:
+            results = file.to_zea_all(output_path.parent, stem=output_path.stem, **kwargs)
+            written = [out for out in results.values() if out is not None]
+            if not written:
+                raise RuntimeError(f"None of the RF buffers in {input_path.name} converted.")
 
-    log.success(f"Converted {log.yellow(input_path)} to {log.yellow(output_path)}")
+    for out in written:
+        log.success(f"Converted {log.yellow(input_path)} to {log.yellow(out)}")
+    return written
 
 
 def get_answer(prompt, additional_options=None):
@@ -2335,46 +2358,7 @@ def convert_verasonics(args):
 
     log.info(f"Selected path: {log.yellow(selected_path)}")
 
-    # A directory with external RF binaries is one acquisition, converted per buffer.
-    binary_workspace = None
-    if selected_path_is_directory:
-        try:
-            binary_workspace = _verasonics_bin.find_binary_workspace(selected_path)
-        except ValueError as e:
-            log.error(str(e))
-            sys.exit(2)
-
     num_converted = 0
-
-    if binary_workspace is not None:
-        log.info(f"Found external RF binaries next to {log.yellow(binary_workspace.name)}.")
-        with VerasonicsFile(binary_workspace, "r") as file:
-            results = file.to_zea_all(
-                output_path,
-                overwrite=True,
-                frames=args.frames,
-                allow_accumulate=args.allow_accumulate,
-            )
-        for buffer_index, out in results.items():
-            if out is not None:
-                num_converted += 1
-                log.success(f"Converted buffer {buffer_index + 1} -> {log.yellow(out)}")
-
-        # Do not write a dataset card or upload anything when nothing was converted.
-        if getattr(args, "upload", False) and num_converted == 0:
-            log.error("No buffers were converted successfully; skipping upload.")
-            return
-        if args.hf_repo_id:
-            write_dataset_card(output_path, make_dataset_card(args.hf_repo_id))
-        if getattr(args, "upload", False):
-            assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
-            assert args.revision, "revision must be provided when --upload is True."
-            upload_verasonics(
-                output_path,
-                revision=args.revision,
-                repo_id=args.hf_repo_id,
-            )
-        return
 
     # Build the list of (input, output) file pairs to convert
     if selected_path_is_directory:
@@ -2398,11 +2382,13 @@ def convert_verasonics(args):
         file_pairs = [(selected_path, output_path)]
 
     for full_path, file_output_path in file_pairs:
-        # Handle existing files
-        if file_output_path.is_file():
+        existing = _buffer_output_paths(file_output_path)
+        if existing:
+            answer = None
             if existing_file_policy is None:
                 answer = get_answer(
-                    f"File {log.yellow(file_output_path)} exists. Overwrite?"
+                    f"Output for {log.yellow(full_path.name)} exists "
+                    f"({', '.join(p.name for p in existing)}). Overwrite?"
                     "\n\ty\t - Overwrite"
                     "\n\tn\t - Skip"
                     "\n\tya\t - Overwrite all existing files"
@@ -2414,31 +2400,26 @@ def convert_verasonics(args):
                     existing_file_policy = "overwrite"
                 elif answer == "na":
                     existing_file_policy = "skip"
-                    continue
 
             if existing_file_policy == "skip" or answer is False:
                 log.info("Skipping...")
                 continue
 
-            if existing_file_policy == "overwrite" or answer is True:
-                log.warning(f"{log.yellow(file_output_path)} exists. Deleting...")
-                file_output_path.unlink(missing_ok=False)
+            for path in existing:
+                log.warning(f"{log.yellow(path)} exists. Deleting...")
+                path.unlink()
 
         try:
-            _zea_from_verasonics_workspace(
+            written = _zea_from_verasonics_workspace(
                 full_path,
                 file_output_path,
                 frames=args.frames,
                 allow_accumulate=args.allow_accumulate,
             )
-            num_converted += 1
+            num_converted += len(written)
         except Exception:
-            # Print error message without raising it
             log.error(f"Failed to convert {full_path.name}")
-            # Print stacktrace
             traceback.print_exc()
-
-            continue
 
     # Do not write a dataset card or upload anything when nothing was converted
     # (e.g. all files failed or were skipped).
