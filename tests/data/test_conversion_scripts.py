@@ -1822,8 +1822,6 @@ def test_verasonics_upload_requires_hf_repo_id(tmp_path, monkeypatch):
         args=["verasonics", str(src), str(dst), "--upload", "--revision", "test-branch"],
     )
 
-    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
-
     with pytest.raises(AssertionError, match="hf_repo_id must be provided"):
         convert_verasonics(args)
 
@@ -1839,8 +1837,6 @@ def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
         Dataset,
         args=["verasonics", str(src), str(dst), "--upload", "--hf-repo-id", "zeahub/test-dataset"],
     )
-
-    monkeypatch.setattr("zea.data.convert.verasonics.init_device", lambda *_: None)
 
     with pytest.raises(AssertionError, match="revision must be provided"):
         convert_verasonics(args)

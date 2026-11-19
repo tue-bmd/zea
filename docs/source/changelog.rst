@@ -32,6 +32,7 @@ Changed
 Fixed
 ^^^^^
 - :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
+- ``zea convert verasonics`` failed with a tyro "Name conflict" error, because its ``--device`` option clashed with the top-level ``zea --device``. The option is removed, so set the device with ``zea --device``. ``python -m zea.data.convert verasonics`` no longer takes ``--device`` either (:gh:`538` by :user:`wesselvannierop`)
 
 
 v0.1.9 (2026-11-10)

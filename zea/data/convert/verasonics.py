@@ -72,7 +72,6 @@ from zea.data.convert.utils import (
 )
 from zea.data.file import CustomElement, File
 from zea.func import log_compress, normalize
-from zea.internal.device import init_device
 from zea.utils import strtobool
 
 _VERASONICS_TO_ZEA_PROBE_NAMES = {
@@ -2125,15 +2124,11 @@ def convert_verasonics(args):
             - dst (str): Destination folder path.
             - frames (list[str]): MATLAB frames spec (e.g., ["all"], integers, or ranges like "4-8")
             - allow_accumulate (bool): Whether to allow accumulate mode.
-            - buffers (list[int] | None): 0-based RF buffers to convert (all if None).
-            - device (str): Device to use for processing.
-    """
+            - buffers (list[int] | None): 0-based RF buffers to convert (all if None)."""
 
     if getattr(args, "upload", False):
         assert args.hf_repo_id, "hf_repo_id must be provided when --upload is True."
         assert args.revision, "revision must be provided when --upload is True."
-
-    init_device(args.device)
 
     # Variable to indicate what to do with existing files.
     # Is set by the user in case these are found.

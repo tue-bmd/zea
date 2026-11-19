@@ -826,8 +826,6 @@ class _Verasonics:
     harmonic imaging through pulse inversion). In this case, the mode in the Receive
     structure is set to 1 (accumulate). If this flag is set, such files will be processed.
     Otherwise, an error is raised when such a mode is detected."""
-    device: str = "cpu"
-    """Device to use for conversion (e.g., 'cpu' or 'gpu:0')."""
     upload: bool = False
     """Upload the converted dataset to HuggingFace Hub after conversion. Only for zea
     maintainers with push access to the repository."""

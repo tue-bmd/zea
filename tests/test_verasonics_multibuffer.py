@@ -588,14 +588,11 @@ def test_convert_existing_output(tmp_path, monkeypatch, answer, overwritten):
     dst.write_text("existing")
 
     converted = []
-    monkeypatch.setattr(verasonics, "init_device", lambda *_: None)
     monkeypatch.setattr("builtins.input", lambda _prompt: answer)
     monkeypatch.setattr(
         verasonics, "_zea_from_verasonics_workspace", lambda src, dst, **_: converted.append(dst)
     )
-    args = argparse.Namespace(
-        src=str(src), dst=str(dst), frames=["all"], allow_accumulate=False, device="cpu"
-    )
+    args = argparse.Namespace(src=str(src), dst=str(dst), frames=["all"], allow_accumulate=False)
     args.hf_repo_id = None
     verasonics.convert_verasonics(args)
 
@@ -612,12 +609,11 @@ def test_convert_forwards_buffers(tmp_path, monkeypatch):
     dst = tmp_path / "raw_data.hdf5"
 
     calls = []
-    monkeypatch.setattr(verasonics, "init_device", lambda *_: None)
     monkeypatch.setattr(
         verasonics, "_zea_from_verasonics_workspace", lambda src, dst, **kw: calls.append(kw)
     )
     args = argparse.Namespace(
-        src=str(src), dst=str(dst), frames=None, allow_accumulate=False, device="cpu", buffers=[0]
+        src=str(src), dst=str(dst), frames=None, allow_accumulate=False, buffers=[0]
     )
     args.hf_repo_id = None
     verasonics.convert_verasonics(args)

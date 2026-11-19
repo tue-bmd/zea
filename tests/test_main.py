@@ -255,6 +255,23 @@ def test_convert_main_dispatches_without_preallocating(monkeypatch):
     assert called_args.download is True
 
 
+def test_convert_verasonics_takes_the_top_level_device(monkeypatch):
+    """'zea --device ... convert verasonics' parses, and its help renders.
+
+    A device field on the verasonics subcommand used to clash with the top-level
+    --device, so tyro failed with 'Name conflict' on every verasonics command.
+    """
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(buf):
+        parse_args(["convert", "verasonics", "--help"])
+    assert exc_info.value.code == 0
+    assert "--buffers" in buf.getvalue()
+
+    args = parse_args(["--device", "cpu", "convert", "verasonics", "src", "dst"])
+    assert args.device == "cpu"
+    assert args.subcommand.subcommand.src.name == "src"
+
+
 # ── datapaths subcommand ──────────────────────────────────────────────────────
 
 
