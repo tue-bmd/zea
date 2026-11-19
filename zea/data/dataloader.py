@@ -448,7 +448,7 @@ def _metadata_batch_conflicts(
     file_n_frames: dict,
     dim_selections: dict | None = None,
     file_dim_sizes: dict | None = None,
-) -> dict[str, dict[tuple, list[str]]]:
+) -> dict[str, dict[tuple | str, list[str]]]:
     """Find metadata leaves whose shape differs between files.
 
     Batching stacks metadata leaf by leaf, so a leaf that is a scalar in one file and
@@ -478,7 +478,7 @@ def _metadata_batch_conflicts(
             shape = batch_leaf_shape(leaf, shape, n_frames, dim_selections, dim_sizes)
             per_leaf[leaf][shape].append(file_path)
 
-    conflicts = {}
+    conflicts: dict[str, dict[tuple | str, list[str]]] = {}
     for leaf, by_shape in per_leaf.items():
         # A leaf that some files do not have at all is a structural mismatch too: the
         # dicts being stacked would not share the same keys.

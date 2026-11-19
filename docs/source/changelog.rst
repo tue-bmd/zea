@@ -22,6 +22,21 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+
+Changed
+^^^^^^^
+- :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
+
+Fixed
+^^^^^
+- :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
+
+
+v0.1.9 (2026-11-10)
+-------------------
+
+New Features
+^^^^^^^^^^^^
 - ADMIRE (Aperture Domain Model Image REconstruction), a model-based beamformer that suppresses off-axis and multipath clutter, as :class:`zea.ops.ADMIRE` or ``zea.ops.Beamform(beamformer="admire")``. See :mod:`zea.beamform.admire` (:gh:`650` by :user:`tristan-deep`)
 - UltraPIPS, a perceptual metric for B-mode ultrasound built on an ultrasound foundation model: :class:`zea.models.ultrapips.UltraPIPS`, or the ``ultrapips`` metric in :mod:`zea.metrics`, used like ``lpips`` (:gh:`649` by :user:`tristan-deep`)
 - Transparent GIFs from RGBA frames with ``transparent=True`` in :func:`zea.io_lib.save_video` and :func:`zea.io_lib.save_to_gif` (:gh:`663` by :user:`tristan-deep`)
@@ -55,7 +70,7 @@ Fixed
 - Deriving ``xlims`` on a GPU with the torch backend (:gh:`661` by :user:`tristan-deep`)
 - Jitted ops on the torch backend in the Docker images, which lacked a C++ compiler (:gh:`658` by :user:`wesselvannierop`)
 - ``zea app`` and ``load_model_from_hf`` download to the zea cache instead of the Hugging Face cache (:gh:`689` by :user:`Louisvh`)
-- The cache key of a ``@cache_output`` function includes the source of other cached functions it calls, so editing those functions invalidates its cached results (:gh:`703` by :user:`wesselvannierop`)
+- ``@cache_output`` functions that call a recursive function can now be cached. Additionally, the cache key now also includes other ``@cache_output`` functions it calls, so editing those invalidates its cache (:gh:`703` by :user:`wesselvannierop`)
 
 
 v0.1.8 (2026-10-01)

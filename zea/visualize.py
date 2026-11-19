@@ -6,7 +6,6 @@ from typing import List, Optional, Tuple, Union, cast
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.ops.image import crop_images
-from matplotlib.axes import Axes as MplAxes
 from matplotlib.patches import PathPatch, Rectangle
 from matplotlib.path import Path as pltPath
 from mpl_toolkits.axes_grid1 import ImageGrid
@@ -175,8 +174,7 @@ def plot_image_grid(
 
     if fig_contents is None:
         fig_contents = [None for _ in range(len(images_padded))]
-    for i, _ax in enumerate(axes):  # ty: ignore[invalid-argument-type]
-        ax = cast(MplAxes, _ax)
+    for i, ax in enumerate(axes):  # ty: ignore[invalid-argument-type]
         image = images_padded[i]
         if image is None:
             ax.set_visible(False)
@@ -393,8 +391,8 @@ def plot_biplanes(
         ax3d.set_box_aspect(volume.shape)
         # Remove background and axes faces
         ax3d.grid(False)
-        ax3d.xaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
-        ax3d.yaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+        ax3d.xaxis.pane.fill = False  # ty: ignore[missing-attribute]
+        ax3d.yaxis.pane.fill = False  # ty: ignore[missing-union-attribute]
         ax3d.zaxis.pane.fill = False
     else:
         ax3d = cast(Axes3D, ax)
@@ -657,8 +655,8 @@ def plot_frustum_vertices(
     ax3d.set_zlim((z_min, z_max))
     ax3d.set_axis_off()
     ax3d.grid(False)
-    ax3d.xaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
-    ax3d.yaxis.pane.fill = False  # ty: ignore[unresolved-attribute]
+    ax3d.xaxis.pane.fill = False  # ty: ignore[missing-attribute]
+    ax3d.yaxis.pane.fill = False  # ty: ignore[missing-union-attribute]
     ax3d.zaxis.pane.fill = False
 
     return fig, ax3d
