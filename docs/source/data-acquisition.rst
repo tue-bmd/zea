@@ -595,13 +595,40 @@ Besides supported existing public datasets, you can also convert your own acquis
 
 **Verasonics**
 
-Record data with your Verasonics script, save the workspace to ``.mat``, then convert:
+Record data with your Verasonics script, save the workspace to ``.mat`` (HDF5,
+i.e. ``save(..., '-v7.3')``), then convert:
 
 .. code-block:: shell
 
     zea convert verasonics <src> <dst>
 
 See :mod:`zea.data.convert.verasonics` for details.
+
+*Multiple RF buffers.*  A Verasonics acquisition may fill several RF buffers
+(``RcvData{1}``, ``RcvData{2}``, …) — for example a wide-beam B-mode buffer and
+a Doppler / shear-wave buffer. Each buffer becomes a track in the same zea file.
+
+.. note::
+
+   zea counts buffers (and frames) from 0, while MATLAB counts from 1. So
+   ``RcvData{1}`` is buffer 0 and becomes the track ``rf_buffer_0``, ``RcvData{2}``
+   is buffer 1 and becomes ``rf_buffer_1``, and so on. The same holds for the image
+   buffers: ``ImgDataP{1}`` is stored as ``verasonics_image_buffer_0``. Converter
+   messages name both, e.g. "RF buffer 0 (RcvData{1})".
+
+.. code-block:: python
+
+    from zea import File
+
+    with File("raw_data.hdf5") as f:
+        print(f.track_labels)                     # ['rf_buffer_0', 'rf_buffer_1']
+        raw = f.get_track("rf_buffer_1").data.raw_data[:]  # RcvData{2}
+
+To convert only some buffers, pass their 0-based indices, e.g.
+``zea convert verasonics <src> <dst> --buffers 0`` for ``RcvData{1}``, or set
+``buffers: [0]`` for the file in ``convert.yaml``. Selecting frames
+(``--frames``, or ``frames`` / ``first_frame`` in ``convert.yaml``) needs a
+single buffer.
 
 **us4us**
 

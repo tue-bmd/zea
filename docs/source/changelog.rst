@@ -22,15 +22,18 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+- The Verasonics converter supports workspaces with several RF buffers (``RcvData{1}``, ``RcvData{2}``, …): each buffer becomes a track in one zea file, and every ``ImgDataP`` image buffer is kept. Buffers are counted from 0 like the rest of zea, so ``RcvData{1}`` becomes the track ``rf_buffer_0``. Select buffers with ``--buffers`` or ``buffers`` in ``convert.yaml`` (:gh:`538` by :user:`lvknippenberg`)
 
 Changed
 ^^^^^^^
+- (Breaking) The Verasonics converter stores each image buffer as a numbered custom element counted from 0, so ``ImgDataP{1}`` becomes ``verasonics_image_buffer_0``, also when there is a single image buffer (previously ``verasonics_image_buffer``) (:gh:`538` by :user:`lvknippenberg`)
 - :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
 - Logging a character the console can't encode (e.g. ``→`` on a redirected Windows stdout) printed a ``--- Logging error ---`` traceback instead of the message; such characters are now escaped (:gh:`721` by :user:`wesselvannierop`)
 - :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
+- ``zea convert verasonics`` failed with a tyro "Name conflict" error, because its ``--device`` option clashed with the top-level ``zea --device``. The option is removed, so set the device with ``zea --device``. ``python -m zea.data.convert verasonics`` no longer takes ``--device`` either (:gh:`538` by :user:`wesselvannierop`)
 
 
 v0.1.9 (2026-11-10)

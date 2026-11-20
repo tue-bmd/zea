@@ -817,13 +817,19 @@ class _Verasonics:
     frames: list[str] | None = None
     """The frames to add to the file. This can be a list of integers, a range of integers
     (e.g. 4-8), or 'all'. Defaults to 'all', unless specified in a convert.yaml file."""
+    buffers: list[int] | None = None
+    """The RF buffers to convert, counted from 0 like the frames: 0 is MATLAB's
+    RcvData{1} and becomes the track rf_buffer_0. Defaults to every buffer, unless
+    specified in a convert.yaml file. Selecting frames needs a single buffer."""
     allow_accumulate: bool = False
     """Sometimes, some transmits are already accumulated on the Verasonics system (e.g.
     harmonic imaging through pulse inversion). In this case, the mode in the Receive
     structure is set to 1 (accumulate). If this flag is set, such files will be processed.
     Otherwise, an error is raised when such a mode is detected."""
-    device: str = "cpu"
-    """Device to use for conversion (e.g., 'cpu' or 'gpu:0')."""
+    connector_applied: bool | None = None
+    """Whether the raw data was already reordered with Trans.ConnectorES before saving.
+    Required for files that have as many channels as probe elements and no
+    save_raw_version, unless specified in a convert.yaml file."""
     upload: bool = False
     """Upload the converted dataset to HuggingFace Hub after conversion. Only for zea
     maintainers with push access to the repository."""

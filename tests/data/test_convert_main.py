@@ -127,7 +127,7 @@ def test_verasonics_defaults():
     args = parse_args(["verasonics", "src", "dst"])
     assert args.frames is None
     assert args.allow_accumulate is False
-    assert args.device == "cpu"
+    assert args.buffers is None
     assert args.upload is False
     assert args.revision is None
     assert args.hf_repo_id == ""
@@ -143,8 +143,9 @@ def test_verasonics_flags():
             "0-3",
             "7",
             "--allow-accumulate",
-            "--device",
-            "gpu:0",
+            "--buffers",
+            "0",
+            "1",
             "--upload",
             "--revision",
             "v1",
@@ -154,7 +155,7 @@ def test_verasonics_flags():
     )
     assert args.frames == ["0-3", "7"]
     assert args.allow_accumulate is True
-    assert args.device == "gpu:0"
+    assert args.buffers == [0, 1]
     assert args.hf_repo_id == "zeahub/test"
 
 

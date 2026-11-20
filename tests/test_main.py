@@ -2,10 +2,12 @@
 
 import contextlib
 import io
+import typing
 from unittest.mock import patch
 
 import pytest
 import tyro
+from tyro.conf._confstruct import _SubcommandConfig
 
 from zea.__main__ import CLI
 from zea.cli_args import AppArgs, DataPathsArgs, ProcessArgs
@@ -24,6 +26,39 @@ def test_subcommands_exist():
         parse_args(["process", "-d", "data/", "-c", "cfg.yaml"]).subcommand, ProcessArgs
     )
     assert isinstance(parse_args(["app"]).subcommand, AppArgs)
+
+
+def _subcommand_paths(cls, prefix=()):
+    """Yield the name path of every (nested) subcommand below the dataclass ``cls``."""
+    hints = typing.get_type_hints(cls, include_extras=True)
+    if "subcommand" not in hints:
+        return
+    union = hints["subcommand"]
+    while typing.get_origin(union) is typing.Annotated:
+        union = typing.get_args(union)[0]
+    for option in typing.get_args(union):
+        sub_cls, *metadata = typing.get_args(option)
+        names = [m.name for m in metadata if isinstance(m, _SubcommandConfig)]
+        if not names:  # e.g. a suppressed ``None`` option
+            continue
+        path = (*prefix, names[0])
+        yield path
+        yield from _subcommand_paths(sub_cls, path)
+
+
+@pytest.mark.parametrize("path", list(_subcommand_paths(CLI)), ids=" ".join)
+def test_every_subcommand_help_exits_zero(path):
+    """``zea <subcommand ...> --help`` renders for every subcommand.
+
+    tyro builds the whole parser for a subcommand only when it is reached, so a broken
+    subcommand (e.g. an option clashing with the cascading top-level ``--device``)
+    fails here even though the other subcommands work.
+    """
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as exc_info, contextlib.redirect_stdout(buf):
+        parse_args([*path, "--help"])
+    assert exc_info.value.code == 0
+    assert "usage" in buf.getvalue().lower()
 
 
 def test_no_subcommand_exits_nonzero():
