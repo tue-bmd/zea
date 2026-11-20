@@ -42,6 +42,9 @@ from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
 
 from .. import DEFAULT_TEST_SEED
+from ..fixtures.verasonics_workspace import VerasonicsWorkspace
+
+VERASONICS_TEST_MAT = "verasonics_conversion_test_zea.mat"
 
 
 def run_subprocess(cmd, **kwargs):
@@ -561,9 +564,8 @@ def create_picmus_test_data(src):
 
 
 def create_verasonics_test_data(src):
-    """For Verasonics we have a .mat file in huggingface."""
-    mat_file = _hf_resolve_path("hf://zeahub/pytest/verasonics_conversion_test_zea.mat")
-    shutil.copy(mat_file, src / mat_file.name)
+    """Generate a synthetic Verasonics workspace with one RF and two image buffers."""
+    mat_file = VerasonicsWorkspace().write(src / VERASONICS_TEST_MAT)
 
     # Create a convert.yaml file to specify parameters
     convert_yaml = {
@@ -1842,28 +1844,15 @@ def test_verasonics_upload_requires_revision(tmp_path, monkeypatch):
         convert_verasonics(args)
 
 
-def copy_verasonics_mat_without_img_data_p(destination_dir):
-    """Copy the Verasonics test .mat and strip its ImgDataP buffer.
-
-    Not every Verasonics workspace reconstructs images, so the ImgDataP buffer can be
-    absent. Removing it from a copy reproduces such a workspace.
-    """
-    mat_file = _hf_resolve_path("hf://zeahub/pytest/verasonics_conversion_test_zea.mat")
-    stripped_file = destination_dir / mat_file.name
-    shutil.copy(mat_file, stripped_file)
-
-    stripped_file.chmod(0o644)
-    with h5py.File(stripped_file, "r+") as file:
-        del file["ImgDataP"]
-    return stripped_file
-
-
 @pytest.mark.heavy
 def test_verasonics_read_without_img_data_p(tmp_path):
-    """Reading a Verasonics file without ImgDataP omits the image buffer element."""
-    stripped_file = copy_verasonics_mat_without_img_data_p(tmp_path)
+    """Reading a Verasonics file without ImgDataP omits the image buffer element.
 
-    with VerasonicsFile(stripped_file, "r") as verasonics_file:
+    Not every Verasonics workspace reconstructs images, so ImgDataP can be absent.
+    """
+    mat_file = VerasonicsWorkspace(n_image_buffers=0).write(tmp_path / VERASONICS_TEST_MAT)
+
+    with VerasonicsFile(mat_file, "r") as verasonics_file:
         assert verasonics_file.read_image_data_p() is None
         _, _, custom_elements = verasonics_file.read_verasonics_file()
 
@@ -1871,38 +1860,17 @@ def test_verasonics_read_without_img_data_p(tmp_path):
     assert not any(name.startswith("verasonics_image_buffer") for name in element_names)
 
 
-def copy_verasonics_mat_with_one_image_buffer(destination_dir):
-    """Copy the Verasonics test .mat and reduce it to a single image buffer.
-
-    The test workspace defines two ``imageDisplay`` processes and therefore two image
-    buffers, but a setup script with a single display window produces just one. MATLAB
-    then stores ``ImgDataP`` as a 1x1 cell and ``Resource.ImageBuffer`` as a plain
-    struct rather than a struct array. Rewriting both reproduces such a workspace.
-    """
-    mat_file = _hf_resolve_path("hf://zeahub/pytest/verasonics_conversion_test_zea.mat")
-    single_buffer_file = destination_dir / mat_file.name
-    shutil.copy(mat_file, single_buffer_file)
-
-    single_buffer_file.chmod(0o644)
-    with h5py.File(single_buffer_file, "r+") as file:
-        image_data_ref = file["ImgDataP"][0, 0]
-        num_frames = file[file["Resource"]["ImageBuffer"]["numFrames"][0, 0]][:]
-
-        del file["ImgDataP"]
-        file.create_dataset("ImgDataP", data=np.array([[image_data_ref]], dtype=h5py.ref_dtype))
-
-        del file["Resource"]["ImageBuffer"]["numFrames"]
-        file["Resource"]["ImageBuffer"]["numFrames"] = np.reshape(num_frames, (1, 1))
-
-    return single_buffer_file
-
-
 @pytest.mark.heavy
 def test_verasonics_read_with_one_image_buffer(tmp_path):
-    """Reading a Verasonics file with a single image buffer keeps the image buffer."""
-    single_buffer_file = copy_verasonics_mat_with_one_image_buffer(tmp_path)
+    """Reading a Verasonics file with a single image buffer keeps the image buffer.
 
-    with VerasonicsFile(single_buffer_file, "r") as verasonics_file:
+    A setup script with a single display window produces one image buffer, so MATLAB
+    stores ``ImgDataP`` as a 1x1 cell and ``Resource.ImageBuffer`` as a plain struct
+    rather than a struct array.
+    """
+    mat_file = VerasonicsWorkspace(n_image_buffers=1).write(tmp_path / VERASONICS_TEST_MAT)
+
+    with VerasonicsFile(mat_file, "r") as verasonics_file:
         image_data = verasonics_file.read_image_data_p()
         assert image_data is not None
         _, _, custom_elements = verasonics_file.read_verasonics_file()

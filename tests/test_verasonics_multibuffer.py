@@ -1,8 +1,9 @@
 """Standalone tests for the Verasonics converter's multi-buffer RF reading.
 
-These build tiny synthetic MATLAB-v7.3-style HDF5 workspaces in a ``tmp_path``
-(no external data) and exercise the two per-buffer RF storage forms the
-converter supports:
+These build tiny synthetic MATLAB ``-v7.3`` workspaces in a ``tmp_path`` with
+:mod:`tests.fixtures.verasonics_workspace`, which stores every variable the way its
+schema (checked against real Verasonics files) says. They exercise the two per-buffer RF
+storage forms the converter supports:
 
 * Several RF buffers stored **in** the ``.mat`` as a ``RcvData`` cell array.
 * RF stored in **external** ``RF_data_{k}.bin`` files next to a metadata ``.mat``
@@ -19,79 +20,60 @@ import h5py
 import numpy as np
 import pytest
 
+from tests.fixtures.verasonics_workspace import (
+    CellArray,
+    StructArray,
+    VerasonicsWorkspace,
+    write_bin,
+    write_workspace,
+)
 from zea.data.convert.verasonics import (
     VerasonicsFile,
     _time_to_next_acq_per_frame,
     _validate_convert_config,
 )
-
-_REF_DTYPE = h5py.special_dtype(ref=h5py.Reference)
-
-
-def _write_cell_array(f, name, arrays):
-    """Write ``arrays`` as a MATLAB-style cell array (a dataset of HDF5 refs).
-
-    Args:
-        f (h5py.File): Open file to write into.
-        name (str): Name of the cell-array dataset.
-        arrays (list[np.ndarray]): One array per cell.
-    """
-    refs_group = f.require_group("#refs#")
-    dset = f.create_dataset(name, shape=(len(arrays), 1), dtype=_REF_DTYPE)
-    for i, arr in enumerate(arrays):
-        target = refs_group.create_dataset(f"{name}_{i}", data=arr)
-        dset[i, 0] = target.ref
+from zea.data.file import File
 
 
 def _write_rcvdata_workspace(path, buffers, bufnums):
     """Write a synthetic workspace with an in-``.mat`` ``RcvData`` cell array.
 
     Args:
-        path (str | Path): Output ``.mat`` (HDF5) path.
+        path (str | Path): Output ``.mat`` path.
         buffers (list[np.ndarray]): One ``(n_frames, n_channels, n_samples)``
             int16 array per RF buffer.
         bufnums (list[int]): 1-based buffer number for each ``Receive`` entry.
     """
-    with h5py.File(path, "w") as f:
-        _write_cell_array(f, "RcvData", [b.astype(np.int16) for b in buffers])
-        receive = f.create_group("Receive")
-        receive.create_dataset("bufnum", data=np.asarray(bufnums, np.float64).reshape(-1, 1))
+    write_workspace(
+        path, {"RcvData": CellArray(buffers), "Receive": StructArray({"bufnum": list(bufnums)})}
+    )
 
 
-def _write_binary_workspace(path, full_buffers, masks, saved):
+def _write_binary_workspace(path, full_buffers, masks, saved, variables=None):
     """Write a synthetic workspace whose RF lives in external ``RF_data_{k}.bin``.
 
     Args:
-        path (Path): Output ``.mat`` (HDF5) path; the ``.bin`` files are written
-            next to it.
+        path (Path): Output ``.mat`` path; the ``.bin`` files are written next to it.
         full_buffers (list[np.ndarray]): Full ``(n_frames, n_channels, n_samples)``
             int16 array per buffer (zero on non-saved channels).
-        masks (list[np.ndarray]): Boolean saved-channel mask per buffer.
+        masks (list[np.ndarray] | None): Boolean saved-channel mask per buffer, or
+            ``None`` to leave ``NonzeroRFcolumns`` out.
         saved (list[bool]): Whether each buffer's ``.bin`` is actually written
             (a buffer may be defined but not saved for a measurement).
+        variables (dict, optional): Further workspace variables to write.
     """
-    path = str(path)
-    directory = Path(path).parent
-    n_buffers = len(full_buffers)
-    rf_rows, rf_cols, rf_frames = [], [], []
-    for k in range(n_buffers):
-        full = full_buffers[k]
-        mask = masks[k]
-        n_frames, _, n_samples = full.shape
-        rf_rows.append(n_samples)  # fast-time samples (RcvData rows)
-        rf_cols.append(int(mask.sum()))  # saved channels
-        rf_frames.append(n_frames)
+    channel_masks = masks or [np.ones(full.shape[1], bool) for full in full_buffers]
+    for k, (full, mask) in enumerate(zip(full_buffers, channel_masks)):
         if saved[k]:
-            # (frames, cols, rows) -> MATLAB (rows, cols, frames), column-major bytes.
-            saved_ch = full[:, mask, :]
-            matlab = np.transpose(saved_ch, (2, 1, 0)).astype("<i2")
-            matlab.flatten(order="F").tofile(directory / f"RF_data_{k + 1}.bin")
-
-    with h5py.File(path, "w") as f:
-        f.create_dataset("RF_rows", data=np.asarray(rf_rows, np.float64).reshape(-1, 1))
-        f.create_dataset("RF_cols", data=np.asarray(rf_cols, np.float64).reshape(-1, 1))
-        f.create_dataset("RF_frames", data=np.asarray(rf_frames, np.float64).reshape(-1, 1))
-        _write_cell_array(f, "NonzeroRFcolumns", [m.astype(np.uint8).reshape(1, -1) for m in masks])
+            write_bin(Path(path).parent / f"RF_data_{k + 1}.bin", full[:, mask, :])
+    workspace = {
+        "RF_rows": [full.shape[2] for full in full_buffers],  # fast-time samples
+        "RF_cols": [int(mask.sum()) for mask in channel_masks],  # saved channels
+        "RF_frames": [full.shape[0] for full in full_buffers],
+    }
+    if masks is not None:
+        workspace["NonzeroRFcolumns"] = CellArray(masks)
+    write_workspace(path, {**workspace, **(variables or {})})
 
 
 def test_multibuffer_rcvdata_reads_each_buffer(tmp_path):
@@ -173,11 +155,10 @@ def test_binary_frame_count_and_order(tmp_path, num_frames, expected_order):
     n_frames, n_channels, n_samples = 3, 2, 4
     full = [np.zeros((n_frames, n_channels, n_samples), np.int16)]
     mat = tmp_path / "Parameters.mat"
-    _write_binary_workspace(mat, full, [np.ones(n_channels, bool)], saved=[True])
-    with h5py.File(mat, "a") as f:
-        rcv_buffer = f.create_group("Resource/RcvBuffer")
-        rcv_buffer.create_dataset("numFrames", data=np.array([[num_frames]], np.float64))
-        rcv_buffer.create_dataset("lastFrame", data=np.array([[2]], np.float64))
+    rcv_buffer = {"numFrames": num_frames, "lastFrame": 2}
+    _write_binary_workspace(
+        mat, full, [np.ones(n_channels, bool)], [True], {"Resource/RcvBuffer": rcv_buffer}
+    )
 
     with VerasonicsFile(str(mat), "r") as vf:
         assert vf.get_frame_count(0) == n_frames
@@ -188,10 +169,9 @@ def test_binary_buffer_without_rcvbuffer_entry_keeps_order(tmp_path):
     """A second .bin with only one RcvBuffer struct is assumed to be in order."""
     full = [np.zeros((3, 2, 4), np.int16), np.zeros((2, 2, 4), np.int16)]
     mat = tmp_path / "Parameters.mat"
-    _write_binary_workspace(mat, full, [np.ones(2, bool)] * 2, saved=[True, True])
-    with h5py.File(mat, "a") as f:
-        rcv_buffer = f.create_group("Resource/RcvBuffer")
-        rcv_buffer.create_dataset("numFrames", data=np.array([[3]], np.float64))
+    _write_binary_workspace(
+        mat, full, [np.ones(2, bool)] * 2, [True, True], {"Resource/RcvBuffer": {"numFrames": 3}}
+    )
 
     with VerasonicsFile(str(mat), "r") as vf:
         np.testing.assert_array_equal(vf.get_raw_data_order(1), [0, 1])
@@ -300,39 +280,19 @@ def test_unknown_buffer_is_rejected(tmp_path):
             vf.receive_indices_for_buffer(3)
 
 
-def _matlab_value(value):
-    """MATLAB storage of a struct field value: chars as a uint16 column, numbers as (1, 1)."""
-    if isinstance(value, str):
-        return np.array([ord(c) for c in value], dtype=np.uint16).reshape(-1, 1)
-    return np.atleast_2d(np.asarray(value, dtype=np.float64))
-
-
-def _write_struct_field(f, group, field, values):
-    """Write a struct-array field as an ``(N, 1)`` dataset of refs, one per entry."""
-    _write_cell_array(f, f"{group}/{field}", [_matlab_value(v) for v in values])
-
-
-def _write_struct(f, group, fields):
-    """Write a struct array given as ``{field: [value per entry]}``."""
-    for field, values in fields.items():
-        _write_struct_field(f, group, field, values)
-
-
-def _write_trans(f, n_elements, connector=None, probe_type=0):
-    trans = f.create_group("Trans")
-    trans.create_dataset("units", data=_matlab_value("mm"))
-    trans.create_dataset("ElementPos", data=np.zeros((5, n_elements)))
+def _trans(n_elements, connector=None, probe_type=0):
+    """A 1x1 ``Trans`` struct with ``n_elements`` elements."""
+    trans = {"units": "mm", "ElementPos": np.zeros((4, n_elements))}
     if probe_type is not None:
-        trans.create_dataset("type", data=_matlab_value(probe_type))
+        trans["type"] = probe_type
     if connector is not None:
-        trans.create_dataset("ConnectorES", data=np.asarray(connector, np.float64).reshape(1, -1))
+        trans["ConnectorES"] = np.asarray(connector)
+    return trans
 
 
-def _write_two_buffer_receive(f, sample_mode="NS200BW"):
+def _two_buffer_receive(sample_mode="NS200BW"):
     """Three receives: one in buffer 1 (TGC 2), two in buffer 2 (TGC 1)."""
-    _write_struct(
-        f,
-        "Receive",
+    return StructArray(
         {
             "bufnum": [1, 2, 2],
             "startSample": [1, 1, 5],
@@ -341,25 +301,25 @@ def _write_two_buffer_receive(f, sample_mode="NS200BW"):
             "demodFrequency": [5.0] * 3,
             "decimSampleRate": [20.0] * 3,
             "TGC": [2, 1, 1],
-        },
+        }
     )
 
 
 def test_dereference_index_out_of_range(tmp_path):
     """Indexing past a reference dataset, or past 0 of a plain dataset, raises."""
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        _write_cell_array(f, "Cells", [np.ones((1, 1)), 2 * np.ones((1, 1))])
-        f.create_dataset("Plain", data=np.ones((2, 2)))
+    images = [np.ones((1, 1, 1, 1)), 2 * np.ones((1, 1, 1, 1))]
+    write_workspace(mat, {"ImgDataP": CellArray(images), "Trans": {"ElementPos": np.ones((4, 2))}})
 
     with VerasonicsFile(str(mat), "r") as vf:
-        assert [float(c[0, 0]) for c in vf.dereference_all(vf["Cells"])] == [1.0, 2.0]
-        assert vf.dereference_all(vf["Plain"], func=lambda d: d.shape) == [(2, 2)]
+        assert [float(c[0, 0, 0, 0]) for c in vf.dereference_all(vf["ImgDataP"])] == [1.0, 2.0]
+        element_pos = vf["Trans"]["ElementPos"]
+        assert vf.dereference_all(element_pos, func=lambda d: d.shape) == [(4, 2)]
         for index in (-1, 2):
             with pytest.raises(IndexError, match="out of range"):
-                vf.dereference_index(vf["Cells"], index)
+                vf.dereference_index(vf["ImgDataP"], index)
         with pytest.raises(IndexError, match="only index 0"):
-            vf.dereference_index(vf["Plain"], 1)
+            vf.dereference_index(element_pos, 1)
 
 
 def test_missing_file_is_reported_as_missing(tmp_path):
@@ -374,8 +334,7 @@ def test_constant_receive_field_checks_every_receive(tmp_path):
     modes = ["NS200BW"] * n
     modes[37] = "BS100BW"
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        _write_struct(f, "Receive", {"bufnum": [1] * n, "sampleMode": modes})
+    write_workspace(mat, {"Receive": StructArray({"bufnum": [1] * n, "sampleMode": modes})})
 
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(AssertionError, match="Multiple sample modes"):
@@ -392,17 +351,13 @@ def test_constant_receive_field_checks_every_receive(tmp_path):
 def test_sampling_rate_is_checked_on_every_receive(tmp_path, rates, quad_decims, message):
     """A buffer that mixes decimSampleRate or quadDecim values is rejected."""
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        _write_struct(
-            f,
-            "Receive",
-            {
-                "bufnum": [1] * 4,
-                "sampleMode": ["NS200BW"] * 4,
-                "decimSampleRate": rates,
-                "quadDecim": quad_decims,
-            },
-        )
+    receive = {
+        "bufnum": [1] * 4,
+        "sampleMode": ["NS200BW"] * 4,
+        "decimSampleRate": rates,
+        "quadDecim": quad_decims,
+    }
+    write_workspace(mat, {"Receive": StructArray(receive)})
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(AssertionError, match=message):
             vf.get_sampling_frequency(0)
@@ -411,8 +366,7 @@ def test_sampling_rate_is_checked_on_every_receive(tmp_path, rates, quad_decims,
 def test_bufnums_fall_back_to_buffer_zero(tmp_path):
     """Without ``Receive.bufnum`` every receive maps to buffer 0."""
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        _write_struct_field(f, "Receive", "startDepth", [0, 0, 0])
+    write_workspace(mat, {"Receive": StructArray({"startDepth": [0, 0, 0]})})
 
     with VerasonicsFile(str(mat), "r") as vf:
         np.testing.assert_array_equal(vf.read_receive_bufnums(), [0, 0, 0])
@@ -428,10 +382,10 @@ def test_bufnums_fall_back_to_buffer_zero(tmp_path):
 def test_receive_metadata_per_buffer(tmp_path):
     """Receive-derived metadata is read per buffer and for all buffers together."""
     mat = tmp_path / "raw_data.mat"
-    tgc_waveforms = [np.full((10, 1), 0.0), np.full((10, 1), 1023.0)]
-    with h5py.File(mat, "w") as f:
-        _write_two_buffer_receive(f)
-        _write_cell_array(f, "TGC/Waveform", tgc_waveforms)
+    tgc_waveforms = [np.full(10, 0.0), np.full(10, 1023.0)]
+    write_workspace(
+        mat, {"Receive": _two_buffer_receive(), "TGC": StructArray({"Waveform": tgc_waveforms})}
+    )
 
     with VerasonicsFile(str(mat), "r") as vf:
         np.testing.assert_array_equal(vf.start_samples, [1, 1, 5])
@@ -459,9 +413,14 @@ def test_receive_metadata_per_buffer(tmp_path):
 def test_buffer_with_several_tgc_waveforms_is_rejected(tmp_path):
     """One buffer whose receives use different TGC waveforms cannot be one track."""
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        _write_struct(f, "Receive", {"bufnum": [1, 1], "TGC": [1, 2]})
-        _write_cell_array(f, "TGC/Waveform", [np.full((4, 1), 7.0), np.full((4, 1), 9.0)])
+    waveforms = [np.full(4, 7.0), np.full(4, 9.0)]
+    write_workspace(
+        mat,
+        {
+            "Receive": StructArray({"bufnum": [1, 1], "TGC": [1, 2]}),
+            "TGC": StructArray({"Waveform": waveforms}),
+        },
+    )
 
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(ValueError, match=r"RF buffer 0 \(RcvData\{1\}\).*\[1, 2\]"):
@@ -471,45 +430,50 @@ def test_buffer_with_several_tgc_waveforms_is_rejected(tmp_path):
 def test_tgc_index_out_of_range_uses_first_waveform(tmp_path):
     """A ``Receive.TGC`` beyond the stored waveforms falls back to the first one."""
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        _write_struct(f, "Receive", {"bufnum": [1], "TGC": [5]})
-        _write_cell_array(f, "TGC/Waveform", [np.full((4, 1), 7.0), np.full((4, 1), 9.0)])
+    waveforms = [np.full(4, 7.0), np.full(4, 9.0)]
+    write_workspace(
+        mat,
+        {
+            "Receive": StructArray({"bufnum": [1], "TGC": [5]}),
+            "TGC": StructArray({"Waveform": waveforms}),
+        },
+    )
 
     with VerasonicsFile(str(mat), "r") as vf:
         np.testing.assert_array_equal(vf._read_tgc_waveform(0), [7.0] * 4)
 
 
-def _write_event_workspace(path, modes, framenums, seq_control_refs=True, ttna_events=None):
+def _write_event_workspace(path, modes, framenums, trailing_event=True, ttna_events=None):
     """Events ``i`` transmit ``TX(i)`` and receive into ``Receive(i)`` (buffer 1).
 
-    A trailing event transmits without a receive. The events in ``ttna_events``
-    (default: all) have a SeqControl ``timeToNextAcq`` of 10 us, the others none.
+    With ``trailing_event`` a last event transmits without a receive. The events in
+    ``ttna_events`` (default: all) have a SeqControl ``timeToNextAcq`` of 10 us, the
+    others none.
     """
     n = len(modes)
-    with h5py.File(path, "w") as f:
-        _write_struct(
-            f,
-            "Receive",
-            {"bufnum": [1] * n, "mode": list(modes), "framenum": list(framenums)},
-        )
-        _write_struct(f, "Event", {"tx": list(range(1, n + 1)) + [1], "rcv": [*range(1, n + 1), 0]})
-        if seq_control_refs:
-            seq_controls = [
-                [0, 1] if ttna_events is None or i in ttna_events else [0, 0] for i in range(n + 1)
-            ]
-            _write_struct_field(f, "Event", "seqControl", seq_controls)
-        else:
-            # A single event's seqControl stored as a plain index vector.
-            f["Event"].create_dataset("seqControl", data=np.array([[0.0], [1.0]]))
-        _write_struct(f, "SeqControl", {"command": ["timeToNextAcq"], "argument": [10.0]})
-        rcv_buffer = f.create_group("Resource/RcvBuffer")
-        rcv_buffer.create_dataset("numFrames", data=_matlab_value(max(framenums)))
+    tx, rcv = list(range(1, n + 1)), list(range(1, n + 1))
+    if trailing_event:
+        tx, rcv = [*tx, 1], [*rcv, 0]
+    seq_controls = [
+        [0, 1] if ttna_events is None or i in ttna_events else [0, 0] for i in range(len(tx))
+    ]
+    write_workspace(
+        path,
+        {
+            "Receive": StructArray(
+                {"bufnum": [1] * n, "mode": list(modes), "framenum": list(framenums)}
+            ),
+            "Event": StructArray({"tx": tx, "rcv": rcv, "seqControl": seq_controls}),
+            "SeqControl": StructArray({"command": ["timeToNextAcq"], "argument": [10.0]}),
+            "Resource/RcvBuffer": {"numFrames": max(framenums)},
+        },
+    )
 
 
 def test_transmit_events_with_plain_seq_control(tmp_path):
-    """A single event with a plain (non-reference) seqControl vector is parsed."""
+    """A 1x1 Event struct, whose seqControl is a plain (non-reference) vector, is parsed."""
     mat = tmp_path / "raw_data.mat"
-    _write_event_workspace(mat, modes=[0], framenums=[1], seq_control_refs=False)
+    _write_event_workspace(mat, modes=[0], framenums=[1], trailing_event=False)
 
     with VerasonicsFile(str(mat), "r") as vf:
         tx_order, rcv_order, time_to_next_acq = vf.read_transmit_events()
@@ -539,6 +503,15 @@ def test_transmit_events_timing_per_frame_dropped(tmp_path):
         tx_order, _, time_to_next_acq = vf.read_transmit_events()
     np.testing.assert_array_equal(tx_order, [0, 1])
     assert time_to_next_acq is None
+
+
+def test_sample_mode_single_receive_plain_dataset(tmp_path):
+    """A single Receive stores sampleMode as a plain char dataset, not a reference."""
+    mat = tmp_path / "raw_data.mat"
+    write_workspace(mat, {"Receive": StructArray({"sampleMode": ["BS100BW"]})})
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        assert vf.get_sample_mode() == 100
 
 
 def test_time_to_next_acq_per_frame():
@@ -582,25 +555,22 @@ def test_transmit_events_accumulate_drop_timing(tmp_path):
     assert time_to_next_acq is None
 
 
-def _write_raw_data_workspace(path, rcv_data, connector=None, n_elements=None):
+def _write_raw_data_workspace(path, rcv_data, connector=None, n_elements=None, variables=None):
     """Single-buffer workspace with two receives of 4 samples each."""
     n_elements = rcv_data.shape[1] if n_elements is None else n_elements
-    with h5py.File(path, "w") as f:
-        f.create_dataset("RcvData", data=rcv_data)
-        _write_struct(
-            f,
-            "Receive",
-            {
-                "bufnum": [1, 1],
-                "startSample": [1, 5],
-                "endSample": [4, 8],
-                "sampleMode": ["NS200BW"] * 2,
-            },
-        )
-        _write_trans(f, n_elements, connector=connector)
-        rcv_buffer = f.create_group("Resource/RcvBuffer")
-        rcv_buffer.create_dataset("numFrames", data=_matlab_value(rcv_data.shape[0]))
-        rcv_buffer.create_dataset("lastFrame", data=_matlab_value(1))
+    receive = {
+        "bufnum": [1, 1],
+        "startSample": [1, 5],
+        "endSample": [4, 8],
+        "sampleMode": ["NS200BW"] * 2,
+    }
+    workspace = {
+        "RcvData": CellArray([rcv_data]),
+        "Receive": StructArray(receive),
+        "Trans": _trans(n_elements, connector=connector),
+        "Resource/RcvBuffer": {"numFrames": rcv_data.shape[0], "lastFrame": 1},
+    }
+    write_workspace(path, {**workspace, **(variables or {})})
 
 
 def test_read_raw_data_layout(tmp_path):
@@ -616,6 +586,21 @@ def test_read_raw_data_layout(tmp_path):
     np.testing.assert_array_equal(raw, expected)
 
 
+def test_read_raw_data_without_last_frame_keeps_order(tmp_path):
+    """Without ``RcvBuffer.lastFrame``, RcvData frames are assumed to be in order."""
+    rcv_data = np.arange(2 * 3 * 8, dtype=np.int16).reshape(2, 3, 8)
+    mat = tmp_path / "raw_data.mat"
+    _write_raw_data_workspace(
+        mat, rcv_data, variables={"Resource/RcvBuffer": {"numFrames": rcv_data.shape[0]}}
+    )
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        np.testing.assert_array_equal(vf.get_raw_data_order(0), [0, 1])
+        raw = vf.read_raw_data()
+    expected = rcv_data.reshape(2, 3, 2, 4).transpose(0, 2, 3, 1)[..., None]
+    np.testing.assert_array_equal(raw, expected)
+
+
 @pytest.mark.parametrize(
     "save_raw_version, connector_applied, permutation",
     [
@@ -628,10 +613,8 @@ def test_read_raw_data_connector(tmp_path, save_raw_version, connector_applied, 
     """The connector is applied unless the raw data was already reordered with it."""
     rcv_data = np.arange(3 * 8, dtype=np.int16).reshape(1, 3, 8)
     mat = tmp_path / "raw_data.mat"
-    _write_raw_data_workspace(mat, rcv_data, connector=[3, 1, 2])
-    if save_raw_version:
-        with h5py.File(mat, "a") as f:
-            f.create_dataset("save_raw_version", data=_matlab_value(1))
+    variables = {"save_raw_version": "1.0"} if save_raw_version else None
+    _write_raw_data_workspace(mat, rcv_data, connector=[3, 1, 2], variables=variables)
 
     with VerasonicsFile(str(mat), "r") as vf:
         raw = vf.read_raw_data(connector_applied=connector_applied)
@@ -662,8 +645,7 @@ def test_read_raw_data_connector_out_of_range(tmp_path):
 def test_missing_rcvdata_and_image_buffer(tmp_path):
     """Missing RF data and out-of-range image buffers raise clear errors."""
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        f.create_dataset("ImgDataP", data=np.zeros((1, 2, 2)))
+    write_workspace(mat, {"ImgDataP": CellArray([np.zeros((1, 1, 2, 2))])})
 
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(KeyError, match="'RcvData' not found"):
@@ -674,12 +656,24 @@ def test_missing_rcvdata_and_image_buffer(tmp_path):
             vf.read_image_data_p(image_buffer_index=1)
 
 
+def test_image_buffer_without_first_and_last_frame_keeps_order(tmp_path):
+    """Without ``ImageBuffer.firstFrame``/``lastFrame``, ImgDataP frames stay in order."""
+    image = np.arange(3 * 1 * 2 * 2, dtype=float).reshape(3, 1, 2, 2)
+    mat = tmp_path / "raw_data.mat"
+    write_workspace(
+        mat,
+        {"ImgDataP": CellArray([image]), "Resource/ImageBuffer": {"numFrames": 3}},
+    )
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        np.testing.assert_array_equal(vf.get_image_data_p_frame_order(0), [0, 1, 2])
+
+
 @pytest.mark.parametrize("probe_type", [None, 99])
 def test_probe_type_none_when_missing_or_unknown(tmp_path, probe_type):
     """A missing or unrecognized ``Trans.type`` gives probe type ``None``."""
     mat = tmp_path / "raw_data.mat"
-    with h5py.File(mat, "w") as f:
-        _write_trans(f, 2, probe_type=probe_type)
+    write_workspace(mat, {"Trans": _trans(2, probe_type=probe_type)})
 
     with VerasonicsFile(str(mat), "r") as vf:
         assert vf.probe.type is None
@@ -690,9 +684,7 @@ def test_binary_buffer_without_channel_mask(tmp_path):
     """Without ``NonzeroRFcolumns`` the binary is taken to hold every channel."""
     full = np.arange(2 * 3 * 4, dtype=np.int16).reshape(2, 3, 4)
     mat = tmp_path / "Parameters.mat"
-    _write_binary_workspace(mat, [full], [np.ones(3, bool)], saved=[True])
-    with h5py.File(mat, "a") as f:
-        del f["NonzeroRFcolumns"]
+    _write_binary_workspace(mat, [full], None, saved=[True])
 
     with VerasonicsFile(str(mat), "r") as vf:
         np.testing.assert_array_equal(vf.read_raw_buffer_array(0), full)
@@ -703,19 +695,24 @@ def test_binary_inconsistent_metadata_raises(tmp_path):
     full = np.zeros((2, 3, 4), np.int16)
     mat = tmp_path / "Parameters.mat"
     _write_binary_workspace(mat, [full], [np.ones(3, bool)], saved=[True])
-    with h5py.File(mat, "a") as f:
-        # Mark only 2 of the 3 saved channels.
-        f["#refs#/NonzeroRFcolumns_0"][...] = np.array([[1, 0, 1]], np.uint8)
+    # Mark only 2 of the 3 saved channels.
+    write_workspace(
+        mat,
+        {
+            "RF_rows": [4],
+            "RF_cols": [3],
+            "RF_frames": [2],
+            "NonzeroRFcolumns": CellArray([np.array([True, False, True])]),
+        },
+    )
 
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(ValueError, match="NonzeroRFcolumns"):
             vf.read_raw_buffer_array(0)
 
     # A second .bin without a matching RF_rows entry.
-    full.tofile(tmp_path / "RF_data_2.bin")
-    with h5py.File(mat, "a") as f:
-        del f["RF_frames"]
-        f.create_dataset("RF_frames", data=np.array([[2.0], [2.0]]))
+    write_bin(tmp_path / "RF_data_2.bin", full)
+    write_workspace(mat, {"RF_rows": [4], "RF_cols": [3], "RF_frames": [2, 2]})
     with VerasonicsFile(str(mat), "r") as vf:
         with pytest.raises(IndexError, match="out of range for 'RF_rows'"):
             vf.read_raw_buffer_array(1)
@@ -763,3 +760,36 @@ def test_convert_forwards_buffers(tmp_path, monkeypatch):
     verasonics.convert_verasonics(args)
 
     assert [kw["buffers"] for kw in calls] == [[0]]
+
+
+@pytest.mark.parametrize("rf_storage", ["rcvdata", "bin"])
+def test_full_workspace_reads_back_each_buffer(tmp_path, rf_storage):
+    """Every buffer's RF reads back per transmit and element, with consistent metadata."""
+    ws = VerasonicsWorkspace(rf_storage=rf_storage, n_buffers=2, n_frames=[2, 3])
+    mat = ws.write(tmp_path / "raw_data.mat")
+
+    with VerasonicsFile(str(mat), "r") as vf:
+        assert vf.available_buffers() == [0, 1]
+        for k, rf in enumerate(ws.rf):
+            raw = vf.read_raw_data(buffer_index=k)
+            # (frames, channels, tx * ax) -> (frames, tx, ax, elements, 1)
+            elements = rf[:, ws.connector - 1, :]
+            expected = elements.reshape(len(rf), ws.n_elements, ws.n_tx, ws.n_ax)
+            np.testing.assert_array_equal(raw, expected.transpose(0, 2, 3, 1)[..., None])
+
+            scan = vf.read_scan(buffer_index=k)
+            assert scan["t0_delays"].shape == (ws.n_tx, ws.n_elements)
+            assert np.all(np.isinf(scan["focus_distances"]))  # plane waves
+            np.testing.assert_allclose(scan["time_to_next_transmit"], 100e-6)
+            assert scan["time_to_next_transmit"].shape == (len(rf), ws.n_tx)
+            assert scan["sampling_frequency"] == 20e6
+
+
+def test_full_workspace_converts_to_one_track_per_buffer(tmp_path):
+    """A two-buffer workspace converts to a valid two-track zea file."""
+    mat = VerasonicsWorkspace(n_buffers=2).write(tmp_path / "raw_data.mat")
+    with VerasonicsFile(str(mat), "r") as vf:
+        vf.to_zea(tmp_path / "raw_data.hdf5")
+    with File(tmp_path / "raw_data.hdf5", "r") as f:
+        f.validate()
+        assert f.track_labels == ["rf_buffer_0", "rf_buffer_1"]

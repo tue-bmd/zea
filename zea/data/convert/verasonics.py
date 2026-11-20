@@ -421,8 +421,8 @@ class VerasonicsFile(h5py.File):
         is 1, the item is stored as a regular dataset. If the size is larger, the item is
         stored as a dataset of references to the actual data.
 
-        This function dereferences the dataset if it is a reference. Otherwise, it returns
-        the dataset.
+        This function dereferences the dataset if it is a reference. Either way it
+        returns the element's data as an array.
 
         If the struct array has a single element, it is stored directly rather than
         as references, so only ``index == 0`` is valid.
@@ -449,7 +449,7 @@ class VerasonicsFile(h5py.File):
                     "single (non-reference) element, so only index 0 is valid. "
                     "For RcvData this means the file contains a single RF buffer."
                 )
-            return dataset
+            return dataset[:]
 
     def dereference_all(self, dataset, func=None):
         """Dereference all elements in a dataset.
