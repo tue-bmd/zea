@@ -10,8 +10,7 @@ reads, and every file the tests write goes through it:
 * :func:`write_workspace` writes just the given variables, for small targeted tests.
 
 A variable or field that is not in :data:`SCHEMA` is rejected. The schema was checked
-against real workspaces (a single-buffer ``RcvData`` workspace and two six-buffer
-``.bin`` workspaces); check a new real file with::
+against real workspaces; check a new real file with::
 
     python -m tests.fixtures.verasonics_workspace check SRC.mat [SRC.mat ...]
 
@@ -146,8 +145,6 @@ SCHEMA = {
             "ImageBuffer": Struct({"numFrames": DOUBLE, "firstFrame": DOUBLE, "lastFrame": DOUBLE}),
         }
     ),
-    # A captured single RcvData cell does not show the axis; ImgDataP, which VSX creates
-    # the same way, is a MATLAB column (h5py (1, n)), so that is assumed.
     "RcvData": Cell(Array("int16", "3d"), axis=1),
     "ImgDataP": Cell(Array("double", "4d"), axis=1),
     "save_raw_version": CHAR,
