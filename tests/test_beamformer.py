@@ -694,6 +694,22 @@ def test_warn_if_focal_region_length_unused(monkeypatch):
     assert len(calls) == 1
 
 
+@backend_equality_check()
+def test_is_focused_same_for_numpy_and_ops():
+    """The backend and numpy versions classify every kind of focus distance alike."""
+    from keras import ops
+
+    from zea.beamform.geometry import _is_focused, is_focused
+
+    focus_distances = np.array([15e-3, 0.0, -15e-3, np.inf, -np.inf, np.nan], np.float32)
+    expected = [True, False, False, False, False, False]
+
+    mask = ops.convert_to_numpy(_is_focused(ops.convert_to_tensor(focus_distances), xp=ops))
+    np.testing.assert_array_equal(mask, expected)
+    np.testing.assert_array_equal(is_focused(focus_distances), expected)
+    return mask.astype(float)
+
+
 # calculate_delays
 
 

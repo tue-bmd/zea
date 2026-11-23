@@ -91,5 +91,6 @@ Check out the :doc:`about` page for the motivation behind ``zea`` and the :ref:`
    :hidden:
 
    about
+   changelog
    GitHub Project <https://github.com/tue-bmd/zea>
    HuggingFace Hub <https://huggingface.co/zeahub>

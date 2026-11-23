@@ -66,6 +66,10 @@ if TYPE_CHECKING:
 FILE_HANDLE_CACHE_CAPACITY = 128
 # Below this many files the sweeps stay serial; sized for network opens
 _PARALLEL_MIN_FILES = 32
+# Default cap on worker processes for those sweeps (ZEA_FIND_H5_SHAPES_WORKERS). Each worker
+# imports zea, and a sweep spends most of its time waiting on file opens, so one process per
+# core (256 on a large node) costs startup time and buys nothing.
+_DEFAULT_SWEEP_WORKERS = 32
 # How many invalid files a validation error spells out before summarising the rest.
 _MAX_LISTED_INVALID_FILES = 10
 # Seconds a per-file sweep may take before it draws a progress bar.
@@ -259,12 +263,30 @@ def _shape_and_metadata_gaps(file_path, key, metadata_paths, revision=None):
     return shape, missing, signature
 
 
+def _sweep_workers(n_files: int) -> int:
+    """Worker processes for a parallel sweep over ``n_files`` files.
+
+    ``ZEA_FIND_H5_SHAPES_WORKERS`` if set, else :data:`_DEFAULT_SWEEP_WORKERS`, and never more
+    than the number of cores or files.
+    """
+    value = os.environ.get("ZEA_FIND_H5_SHAPES_WORKERS")
+    try:
+        workers = int(value) if value else _DEFAULT_SWEEP_WORKERS
+    except ValueError:
+        log.warning(
+            f"Ignoring ZEA_FIND_H5_SHAPES_WORKERS={value!r}: expected a number of processes."
+        )
+        workers = _DEFAULT_SWEEP_WORKERS
+    return max(1, min(workers, os.cpu_count() or 1, n_files))
+
+
 def _map_over_files(func, file_paths, desc, verbose=True):
     """Apply *func* to every file path, in parallel when that is worth its startup cost.
 
     ``func`` must be importable at module level -- it runs in a
     :mod:`multiprocessing` worker. Set ``ZEA_FIND_H5_SHAPES_PARALLEL=0`` to force the
-    main process (e.g. when calling from a worker yourself).
+    main process (e.g. when calling from a worker yourself), and
+    ``ZEA_FIND_H5_SHAPES_WORKERS`` to change the number of workers (see :func:`_sweep_workers`).
     """
     parallel = len(file_paths) >= _PARALLEL_MIN_FILES and os.environ.get(
         "ZEA_FIND_H5_SHAPES_PARALLEL", "1"
@@ -273,7 +295,7 @@ def _map_over_files(func, file_paths, desc, verbose=True):
     if parallel:
         # make sure to call this from within a function or use if __name__ == "__main__"
         # to avoid freezing the main process
-        with multiprocessing.Pool() as pool:
+        with multiprocessing.Pool(_sweep_workers(len(file_paths))) as pool:
             return list(
                 tqdm.tqdm(
                     pool.imap(func, file_paths),

@@ -376,6 +376,9 @@ class Metrics:
             {'psnr': ..., 'lpips': ...}
     """
 
+    #: Range all images are translated to (from ``image_range``) before the metrics are computed.
+    METRIC_RANGE = (0, 255)
+
     def __init__(
         self,
         metrics: List[str],
@@ -400,8 +403,9 @@ class Metrics:
                 f"Metric {m} is not a paired metric."
             )
 
-        # Add image_range to kwargs for metrics that require it
-        kwargs["image_range"] = image_range
+        # Metrics that take an `image_range` (LPIPS, UltraPIPS) receive the preprocessed images,
+        # which are in METRIC_RANGE, not in the user's `image_range`.
+        kwargs["image_range"] = self.METRIC_RANGE
         self.image_range = image_range
 
         # Initialize all metrics
@@ -433,7 +437,7 @@ class Metrics:
         return_numpy,
         device,
         mapped_batch_size=None,
-        _use_torch_vmap=True,
+        torch_vmappable=True,
     ):
         num_batch_axes = max(0, ops.ndim(y_true) - 3)
 
@@ -447,11 +451,10 @@ class Metrics:
             # disable_jit only when on the torch backend and the metric is not
             # torch-vmappable (e.g. LPIPS), so that other backends (JAX, etc.)
             # still benefit from their native vmap / vectorized_map paths.
-            disable_jit = not _use_torch_vmap and keras.backend.backend() == "torch"
+            disable_jit = not torch_vmappable and keras.backend.backend() == "torch"
             metric_fn = tensor.vmap(
                 metric_fn,
                 in_axes=0,
-                _use_torch_vmap=_use_torch_vmap,
                 disable_jit=disable_jit,
                 batch_size=mapped_batch_size,
             )
@@ -466,9 +469,9 @@ class Metrics:
         return out
 
     def _preprocess(self, tensor):
-        tensor = translate(tensor, self.image_range, [0, 255])
+        tensor = translate(tensor, self.image_range, self.METRIC_RANGE)
         if self.clip:
-            tensor = ops.clip(tensor, 0, 255)
+            tensor = ops.clip(tensor, *self.METRIC_RANGE)
         if self.quantize:
             tensor = ops.cast(tensor, "uint8")
         tensor = ops.cast(tensor, "float32")  # Some metrics require float32
@@ -510,7 +513,7 @@ class Metrics:
                 return_numpy,
                 device,
                 mapped_batch_size=mapped_batch_size,
-                _use_torch_vmap=self.torch_vmappable[name],
+                torch_vmappable=self.torch_vmappable[name],
             )
         return results
 

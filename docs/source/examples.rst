@@ -3,44 +3,77 @@ Examples
 
 Explore practical usage of ``zea`` with the following example notebooks. All notebooks can be run in the browser using Google Colab, using the links below. Make sure to select a GPU / TPU runtime to optimally benefit from the ``zea`` library.
 
+.. raw:: html
+
+   <div class="example-filter" aria-label="Filter examples by tag"></div>
+
 Data
 ----
 
 .. toctree::
-    :maxdepth: 2
+    :hidden:
 
     notebooks/data
+
+.. example-gallery:: notebooks/data
 
 Pipeline
 --------
 
 .. toctree::
-    :maxdepth: 2
+    :hidden:
 
     notebooks/pipeline
+
+.. example-gallery:: notebooks/pipeline
 
 Models
 ------
 
 .. toctree::
-    :maxdepth: 2
+    :hidden:
 
     notebooks/models
+
+.. example-gallery:: notebooks/models
 
 Metrics
 -------
 
 .. toctree::
-    :maxdepth: 2
+    :hidden:
 
     notebooks/metrics
+
+.. example-gallery:: notebooks/metrics
 
 Agent
 -----
 
 .. toctree::
-    :maxdepth: 2
+    :hidden:
 
     notebooks/agent
 
+.. example-gallery:: notebooks/agent
 
+Examples outside the toolbox
+----------------------------
+
+``zea`` is also used in other libraries, blog posts and tutorials. These examples are linked here below:
+
+.. container:: example-gallery
+
+   .. external-example:: Ultrasound regularized beamforming with zea
+      :link: https://deepinv.github.io/deepinv/auto_examples/external-libraries/demo_zea_ultrasound.html
+      :thumbnail: deepinv_zea_ultrasound.webp
+      :source: DeepInverse
+      :tags: beamforming, inverse problems, simulation
+      :level: intermediate
+
+   .. external-example:: Ultrasound despeckling from B-mode images
+      :link: https://deepinv.org/auto_examples/self-supervised-learning/demo_ultrasound_despeckling.html
+      :thumbnail: deepinv_ultrasound_despeckling.webp
+      :source: DeepInverse
+      :tags: image enhancement
+      :level: beginner

@@ -33,7 +33,7 @@ from tqdm import tqdm
 
 from zea import File, log
 from zea.backend import jit
-from zea.data.convert.utils import load_avi, unzip
+from zea.data.convert.utils import load_avi, unzip_beside
 from zea.display import cartesian_to_polar_matrix, polar_to_cartesian_matrix
 from zea.func.tensor import vmap
 from zea.internal.utils import atomic_write
@@ -865,9 +865,7 @@ def convert_echonetlvh(
 
     # Check if unzip is needed
     if src.suffix == ".zip":
-        tmp_dir = dst / "unzipped_original_files"
-        tmp_dir.mkdir(exist_ok=True)
-        src = unzip(src, tmp_dir)
+        src = unzip_beside(src)
 
     # Check the required files exist
     for folder in ["Batch1", "Batch2", "Batch3", "Batch4"]:

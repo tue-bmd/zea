@@ -18,6 +18,7 @@ from zea.data.convert.__main__ import (
     _Picmus,
     _Verasonics,
 )
+from zea.data.convert.echonet import ECHONET_SPLIT_PATH
 
 
 def parse_args(argv):
@@ -84,7 +85,8 @@ def test_positional_src_dst_parsed_as_path():
 
 def test_echonet_defaults():
     args = parse_args(["echonet", "src", "dst"])
-    assert args.split_path is None
+    assert args.split_path == ECHONET_SPLIT_PATH
+    assert args.new_split is False
     assert args.no_hyperthreading is False
 
 
@@ -92,7 +94,7 @@ def test_echonet_flags():
     args = parse_args(
         ["echonet", "src", "dst", "--split-path", "split.yaml", "--no-hyperthreading"]
     )
-    assert args.split_path == Path("split.yaml")
+    assert args.split_path == "split.yaml"
     assert args.no_hyperthreading is True
 
 

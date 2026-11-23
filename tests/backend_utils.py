@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from collections import Counter
 
 ML_BACKENDS = ("tensorflow", "torch", "jax")
@@ -31,8 +32,18 @@ def all_test_backends_available() -> bool:
 
 
 def get_test_backend() -> str:
-    """Return the backend the test suite should use for regular imports."""
+    """Return the backend the test suite should use for regular imports.
+
+    Set ``ZEA_TEST_BACKEND`` to pick one. ``KERAS_BACKEND`` is ignored on purpose: the zea
+    Docker images set it by default, which would silently change the backend under test.
+    """
     available = available_test_backends()
+    requested = os.environ.get("ZEA_TEST_BACKEND", "").strip().lower()
+    if requested:
+        assert requested in available, (
+            f"ZEA_TEST_BACKEND={requested!r} is not installed. Available: {', '.join(available)}."
+        )
+        return requested
     if DEFAULT_TEST_BACKEND in available:
         return DEFAULT_TEST_BACKEND
     if FALLBACK_TEST_BACKEND in available:

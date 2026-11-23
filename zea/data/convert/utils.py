@@ -1,5 +1,8 @@
+import atexit
 import json
 import os
+import shutil
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -155,6 +158,27 @@ def unzip(src: Path, dst: Path) -> Path:
     already_unzipped_filepath.touch()
 
     return dst
+
+
+def unzip_beside(src: Path) -> Path:
+    """Unzips a .zip file next to itself, or into a fresh temp dir if its folder is read-only.
+
+    Args:
+        src (Path): Path to the .zip file to unzip.
+
+    Returns:
+        Path: Path to the unzipped directory.
+    """
+    if os.access(src.parent, os.W_OK):
+        return unzip(src, src.with_suffix(""))
+
+    # A fresh private dir each run, as reusing a predictable path in the shared temp dir
+    # would let another user plant a forged extraction.
+    tmp_dir = Path(tempfile.mkdtemp(prefix="zea_unzipped_"))
+    # Registered before extracting, so a failed or partial extraction is removed too.
+    atexit.register(shutil.rmtree, tmp_dir, ignore_errors=True)
+    log.warning(f"{src.parent} is not writable, unzipping to {tmp_dir} instead.")
+    return unzip(src, tmp_dir)
 
 
 def download_file(url: str, destination: str | Path) -> Path:  # pragma: no cover

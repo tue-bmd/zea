@@ -97,7 +97,7 @@ def get_ops(ops_name: str):
             "        imports:\n"
             "          - path/to/your_module.py\n"
             "or pass --import path/to/your_module.py to `zea process`. See "
-            "https://zea.readthedocs.io/en/latest/pipeline.html#custom-operations\n\n"
+            "https://zea.readthedocs.io/en/stable/pipeline.html#custom-operations\n\n"
             f"{exc.args[0]}"
         ) from exc
 
@@ -282,6 +282,20 @@ class Operation(keras.Operation):
             )
         else:
             self._call = self.call
+
+    # Copy and pickle as a plain Python object, skipping Keras' config round trip,
+    # which fails for unregistered ops and drops the JIT flag. The (compiled) `_call`
+    # is rebuilt afterwards.
+    __reduce__ = object.__reduce__
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_call", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.set_jit(self._jit_compile)
 
     def _trace_signatures(self):
         """

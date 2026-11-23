@@ -37,7 +37,7 @@ config = zea.Config.from_path("hf://zeahub/configs/config_picmus_rf.yaml", revis
 For detailed documentation and usage examples, visit:
 
 - 📚 [zea.readthedocs.io](https://zea.readthedocs.io)
-- 🔬 [Examples & Tutorials](https://zea.readthedocs.io/en/latest/examples.html)
+- 🔬 [Examples & Tutorials](https://zea.readthedocs.io/en/stable/examples.html)
 
 ## Source
 

@@ -69,7 +69,7 @@ def _bootstrap_backend():
         "tensorflow": "https://www.tensorflow.org/install",
         "jax": "https://docs.jax.dev/en/latest/installation.html",
     }
-    DOCS_URL = "https://zea.readthedocs.io/en/latest/installation.html"
+    DOCS_URL = "https://zea.readthedocs.io/en/stable/installation.html"
 
     # Probed with find_spec so that no backend is imported here
     installed_backends = [

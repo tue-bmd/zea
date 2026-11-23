@@ -24,6 +24,7 @@ extensions = [
     "sphinx.ext.viewcode",  # for links to source code
     "sphinx.ext.autosummary",  # for generating API documentation
     "sphinx.ext.intersphinx",  # for cross-project links
+    "sphinx.ext.extlinks",  # for the :gh: and :user: roles in the changelog
     "myst_parser",  # for markdown support
     "sphinx.ext.doctest",  # for testing code snippets in the documentation
     "nbsphinx",  # for Jupyter notebook support
@@ -33,6 +34,7 @@ extensions = [
     "sphinx.ext.mathjax",  # for rendering math in the documentation
     "tyroprogram",  # local: auto-documents the tyro CLI (docs/source/_ext/tyroprogram.py)
     "citation",  # local: the .. citation:: block (docs/source/_ext/citation.py)
+    "example_gallery",  # local: example cards on the examples page (_ext/example_gallery.py)
 ]
 
 autodoc_mock_imports = [
@@ -77,6 +79,13 @@ autodoc_default_options = {
     "special-members": "__call__",
 }
 autoclass_content = "both"  # include both class docstring and __init__ docstring
+
+# Used by the changelog: :gh:`681` links to a pull request, :user:`handle` to a GitHub
+# profile. .github/scripts/changelog.py turns them into #681 and @handle for release notes.
+extlinks = {
+    "gh": ("https://github.com/tue-bmd/zea/pull/%s", "#%s"),
+    "user": ("https://github.com/%s", "@%s"),
+}
 
 templates_path = ["_templates"]
 

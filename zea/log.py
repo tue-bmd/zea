@@ -39,7 +39,7 @@ LEVELS = ["DEBUG", "INFO", "DEPRECATED", "WARNING", "ERROR", "CRITICAL"]
 
 DEPRECATED_LEVEL_NUM = logging.WARNING + 5
 logging.addLevelName(DEPRECATED_LEVEL_NUM, "DEPRECATED")
-logging.DEPRECATED = DEPRECATED_LEVEL_NUM  # ty: ignore[unresolved-attribute]
+logging.DEPRECATED = DEPRECATED_LEVEL_NUM  # ty: ignore[missing-attribute]
 
 
 def get_format_fn(name_format):
@@ -158,6 +158,19 @@ class _ProgressAwareStreamHandler(logging.StreamHandler):
       to redraw itself.
     - If neither applies, this behaves like a plain ``StreamHandler``.
     """
+
+    def format(self, record):
+        msg = super().format(record)
+        # On Windows, a redirected stdout uses the legacy codepage (e.g. cp1252),
+        # which can't encode the Unicode characters (arrows, checkmarks, ...) used
+        # in log messages; writing them would raise from inside logging ("---
+        # Logging error ---"). Escape what the stream can't encode, without
+        # touching the stream itself (it's shared with the rest of the process).
+        encoding = getattr(self.stream, "encoding", None)
+        if encoding:
+            with contextlib.suppress(LookupError):
+                msg = msg.encode(encoding, "backslashreplace").decode(encoding)
+        return msg
 
     def emit(self, record):
         try:

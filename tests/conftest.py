@@ -12,6 +12,14 @@ from pathlib import Path
 # test_notebooks.py, which would otherwise pick up an interactive backend from the shell.
 os.environ["MPLBACKEND"] = "Agg"
 
+# Hide the GPUs before any backend initializes CUDA: init_device("cpu") below hides them too,
+# but that is a no-op once a backend has claimed them.
+_TEST_DEVICE = os.environ.get("ZEA_TEST_DEVICE", "auto:1").strip().lower()
+_TEST_ON_CPU = _TEST_DEVICE in ("cpu", "auto:0")  # the spellings init_device resolves to CPU
+if _TEST_ON_CPU:
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    os.environ["JAX_PLATFORMS"] = "cpu"
+
 import pytest  # noqa: E402
 
 from .data import generate_example_dataset  # noqa: E402
@@ -45,7 +53,7 @@ def _gpu_available() -> bool:
 
 
 # must be before importing anything that may call init_device()
-_GPU_AVAILABLE = _gpu_available()
+_GPU_AVAILABLE = not _TEST_ON_CPU and _gpu_available()
 
 # Warm up jax's GPU backend while all GPUs are still visible. If the first init happens when
 # a test has hidden the GPUs, jax permanently falls back to CPU.
@@ -63,8 +71,7 @@ if _GPU_AVAILABLE:
 # they remain free to select their own backend. See tests/__init__.py for details.
 from zea.internal.device import init_device  # noqa: E402
 
-device = os.environ.get("ZEA_TEST_DEVICE", "auto:1")
-device = init_device(device=device, allow_preallocate=False)
+device = init_device(device=_TEST_DEVICE, allow_preallocate=False)
 
 
 from .backend_utils import (  # noqa: E402
@@ -292,6 +299,23 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     )
     for (active_backend, required_backends), count in sorted(guard_skip_counts.items()):
         terminalreporter.write_line(f"{count} requiring {', '.join(required_backends)}")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_hf_caches(tmp_path_factory):
+    """Keep the on-disk HF location and listing caches of this session in a temp dir.
+
+    Tests mock repos (some under real names), and CI runners share one ZEA_CACHE_DIR
+    between concurrent jobs, so those caches must never be written to or wiped there.
+    """
+    from zea.data import hf_remote
+    from zea.internal import preset_utils
+
+    root = tmp_path_factory.mktemp("hf_caches")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(hf_remote, "_CACHE_DIR", root / "locations")
+        mp.setattr(preset_utils, "_LISTING_DIR", root / "listings")
+        yield
 
 
 @pytest.fixture(scope="session", autouse=True)

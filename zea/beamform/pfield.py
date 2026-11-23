@@ -48,8 +48,20 @@ def compute_pfield(
     norm=True,
     point_batch_size=2048,
     interpolation="bilinear",
+    attenuation_coef=0.0,
 ):
     """Compute the pressure field for ultrasound imaging.
+
+    This implements PFIELD from MUST in its two-dimensional form: element height and elevation
+    focus are taken to infinity, so the elevation term of the 3-D theory drops out
+    and the Green's function is 1 / sqrt(r) instead of 1 / r (Eqs. 36-37). Equation
+    numbers in this module refer to the reference below.
+
+    .. admonition:: Reference
+
+        Garcia, D. (2022). SIMUS: An open-source simulator for medical ultrasound
+        imaging. Part I: Theory & examples. *Computer Methods and Programs in
+        Biomedicine, 218*, 106726. https://www.biomecardio.com/publis/cmpb22.pdf
 
     Only linear (and phased) arrays are supported: all elements must lie on the x-axis
     and face +z.
@@ -75,7 +87,7 @@ def compute_pfield(
         downmix (int, optional): Downmixing the frequency to facilitate a smaller grid.
             Default is 4. Higher requires lower number of grid points but is less accurate.
         alpha (float, optional): Exponent to 'sharpen or smooth' the weighting. Higher is sharper.
-            Default is 1.
+            Default is 1. Values above roughly 10 can overflow float32, giving NaN.
         percentile (int, optional): minimum percentile threshold to keep in the weighting.
             Higher is more aggressive. Default is 10.
         norm (bool, optional): per pixel normalization over the transmit axis (True)
@@ -88,16 +100,24 @@ def compute_pfield(
             weighting, which can cause visible steps at the edges of each
             transmit's insonified region; "bilinear" (default) removes those steps at a
             small extra cost and is recommended for display-quality images.
+        attenuation_coef (float, optional): Frequency-dependent attenuation of the
+            medium in dB/(cm·MHz), applied one-way along the transmit path (Eq. 40)
+            at the true frequency, regardless of `downmix`. Default is 0 (lossless).
+            Soft tissue is ~0.5; with it the
+            high end of the band, which focuses hardest, is lost with depth, so the
+            focus is wider and weaker than in the lossless field.
 
     Returns:
         ops.array: The (normalized) pressure field (across tx events)
             of shape (n_tx, grid_size_z, grid_size_x).
     """
-    # medium params
-    # NOTE: currently we ignore attenuation in the compounding
-    attenuation_coef = 0  # dB/cm/MHz, attenuation coefficient of the medium
-    attenuation_coef = attenuation_coef / 8.686  # convert to Np/cm/MHz
-    attenuation_coef = attenuation_coef / 1e6 / 1e2  # convert to Np/m/Hz
+    # medium params: attenuation dB/(cm·MHz) -> Np/(cm·MHz) -> Np/(m·Hz)
+    attenuation_coef = float(attenuation_coef)
+    if not (np.isfinite(attenuation_coef) and attenuation_coef >= 0):
+        raise ValueError(
+            f"`attenuation_coef` must be finite and non-negative, got {attenuation_coef!r}"
+        )
+    attenuation_coef = attenuation_coef / 8.686 * 1e2 / 1e6
 
     # Element orientation (theta) is assumed zero and sub-elements are laid out along x.
     geometry = ops.convert_to_numpy(probe_geometry)
@@ -138,7 +158,7 @@ def compute_pfield(
     # % POINT LOCATIONS, DISTANCES & GRIDS %
     # %------------------------------------%
 
-    # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation)
+    # subdivide elements into sub elements or not? (to satisfy Fraunhofer approximation, Eq. 21)
     lambda_min = sound_speed / (center_frequency * (1 + probe_bandwidth_percent / 200))
     num_sub_elements = ops.ceil(element_width / lambda_min)
 
@@ -178,8 +198,9 @@ def compute_pfield(
     epsilon = keras.config.epsilon()
     theta = ops.arcsin(ops.clip(delta_x / (distance + epsilon), -1.0, 1.0)) - element_theta
 
-    # Directivity of a sub-element. Frequency-independent, so it is computed once here
-    # rather than inside the (batched, per-frequency) loop below.
+    # Directivity of a sub-element (Eq. 17). It varies over the band, but we approximate it at the
+    # center frequency such that it doesn't need to be recomputed for each frequency sample.
+    # We use a rigid baffle by default, PFIELD uses a soft baffle (extra cos(theta) factor, Eq. 39).
     sub_element_directivity = ops.cast(
         directivity(center_frequency, theta, seg_length, sound_speed), "complex64"
     )
@@ -194,7 +215,7 @@ def compute_pfield(
     # Both spectra are written in ordinary frequency (Hz) rather than angular frequency:
     # the sinc arguments then carry no factors of pi, since keras.ops.sinc is the
     # normalized sin(pi x) / (pi x).
-    def pulse_spectrum(f):
+    def pulse_spectrum(f):  # Eq. (25)
         imag = ops.sinc(pulse_width * (f - center_frequency)) - ops.sinc(
             pulse_width * (f + center_frequency)
         )
@@ -204,7 +225,7 @@ def compute_pfield(
     bandwidth = probe_bandwidth_percent * center_frequency / 100  # bandwidth in Hz
     p_shape = ops.log(126) / ops.log(epsilon + 2 * center_frequency / bandwidth)
 
-    def probe_spectrum(f):
+    def probe_spectrum(f):  # sqrt of Eq. (27), the one-way half of Eq. (28)
         # Calculate the normalized frequency difference
         freq_diff = ops.abs(f - center_frequency)
         # Calculate the denominator for normalization
@@ -219,7 +240,7 @@ def compute_pfield(
     # The spectrum of the pulse (pulse_spectrum) will be then multiplied
     # by the frequency-domain tapering window of the transducer (probe_spectrum)
     # The frequency step df is chosen to avoid interferences due to
-    # inadequate discretization.
+    # inadequate discretization (the criterion below Eq. 42).
     # df = frequency step (must be sufficiently small):
     # One has exp[-i(k r + w delay)] = exp[-2i pi(f r/c + f delay)] in the Eq.
     # One wants: the phase increment 2pi(df r/c + df delay) be < 2pi.
@@ -244,11 +265,12 @@ def compute_pfield(
 
     # Exponential arrays of size [numel(x) n_el num_sub_elements]
     wavenumber = 2 * np.pi * freq[0] / sound_speed
-    attenuation_wavenumber = attenuation_coef * freq[0]
+    # freq is downmixed, which only coarsens the phase: the loss follows the true frequency.
+    attenuation_wavenumber = attenuation_coef * downmix * freq[0]
 
     # Exponential array for the increment wavenumber dk
     wavenumber_step = 2 * np.pi * freq_step / sound_speed
-    attenuation_wavenumber_step = attenuation_coef * freq_step
+    attenuation_wavenumber_step = attenuation_coef * downmix * freq_step
 
     @jit(torch=False)
     def _pfield_freq_loop(distance, sub_element_directivity):
@@ -271,7 +293,6 @@ def compute_pfield(
         )
 
         exp_arr = exp_arr / ops.sqrt(distance_complex)
-        exp_arr = exp_arr * ops.cast(ops.sqrt(min_distance), "complex64")
 
         exp_arr = exp_arr * sub_element_directivity
 
@@ -284,7 +305,7 @@ def compute_pfield(
                 freq[k],
                 t0_delays,
                 tx_apodizations,
-                ops.mean(monochromatic_pressure, axis=1),  # avg over sub-elements
+                ops.mean(monochromatic_pressure, axis=1),  # as PFIELD; Eq. (37) sums instead
                 pulse_spect[k],
                 probe_spect[k],
             )
@@ -314,13 +335,14 @@ def compute_pfield(
     # Zero out pressure behind the transducer (z < 0)
     pressure_squared = ops.where(grid_z[:, None] < 0, 0, pressure_squared)
 
-    # Mean over the retained frequency samples, not their sum: the scan accumulates
-    # |P(f_k)|^2 with no df factor, so a sum scales with the sample count, i.e. with
-    # 1/freq_step -- which is set above from max(t0_delays) and so depends on which
-    # transmits are in the stack. The mean keeps the field a true RMS over the
-    # retained band, and comparable across transmit subsets (~2e-3 apart, from the
-    # differing grids). No effect when norm=True: a global factor cancels below.
-    pressure_squared = pressure_squared / ops.cast(ops.shape(freq)[0], "float32")
+    # The Riemann sum of Eq. (42), completed by PFIELD's correcting factor: the
+    # frequency step, which cancels the sample count -- that count follows freq_step,
+    # itself set above from max(t0_delays), so a bare sum would depend on which
+    # transmits are in the stack -- times the element width, whose square root is the
+    # amplitude factor of Eq. (36). Like PFIELD we integrate over ordinary frequency,
+    # so there is no 2 pi against Eq. (42)'s Δω. The step is taken at the true frequency,
+    # since downmixing shrinks the band by the same factor. No effect when norm=True.
+    pressure_squared = pressure_squared * (freq_step * downmix) * element_width
 
     # RMS acoustic pressure, reshaped to (n_tx, grid_size_z, grid_size_x)
     pressure = ops.transpose(ops.sqrt(pressure_squared), (1, 0))
@@ -403,7 +425,8 @@ def _pfield_freq_step(
     delay_apodization = (
         ops.exp(1j * ops.cast(angular_frequency * delays_tx, "complex64")) * tx_apodization
     )
-    # (num_points, n_el) @ (n_el, n_tx) -> (num_points, n_tx): all transmits batched
+    # The sum over elements of Eq. (37), as a matmul:
+    # (num_points, n_el) @ (n_el, n_tx) -> (num_points, n_tx), all transmits batched
     pressure_k = (
         ops.matmul(monochromatic_pressure, ops.transpose(delay_apodization, (1, 0)))
         * pulse_spect

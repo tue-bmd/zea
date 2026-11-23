@@ -1,11 +1,12 @@
 # Manually triggered release preparation: bumps the version in `pyproject.toml`,
-# refreshes `uv.lock`, and opens a "Release vX.Y.Z" PR holding a single
-# "bump version to vX.Y.Z" commit.
+# refreshes `uv.lock`, moves the "Current" section of `docs/source/changelog.rst`
+# under the new version, and opens a "Release vX.Y.Z" PR holding a single
+# "bump version to vX.Y.Z" commit, with the release notes in its description.
 #
-# Merging that PR does not release anything by itself -- publishing a GitHub
-# release tagged vX.Y.Z is still a manual step, and that is what triggers
-# `publish.yaml` (PyPI), `docker.yaml` (images) and `release-tags.yaml`
-# (moves `latest` / `openh-rf-latest` and rebuilds the docs).
+# Merging that PR does not release anything by itself: `release-draft.yaml` turns
+# it into a draft GitHub release. Publishing that draft is still a manual step,
+# and that is what triggers `publish.yaml` (PyPI), `docker.yaml` (images) and
+# `release-tags.yaml` (moves `openh-rf-latest` and rebuilds its docs).
 #
 # Requires a `RELEASE_PAT` secret: a personal access token with write access to
 # this repository's contents and pull requests.
@@ -140,6 +141,18 @@ jobs:
           uv version --no-sync "${NEW}"
           git diff --stat
 
+      # Fails when "Current" has no entries, rather than releasing without notes.
+      # Pre-releases leave the changelog as it is; see .github/scripts/changelog.py.
+      - name: Move changelog entries under the new version
+        env:
+          NEW: ${{ steps.version.outputs.new }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/changelog.py release "${NEW}"
+          # The version's docs only exist once the release is published, so the
+          # PR description links to `latest`.
+          python3 .github/scripts/changelog.py notes "${NEW}" --docs-version latest > "${RUNNER_TEMP}/notes.md"
+
       - name: Commit and push release branch
         env:
           BRANCH: ${{ steps.version.outputs.branch }}
@@ -149,11 +162,27 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "${BRANCH}"
-          git add pyproject.toml uv.lock
+          git add pyproject.toml uv.lock docs/source/changelog.rst
           git commit -m "bump version to ${TAG}"
+
+          # Maintainers fix the release notes by editing the changelog on this
+          # branch. Never force-push over such edits: only replace a branch that
+          # holds nothing but this workflow's own commit.
+          remote_sha=""
+          if git fetch --quiet origin "refs/heads/${BRANCH}" 2>/dev/null; then
+            remote_sha=$(git rev-parse FETCH_HEAD)
+            others=$(git log --format='%H %ae' origin/main..FETCH_HEAD | grep -v ' 41898282+github-actions\[bot\]@users.noreply.github.com$' || true)
+            if [ -n "${others}" ]; then
+              echo "::error::${BRANCH} has commits that are not from this workflow (e.g. changelog edits); merge or close its pull request and delete the branch before re-running"
+              echo "${others}"
+              exit 1
+            fi
+          fi
           # Force so a re-run after a failed attempt replaces the stale branch
-          # rather than erroring out.
-          git push --force origin "${BRANCH}"
+          # rather than erroring out. The lease only replaces the commit checked
+          # above: a push made since, or a branch the fetch failed to see (empty
+          # lease: "must not exist"), makes the push fail instead.
+          git push --force-with-lease="refs/heads/${BRANCH}:${remote_sha}" origin "${BRANCH}"
 
       - name: Open pull request
         env:
@@ -165,13 +194,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          existing=$(gh pr list --head "${BRANCH}" --state open --json url --jq '.[0].url // ""')
-          if [ -n "${existing}" ]; then
-            echo "Reusing existing pull request: ${existing}"
-            echo "[Release ${TAG}](${existing}) (updated)" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
           body=$(cat <<EOF
           Bump zea version to \`${NEW}\`.
 
@@ -179,11 +201,27 @@ jobs:
 
           - \`pyproject.toml\`: \`version = "${NEW}"\`
           - \`uv.lock\`: refreshed
+          - \`docs/source/changelog.rst\`: **Current** moved under \`${TAG}\` (pre-releases leave it unchanged)
 
-          After merging, publish a GitHub release tagged \`${TAG}\` off \`main\`. This will trigger the following workflows: \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`latest\` and \`openh-rf-latest\`, then rebuilds the docs).
+          The release notes below are a snapshot, generated from the changelog when this PR was opened. To change them, edit \`docs/source/changelog.rst\` on this branch: the draft release is made from the merged changelog, so it includes those edits even though this description does not show them.
+
+          After merging, the [Draft Release](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/workflows/release-draft.yaml) workflow creates a draft GitHub release tagged \`${TAG}\` with these notes. Add a short highlights paragraph at the top if you like, then publish it. This will trigger the following workflows: \`publish.yaml\` (PyPI), \`docker.yaml\` (images) and \`release-tags.yaml\` (moves \`openh-rf-latest\`, then rebuilds its docs).
+
+          ## Release notes
+
+          $(cat "${RUNNER_TEMP}/notes.md")
           EOF
           )
 
-          url=$(gh pr create --base main --head "${BRANCH}" --title "Release ${TAG}" --body "${body}")
+          existing=$(gh pr list --head "${BRANCH}" --state open --json url --jq '.[0].url // ""')
+          if [ -n "${existing}" ]; then
+            gh pr edit "${existing}" --body "${body}" --add-label dev
+            echo "Reusing existing pull request: ${existing}"
+            echo "[Release ${TAG}](${existing}) (updated)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # `dev`: the release PR itself is not a change users need to read about.
+          url=$(gh pr create --base main --head "${BRANCH}" --title "Release ${TAG}" --body "${body}" --label dev)
           echo "Opened ${url}"
           echo "[Release ${TAG}](${url})" >> "$GITHUB_STEP_SUMMARY"

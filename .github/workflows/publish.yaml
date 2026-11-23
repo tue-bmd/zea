@@ -1,5 +1,6 @@
-# On a published GitHub release: builds the wheel and sdist and uploads them to
-# PyPI via trusted publishing (no API token needed).
+# On a published GitHub release: builds and checks the wheel and sdist
+# (`package.yaml`), then uploads them to PyPI via trusted publishing (no API
+# token needed). Nothing is uploaded when the check fails.
 name: Build and Publish
 
 on:
@@ -8,24 +9,8 @@ on:
 
 jobs:
   build:
-    name: Build distribution 📦
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-    - uses: actions/checkout@v7
-      with:
-        persist-credentials: false
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7.6.0
-      with:
-        enable-cache: false
-    - name: Build a binary wheel and a source tarball
-      run: uv build
-    - name: Store the distribution packages
-      uses: actions/upload-artifact@v7
-      with:
-        name: python-package-distributions
-        path: dist/
+    name: Build and check distribution 📦
+    uses: ./.github/workflows/package.yaml
 
   publish-to-pypi:
     name: >-
