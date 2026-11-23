@@ -25,9 +25,12 @@ New Features
 
 Changed
 ^^^^^^^
+- :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
+- Logging a character the console can't encode (e.g. ``→`` on a redirected Windows stdout) printed a ``--- Logging error ---`` traceback instead of the message; such characters are now escaped (:gh:`721` by :user:`wesselvannierop`)
+- :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
 
 
 v0.1.9 (2026-11-10)

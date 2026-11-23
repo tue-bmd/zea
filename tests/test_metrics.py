@@ -123,6 +123,31 @@ def test_metrics_class():
     return results_no_avg["mse"]
 
 
+def test_metrics_class_image_range():
+    """Metrics class gives the same results for the same images in a different image_range."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.uniform(-1, 1, (2, 32, 32, 1)).astype(np.float32)
+    y_pred = np.clip(y_true + 0.2 * rng.normal(size=y_true.shape), -1, 1).astype(np.float32)
+
+    METRIC_NAMES = ["mse", "psnr", "lpips"]
+    # clip=True is a no-op here (data within range), but also covers the clipping branch
+    results = metrics.Metrics(METRIC_NAMES, [-1, 1], clip=True)(
+        y_true, y_pred, average_batches=False
+    )
+    results_255 = metrics.Metrics(METRIC_NAMES, [0, 255])(
+        (y_true + 1) * 127.5, (y_pred + 1) * 127.5, average_batches=False
+    )
+
+    for name in METRIC_NAMES:
+        np.testing.assert_allclose(
+            results[name],
+            results_255[name],
+            rtol=1e-4,
+            atol=1e-4,
+            err_msg=f"Metric {name} depends on image_range",
+        )
+
+
 @backend_equality_check(decimal=2)
 def test_metrics_class_batch_size():
     """Test Metrics class with batch_size parameter"""
