@@ -290,6 +290,31 @@ def test_convert_main_dispatches_without_preallocating(monkeypatch):
     assert called_args.download is True
 
 
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["convert", "verasonics", "raw/", "out/"], "cpu"),
+        (["convert", "verasonics", "raw/", "out/", "--device", "auto:1"], "auto:1"),
+        (["convert", "camus", "raw/", "out/"], "auto:1"),
+    ],
+)
+def test_convert_device_defaults_per_dataset(monkeypatch, argv, expected):
+    """Verasonics conversion defaults to the CPU; an explicit --device still wins."""
+    monkeypatch.setattr("sys.argv", ["zea", *argv])
+
+    with (
+        patch("zea.internal.device.init_device") as mock_init_device,
+        patch("zea.data.convert.verasonics.convert_verasonics"),
+        patch("zea.data.convert.camus.convert_camus"),
+    ):
+        from zea.__main__ import main
+
+        main()
+
+    (device,), _ = mock_init_device.call_args
+    assert device == expected
+
+
 # ── datapaths subcommand ──────────────────────────────────────────────────────
 
 

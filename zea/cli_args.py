@@ -14,7 +14,7 @@ and each module's own ``python -m`` entry point can reuse the same dispatch.
 import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, ClassVar, Literal, Union
 
 import numpy as np
 import tyro
@@ -28,6 +28,22 @@ if sitk is not None:
 #: ``python -m zea.data.process`` entry point, so the two can't drift apart.
 DEFAULT_DEVICE = "auto:1"
 DEVICE_HELP = "Compute device passed to init_device (e.g. 'cpu', 'auto:1')."
+
+
+def resolve_device(args, device: str | None = None) -> str:
+    """Return ``device``, or the default device for the (nested) subcommand ``args``.
+
+    A subcommand dataclass can set a ``default_device`` class variable (e.g. ``'cpu'`` for
+    converters that barely touch the backend), which is used when no device was given.
+    Otherwise falls back to :data:`DEFAULT_DEVICE`.
+    """
+    if device is not None:
+        return device
+    while args is not None:
+        if hasattr(args, "default_device"):
+            return args.default_device
+        args = getattr(args, "subcommand", None)
+    return DEFAULT_DEVICE
 
 
 @dataclass
@@ -809,6 +825,9 @@ class _Picmus:
 @dataclass
 class _Verasonics:
     """Convert Verasonics data to zea dataset."""
+
+    # Conversion is h5py/numpy work; a GPU only adds startup cost.
+    default_device: ClassVar[str] = "cpu"
 
     src: tyro.conf.Positional[Path]
     """Source folder path."""
