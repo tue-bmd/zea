@@ -1058,6 +1058,20 @@ class Pipeline:
         return prepared
 
 
+def _is_traced(x):
+    """True when ``x`` is being traced by a jit or graph we did not set up."""
+    name = keras.backend.backend()
+    if name == "jax":
+        import jax
+
+        return isinstance(x, jax.core.Tracer)
+    if name == "tensorflow":
+        import tensorflow as tf
+
+        return not tf.executing_eagerly()
+    return False
+
+
 @ops_registry("map")
 class Map(Pipeline):
     """
@@ -1241,7 +1255,8 @@ class Map(Pipeline):
         if self._with_batch_dim:
             input_data = inputs.pop(self.key)
             # A traced ops.map would unroll call_item's eager patch loop.
-            map_fn = simple_map if self._runs_eagerly else ops.map
+            eager = self._runs_eagerly and not _is_traced(input_data)
+            map_fn = simple_map if eager else ops.map
             output = map_fn(
                 lambda x: self.call_item(**{self.key: x, **inputs}),
                 input_data,

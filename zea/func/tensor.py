@@ -350,6 +350,10 @@ def simple_map(function, elements):
         return function(None)
 
     multiple_inputs = isinstance(elements, (list, tuple))
+    first = elements[0] if multiple_inputs else elements
+    if first.shape[0] == 0:
+        # Nothing to loop over; ops.map infers the empty output's shape.
+        return ops.map(function, elements)
 
     outputs = []
     if not multiple_inputs:
