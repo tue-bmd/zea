@@ -8,6 +8,8 @@ This module provides functionality to:
 3. Calculate cone parameters (apex position, opening angle, etc.)
 4. Crop and center the image around the cone
 5. Visualize the detected cone and its parameters
+6. Detect the scan frustum of a 3-D volume (:func:`detect_frustum_parameters`), so it can be
+   resampled onto a polar ``(rho, theta, phi)`` grid
 """
 
 import argparse
@@ -423,6 +425,275 @@ def fit_and_crop_around_scan_cone(
     cropped_image = np.squeeze(cropped_image, axis=0)
 
     return cropped_image, cone_params
+
+
+# ---------------------------------------------------------------------------
+# 3-D scan frustum
+# ---------------------------------------------------------------------------
+
+
+def _largest_connected_component(mask):
+    """Keep only the largest connected component of a boolean mask."""
+    from scipy import ndimage
+
+    labels, n_labels = ndimage.label(mask)
+    if n_labels <= 1:
+        return mask
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0  # background
+    return labels == np.argmax(sizes)
+
+
+def _silhouette_edges(silhouette):
+    """Outermost data index on the low and high side of each row of a 2-D silhouette.
+
+    Rows without data are NaN.
+    """
+    has_data = silhouette.any(axis=1)
+    n_lateral = silhouette.shape[1]
+    low = np.argmax(silhouette, axis=1).astype(np.float64)
+    high = (n_lateral - 1 - np.argmax(silhouette[:, ::-1], axis=1)).astype(np.float64)
+    low[~has_data] = np.nan
+    high[~has_data] = np.nan
+    return low, high
+
+
+def _straight_edge_rows(edge, n_lateral, is_low):
+    """Rows in which a silhouette edge lies on the straight side of the sector.
+
+    Going down from the apex, an edge moves outward along a straight line until the far cap of
+    the sector bends it back in. Rows below the outermost point are therefore dropped, as are
+    rows where the edge touches the volume border, because the sector is clipped there.
+    """
+    valid = np.isfinite(edge)
+    outward = np.where(valid, -edge if is_low else edge, -np.inf)
+    last_row = np.argmax(outward)  # first row where the edge is furthest out
+    rows = np.arange(len(edge))
+    on_border = np.zeros_like(valid)
+    on_border[valid] = (edge[valid] <= 0) if is_low else (edge[valid] >= n_lateral - 1)
+    return valid & (rows <= last_row) & ~on_border
+
+
+def _fit_line_robust(z, e, min_scale, threshold, n_iter=5):
+    """Fit ``e = a + b * z`` by least squares, iteratively discarding outliers.
+
+    Points further than ``threshold`` robust standard deviations (estimated from the median
+    absolute residual, but at least ``min_scale``) from the line are excluded from the next fit.
+
+    Returns:
+        Tuple ``(a, b, inliers)``.
+    """
+    inliers = np.ones(z.shape, dtype=bool)
+    for _ in range(n_iter):
+        design = np.stack([np.ones(inliers.sum()), z[inliers]], axis=1)
+        (a, b), *_ = np.linalg.lstsq(design, e[inliers], rcond=None)
+        residual = e - (a + b * z)
+        scale = max(1.4826 * np.median(np.abs(residual[inliers])), min_scale)
+        new_inliers = np.abs(residual) <= threshold * scale
+        if new_inliers.sum() < 2 or np.array_equal(new_inliers, inliers):
+            break
+        inliers = new_inliers
+    return a, b, inliers
+
+
+def _fit_edges_through_apex(edges, z_apex):
+    """Fit each pair of opposite edges as two lines through one apex at depth ``z_apex``.
+
+    For each lateral axis the low edge is modelled as ``e = c + s_low * (z - z_apex)`` and the
+    high edge as ``e = c + s_high * (z - z_apex)``, which is linear in ``(c, s_low, s_high)``.
+
+    Args:
+        edges: Per lateral axis, a pair ``((z_low, e_low), (z_high, e_high))`` of edge points.
+        z_apex: Depth of the apex.
+
+    Returns:
+        Tuple of the per-axis parameters ``[(c, s_low, s_high), ...]``, the per-edge residuals
+        ``[r_low, r_high, ...]`` and the total sum of squared residuals.
+    """
+    params, residuals, sse = [], [], 0.0
+    for (z_low, e_low), (z_high, e_high) in edges:
+        n_low = len(z_low)
+        design = np.zeros((n_low + len(z_high), 3))
+        design[:, 0] = 1.0
+        design[:n_low, 1] = z_low - z_apex
+        design[n_low:, 2] = z_high - z_apex
+        target = np.concatenate([e_low, e_high])
+        solution, *_ = np.linalg.lstsq(design, target, rcond=None)
+        residual = design @ solution - target
+        params.append(solution)
+        residuals.extend([residual[:n_low], residual[n_low:]])
+        sse += float(np.sum(residual**2))
+    return params, residuals, sse
+
+
+def _distance_range(mask, apex, spacing):
+    """Distance from ``apex`` to the nearest and farthest ``True`` voxel of ``mask``.
+
+    Works one depth slice at a time to avoid materialising every voxel's coordinates.
+    """
+    z = (np.arange(mask.shape[0]) - apex[0]) * spacing[0]
+    x = (np.arange(mask.shape[1]) - apex[1]) * spacing[1]
+    y = (np.arange(mask.shape[2]) - apex[2]) * spacing[2]
+    lateral_sq = x[:, None] ** 2 + y[None, :] ** 2
+    r_sq_min, r_sq_max = np.inf, -np.inf
+    for z_slice, plane in zip(z, mask):
+        if plane.any():
+            r_sq = lateral_sq[plane]
+            r_sq_min = min(r_sq_min, z_slice**2 + r_sq.min())
+            r_sq_max = max(r_sq_max, z_slice**2 + r_sq.max())
+    return float(np.sqrt(r_sq_min)), float(np.sqrt(r_sq_max))
+
+
+def detect_frustum_parameters(
+    mask,
+    spacing=(1.0, 1.0, 1.0),
+    keep_largest_component=True,
+    min_edge_points=10,
+    outlier_threshold=3.0,
+):
+    """Detect the scan frustum of a scan-converted 3-D ultrasound volume.
+
+    This is the 3-D counterpart of :func:`detect_cone_parameters`. Seen from its apex, the
+    imaging sector of a volumetric scan spans a range of azimuth angles ``theta`` and elevation
+    angles ``phi`` and is closed at depth by a spherical cap. This function estimates the apex
+    and these ranges in the frustum convention of :func:`zea.display.frustum_convert_rtp2xyz`
+    (``tan(theta) = x / z``, ``tan(phi) = y / z``), so the volume can be resampled onto a polar
+    ``(rho, theta, phi)`` grid and scan converted back with :func:`zea.display.scan_convert_3d`.
+
+    The volume is indexed ``(z, x, y)``, as for 3-D maps in the zea format: depth along the first
+    axis, with the apex at the top (towards index 0, possibly above the volume), azimuth along
+    the second axis and elevation along the third.
+
+    The detection works on silhouettes, which keeps it as simple as the 2-D case:
+
+    1. Optionally keep only the largest connected component of ``mask``, which drops stray
+       voxels outside the sector.
+    2. Project the mask along each lateral axis. Each projection is a 2-D sector whose straight
+       sides are rays from the apex.
+    3. In every depth row of a projection, take the outermost data voxel on both sides. Rows
+       where the sector is clipped by the volume border, and rows below the point where an edge
+       is furthest out (where the far cap begins), are not used.
+    4. Fit a line to each of the four edges, iteratively rejecting outliers.
+    5. Refit the four lines so that they all pass through a single apex.
+    6. Take the radial range from the nearest and farthest data voxel seen from the apex.
+
+    The fitted faces pass through the centres of the outermost data voxels, as in the 2-D case,
+    so samples on the boundary of the polar grid land on data rather than on background.
+
+    Not every scanner acquires a true frustum. If the volume is a fan of tilted 2-D sectors, its
+    cross-sections are barrel-shaped instead of rectangular. The silhouette edges are then the
+    corner rays of the sector, so the result is a frustum that encloses the whole sector, and
+    parts of the polar grid near the middle of its sides fall outside the sector.
+
+    Args:
+        mask (np.ndarray): Boolean array of shape ``(n_z, n_x, n_y)`` that is ``True`` for
+            voxels inside the imaging sector, i.e. voxels that are not background padding.
+        spacing (tuple, optional): Voxel size along ``(z, x, y)``. Distances in the output are
+            in the same unit. Defaults to ``(1.0, 1.0, 1.0)`` (voxels).
+        keep_largest_component (bool, optional): Only use the largest connected component of
+            ``mask``. Defaults to True.
+        min_edge_points (int, optional): Minimum number of depth rows needed to fit each of the
+            four edges. Defaults to 10.
+        outlier_threshold (float, optional): Edge points further than this many robust standard
+            deviations from a fitted edge are rejected. Defaults to 3.0.
+
+    Returns:
+        dict: Frustum parameters, as plain floats:
+
+        - ``apex``: ``(z, x, y)`` position of the apex as a fractional voxel index. ``z`` is
+          negative when the apex lies above the volume.
+        - ``theta_range``: ``(theta_min, theta_max)`` azimuth range in radians, along ``x``.
+        - ``phi_range``: ``(phi_min, phi_max)`` elevation range in radians, along ``y``.
+        - ``rho_range``: ``(rho_min, rho_max)`` distance from the apex to the nearest and the
+          farthest data voxel, in units of ``spacing``.
+        - ``edge_rms``: RMS distance in voxels of the edge points to the fitted edges, in the
+          order ``(x_min, x_max, y_min, y_max)``. Values around 0.5 indicate a clean fit.
+        - ``apex_depth_spread``: Difference in voxels between the apex depths found from the
+          ``x`` and ``y`` silhouettes separately. Large values mean that the edges do not meet
+          in one point, so the volume is not well described by a frustum.
+
+    Raises:
+        ValueError: If ``mask`` is not 3-D, contains no data, or no frustum can be fitted, for
+            instance because an edge has too few usable points or the sector does not widen
+            with depth.
+    """
+    from scipy.optimize import minimize_scalar
+
+    mask = np.asarray(mask, dtype=bool)
+    if mask.ndim != 3:
+        raise ValueError(f"mask must be 3-D (z, x, y), got shape {mask.shape}")
+    spacing = np.asarray(spacing, dtype=np.float64)
+    if spacing.shape != (3,) or np.any(spacing <= 0):
+        raise ValueError(f"spacing must contain three positive values, got {spacing}")
+
+    if keep_largest_component:
+        mask = _largest_connected_component(mask)
+    if not mask.any():
+        raise ValueError("Failed to detect scan frustum: the mask contains no data voxels.")
+
+    depth = np.arange(mask.shape[0]) * spacing[0]
+    edges, axis_apex_depths = [], []
+    for axis, name in ((1, "x"), (2, "y")):
+        silhouette = mask.any(axis=3 - axis)  # project along the other lateral axis
+        n_lateral = silhouette.shape[1]
+        pair, lines = [], []
+        for edge, is_low in zip(_silhouette_edges(silhouette), (True, False)):
+            side = f"{name}_{'min' if is_low else 'max'}"
+            rows = _straight_edge_rows(edge, n_lateral, is_low)
+            if rows.sum() < min_edge_points:
+                raise ValueError(
+                    f"Failed to detect scan frustum: only {rows.sum()} usable depth rows on the "
+                    f"{side} edge (need at least {min_edge_points}). The sector may be clipped "
+                    "by the volume border almost immediately, or the apex is not at the top."
+                )
+            z, e = depth[rows], edge[rows] * spacing[axis]
+            a, b, inliers = _fit_line_robust(
+                z, e, min_scale=0.5 * spacing[axis], threshold=outlier_threshold
+            )
+            if inliers.sum() < min_edge_points:
+                raise ValueError(
+                    f"Failed to detect scan frustum: the {side} edge is not straight "
+                    f"({inliers.sum()} inliers, need at least {min_edge_points})."
+                )
+            pair.append((z[inliers], e[inliers]))
+            lines.append((a, b))
+        (a_low, b_low), (a_high, b_high) = lines
+        if b_high - b_low < 1e-3:
+            raise ValueError(
+                f"Failed to detect scan frustum: the {name} edges do not diverge with depth "
+                f"(slopes {b_low:.3g} and {b_high:.3g}). The apex must be at the top of the "
+                "volume (towards index 0 of the first axis)."
+            )
+        axis_apex_depths.append((a_high - a_low) / (b_low - b_high))
+        edges.append(pair)
+
+    # All four edges should meet in one apex. The x and y silhouettes each give an apex depth;
+    # find the common depth that fits all edges best. For a fixed depth this is linear.
+    margin = 5 * spacing[0]
+    result = minimize_scalar(
+        lambda z_apex: _fit_edges_through_apex(edges, z_apex)[2],
+        bounds=(min(axis_apex_depths) - margin, max(axis_apex_depths) + margin),
+        method="bounded",
+    )
+    z_apex = float(result.x)
+    params, residuals, _ = _fit_edges_through_apex(edges, z_apex)
+    (x_apex, sx_low, sx_high), (y_apex, sy_low, sy_high) = params
+
+    apex = np.array([z_apex / spacing[0], x_apex / spacing[1], y_apex / spacing[2]])
+    rho_range = _distance_range(mask, apex, spacing)
+    lateral_spacing = (spacing[1], spacing[1], spacing[2], spacing[2])
+    edge_rms = tuple(
+        float(np.sqrt(np.mean((r / s) ** 2))) for r, s in zip(residuals, lateral_spacing)
+    )
+
+    return {
+        "apex": tuple(float(v) for v in apex),
+        "theta_range": (float(np.arctan(sx_low)), float(np.arctan(sx_high))),
+        "phi_range": (float(np.arctan(sy_low)), float(np.arctan(sy_high))),
+        "rho_range": rho_range,
+        "edge_rms": edge_rms,
+        "apex_depth_spread": float(abs(axis_apex_depths[0] - axis_apex_depths[1]) / spacing[0]),
+    }
 
 
 def visualize_scan_cone(image, cone_params, output_dir="output"):

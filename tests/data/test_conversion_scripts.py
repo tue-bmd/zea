@@ -42,6 +42,7 @@ from zea.internal.preset_utils import _hf_resolve_path
 from zea.io_lib import _SUPPORTED_IMG_TYPES
 
 from .. import DEFAULT_TEST_SEED
+from ..tools.test_fit_scan_cone import make_frustum_mask
 
 
 def run_subprocess(cmd, **kwargs):
@@ -480,6 +481,45 @@ def create_camus_test_data(src):
     return ["--no-hyperthreading"]  # for code coverage to hit
 
 
+# Synthetic CETUS volume: a scan frustum inside a (z, x, y) volume, with the apex just above it.
+CETUS_TEST_SHAPE = (44, 64, 60)
+CETUS_TEST_FRUSTUM = {
+    "apex": (-2.0, 32.0, 30.0),
+    "theta_range": (-0.6, 0.6),
+    "phi_range": (-0.55, 0.55),
+    "rho_max": 40.0,  # voxels
+}
+CETUS_TEST_SPACING = 0.0005763
+CETUS_TEST_POLAR_SHAPE = (32, 16, 16)
+
+
+def write_cetus_test_volume(path, rng):
+    """Write a CETUS-like B-mode NIfTI file and its ``_gt`` segmentation.
+
+    The B-mode volume holds random values inside a scan frustum and a constant background
+    padding value of 10 outside it, like the real CETUS volumes.
+    """
+    sector = make_frustum_mask(
+        CETUS_TEST_SHAPE,
+        CETUS_TEST_FRUSTUM["apex"],
+        CETUS_TEST_FRUSTUM["theta_range"],
+        CETUS_TEST_FRUSTUM["phi_range"],
+        CETUS_TEST_FRUSTUM["rho_max"],
+    )
+    vol = np.full(CETUS_TEST_SHAPE, 10.0, dtype=np.float32)
+    vol[sector] = rng.uniform(30, 255, sector.sum()).astype(np.float32)
+
+    # Ground truth: an ellipsoidal "ventricle" inside the sector
+    z, x, y = np.meshgrid(*[np.arange(n) for n in CETUS_TEST_SHAPE], indexing="ij")
+    gt = ((z - 22) / 9) ** 2 + ((x - 32) / 6) ** 2 + ((y - 30) / 6) ** 2 <= 1
+    gt = gt.astype(np.float32) * 255.0
+
+    for array, suffix in ((vol, ""), (gt, "_gt")):
+        image = sitk.GetImageFromArray(array)
+        image.SetSpacing((CETUS_TEST_SPACING,) * 3)
+        sitk.WriteImage(image, str(path).replace(".nii.gz", f"{suffix}.nii.gz"))
+
+
 def create_cetus_test_data(src):
     """Create CETUS-like NIfTI test data.
 
@@ -494,22 +534,10 @@ def create_cetus_test_data(src):
         os.makedirs(patient_dir)
 
         for tp in ["ED", "ES"]:
-            # Small 3D volume with a background padding value (~10) and data region
-            vol = np.full((16, 16, 16), 10.0, dtype=np.float32)
-            vol[4:12, 4:12, 4:12] = rng.uniform(30, 255, (8, 8, 8)).astype(np.float32)
+            write_cetus_test_volume(patient_dir / f"{patient_name}_{tp}.nii.gz", rng)
 
-            image = sitk.GetImageFromArray(vol)
-            image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
-            sitk.WriteImage(image, str(patient_dir / f"{patient_name}_{tp}.nii.gz"))
-
-            # Ground truth segmentation
-            gt = np.zeros((16, 16, 16), dtype=np.float32)
-            gt[5:11, 5:11, 5:11] = 255.0
-            gt_image = sitk.GetImageFromArray(gt)
-            gt_image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
-            sitk.WriteImage(gt_image, str(patient_dir / f"{patient_name}_{tp}_gt.nii.gz"))
-
-    return ["--no-hyperthreading"]  # for code coverage to hit
+    # --no-hyperthreading for code coverage to hit; a small polar grid keeps the test fast
+    return ["--no-hyperthreading", "--polar-shape", *map(str, CETUS_TEST_POLAR_SHAPE)]
 
 
 def create_picmus_test_data(src):
@@ -851,6 +879,16 @@ def verify_converted_cetus_test_data(dst):
         assert "data/segmentation" in f
         assert "metadata/subject" in f
         assert "metadata/credit" in f
+
+        polar = f.data.image_polar.values[:]
+        assert polar.shape == (1, *CETUS_TEST_POLAR_SHAPE)
+        assert f.data.image_polar.coordinates.shape == (*CETUS_TEST_POLAR_SHAPE, 3)
+        # The synthetic sector is a frustum that fits in the volume, so the polar grid is
+        # (nearly) all data.
+        assert np.mean(polar <= -60) < 0.05
+        geometry = {e.name: np.asarray(e.data) for e in f.custom["polar_geometry"]}
+        assert set(geometry) == {"rho_range", "theta_range", "phi_range", "apex"}
+        np.testing.assert_allclose(geometry["apex"], CETUS_TEST_FRUSTUM["apex"], atol=1.0)
 
     # Exercise the error branch of get_split (not reachable via normal conversion)
     with pytest.raises(ValueError):
@@ -1758,21 +1796,95 @@ def test_cetus_process_writes_image_not_image_sc(tmp_path):
     """
     from zea.data.convert.cetus import process_cetus
 
-    vol = np.full((16, 16, 16), 10.0, dtype=np.float32)
-    vol[4:12, 4:12, 4:12] = 200.0
-    image = sitk.GetImageFromArray(vol)
-    image.SetSpacing((0.0005763, 0.0005763, 0.0005763))
-
     source = tmp_path / "patient01_ED.nii.gz"
-    sitk.WriteImage(image, str(source))
+    write_cetus_test_volume(source, np.random.default_rng(DEFAULT_TEST_SEED))
     output = tmp_path / "patient01_ED.hdf5"
 
-    process_cetus(source, output)
+    process_cetus(source, output, polar_shape=CETUS_TEST_POLAR_SHAPE)
 
     with File(output, "r") as f:
         assert "image" in f["data"], "missing 'image'"
         assert "image_sc" not in f["data"], "unexpected legacy 'image_sc'"
         assert f.data.image.values.ndim == 4, "volume should be stored as (1, D, H, W)"
+
+
+def test_cetus_polar_volume_matches_geometry(tmp_path):
+    """The polar CETUS volume recovers the synthetic frustum, in a shared coordinate frame.
+
+    - The stored ranges match the frustum the volume was made with.
+    - ``image`` and ``image_polar`` coordinates are ``[x, y, z]`` with the apex at the origin,
+      so sampling ``image`` at the polar coordinates reproduces ``image_polar``.
+    """
+    from scipy.ndimage import map_coordinates
+
+    from zea.data.convert.cetus import process_cetus
+
+    source = tmp_path / "patient01_ED.nii.gz"
+    write_cetus_test_volume(source, np.random.default_rng(DEFAULT_TEST_SEED))
+    output = tmp_path / "patient01_ED.hdf5"
+    process_cetus(source, output, polar_shape=CETUS_TEST_POLAR_SHAPE)
+
+    with File(output, "r") as f:
+        image = f.data.image.values[0]
+        image_coords = f.data.image.coordinates[:]
+        polar = f.data.image_polar.values[0]
+        polar_coords = f.data.image_polar.coordinates[:]
+        geometry = {
+            e.name: np.asarray(e.data, dtype=np.float64) for e in f.custom["polar_geometry"]
+        }
+
+    tol = np.radians(2)
+    np.testing.assert_allclose(geometry["theta_range"], CETUS_TEST_FRUSTUM["theta_range"], atol=tol)
+    np.testing.assert_allclose(geometry["phi_range"], CETUS_TEST_FRUSTUM["phi_range"], atol=tol)
+    rho_max = CETUS_TEST_FRUSTUM["rho_max"] * CETUS_TEST_SPACING
+    np.testing.assert_allclose(geometry["rho_range"][1], rho_max, atol=2 * CETUS_TEST_SPACING)
+
+    # Image coordinates: x along the second axis, y along the third, z (depth) along the first,
+    # all zero at the apex.
+    apex = geometry["apex"]
+    spacing = CETUS_TEST_SPACING
+    np.testing.assert_allclose(image_coords[0, 0, 0], -apex[[1, 2, 0]] * spacing, rtol=1e-5)
+    np.testing.assert_allclose(
+        image_coords[1, 1, 1] - image_coords[0, 0, 0], [spacing] * 3, rtol=1e-5
+    )
+
+    # The polar coordinates point at the voxels the polar values were sampled from.
+    indices = apex[:, None, None, None] + np.moveaxis(polar_coords[..., [2, 0, 1]], -1, 0) / spacing
+    resampled = map_coordinates(image, indices, order=1, mode="constant", cval=-60.0)
+    np.testing.assert_allclose(resampled, polar, atol=1e-3)
+
+
+def test_cetus_polar_grid_uses_zea_frustum_convention():
+    """polar_grid places samples where zea.display.frustum_convert_rtp2xyz does, so that
+    zea.display.scan_convert_3d inverts the polar resampling."""
+    from zea.data.convert.cetus import polar_grid
+    from zea.display import frustum_convert_rtp2xyz
+
+    frustum = {
+        "apex": (-3.0, 40.0, 35.0),
+        "rho_range": (0.002, 0.12),
+        "theta_range": (-0.7, 0.6),
+        "phi_range": (-0.5, 0.65),
+    }
+    shape = (9, 7, 5)
+    spacing = np.array([0.5e-3, 0.6e-3, 0.7e-3])
+    indices, coordinates = polar_grid(frustum, shape, spacing)
+    assert indices.shape == (3, *shape)
+    assert coordinates.shape == (*shape, 3)
+
+    rho, theta, phi = np.meshgrid(
+        np.linspace(*frustum["rho_range"], shape[0]),
+        np.linspace(*frustum["theta_range"], shape[1]),
+        np.linspace(*frustum["phi_range"], shape[2]),
+        indexing="ij",
+    )
+    x, y, z = (np.asarray(v) for v in frustum_convert_rtp2xyz(rho, theta, phi))
+    np.testing.assert_allclose(coordinates, np.stack([x, y, z], axis=-1), rtol=1e-5, atol=1e-9)
+    expected_indices = (
+        np.asarray(frustum["apex"])[:, None, None, None]
+        + np.stack([z, x, y]) / (spacing[:, None, None, None])
+    )
+    np.testing.assert_allclose(indices, expected_indices, rtol=1e-6)
 
 
 def test_images_non_uint8_raises():

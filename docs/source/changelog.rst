@@ -22,9 +22,11 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+- :func:`zea.tools.fit_scan_cone.detect_frustum_parameters` estimates the scan frustum (apex, azimuth and elevation ranges and depth) of a scan-converted 3-D volume, like :func:`~zea.tools.fit_scan_cone.detect_cone_parameters` does for 2-D images. ``zea convert cetus`` uses it to also store every CETUS volume on a polar ``(rho, theta, phi)`` grid as ``image_polar``, with its ranges under ``custom/polar_geometry``, so it can be scan converted back with :func:`zea.display.scan_convert_3d`. Set the grid size with ``--polar-shape`` (:gh:`TODO` by :user:`TODO`)
 
 Changed
 ^^^^^^^
+- ``zea convert cetus`` stores the ``image`` and ``segmentation`` coordinates as ``[x, y, z]`` positions with the estimated apex at the origin, as the zea format specifies, in the same frame as ``image_polar``. They were ``[depth, height, width]`` positions measured from the corner of the volume (:gh:`TODO` by :user:`TODO`)
 - :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
 
 Fixed

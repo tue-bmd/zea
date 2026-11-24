@@ -10,6 +10,16 @@ from 45 patients with ground-truth left-ventricle segmentation masks at
 end-diastole (ED) and end-systole (ES).  Volumes are stored as NIfTI
 (``.nii.gz``) files with isotropic voxel spacing.
 
+Each converted file holds the scan-converted (Cartesian) volume and the same volume
+resampled onto a polar ``(rho, theta, phi)`` grid (``image_polar``), which can be scan
+converted back with :func:`zea.display.scan_convert_3d`. CETUS does not include the
+acquisition geometry, so the scan frustum (apex, angle ranges and depth) is estimated
+from every volume with :func:`zea.tools.fit_scan_cone.detect_frustum_parameters`.
+The volumes come from three scanners. For some of them the sector is not an exact
+frustum, and the polar grid is then a frustum that encloses the whole sector, so parts
+of it lie outside the sector. Sector corners that were cropped off the original
+Cartesian volumes are background in the polar volume too.
+
 Dataset splits:
 
 * **Train** - patients 1-30
@@ -56,7 +66,12 @@ from zea.data.convert.utils import (
     upload_dataset_to_hf,
     write_dataset_card,
 )
-from zea.data.file import File
+from zea.data.file import CustomElement, File
+from zea.tools.fit_scan_cone import detect_frustum_parameters
+
+# Default shape (n_rho, n_theta, n_phi) of the polar volume. The radial step is then close
+# to the 0.58 mm voxel size of the Cartesian volumes.
+DEFAULT_POLAR_SHAPE = (256, 128, 128)
 
 # Citation text for inclusion in every converted file
 CETUS_CITATION = (
@@ -120,14 +135,80 @@ def _detect_background_level(volume: np.ndarray) -> float:
     return bg_level
 
 
-def process_cetus(source_path, output_path, overwrite=False):
+def cartesian_coordinates(shape, apex, spacing) -> np.ndarray:
+    """Per-voxel ``[x, y, z]`` positions of a CETUS volume, with the apex at the origin.
+
+    Args:
+        shape: Volume shape ``(n_z, n_x, n_y)``.
+        apex: Apex position ``(z, x, y)`` as a fractional voxel index.
+        spacing: Voxel size along ``(z, x, y)`` in metres.
+
+    Returns:
+        Array of shape ``(n_z, n_x, n_y, 3)`` and type float32, in metres.
+    """
+    axes = [(np.arange(n) - a) * s for n, a, s in zip(shape, apex, spacing)]
+    coordinates = np.empty((*shape, 3), dtype=np.float32)
+    coordinates[..., 0] = axes[1][None, :, None]  # x: second axis
+    coordinates[..., 1] = axes[2][None, None, :]  # y: third axis
+    coordinates[..., 2] = axes[0][:, None, None]  # z: depth
+    return coordinates
+
+
+def polar_grid(frustum, polar_shape, spacing):
+    """Sample positions of a regular ``(rho, theta, phi)`` grid spanning a scan frustum.
+
+    Uses the frustum convention of :func:`zea.display.frustum_convert_rtp2xyz`, so a volume
+    sampled on this grid can be scan converted back with :func:`zea.display.scan_convert_3d`
+    using the frustum's ``rho_range``, ``theta_range`` and ``phi_range``.
+
+    Args:
+        frustum (dict): Output of :func:`~zea.tools.fit_scan_cone.detect_frustum_parameters`,
+            with ``rho_range`` in metres.
+        polar_shape (tuple): Number of samples ``(n_rho, n_theta, n_phi)``.
+        spacing: Voxel size along ``(z, x, y)`` in metres.
+
+    Returns:
+        Tuple of:
+            - ``indices``: ``(3, n_rho, n_theta, n_phi)`` fractional voxel indices ``(z, x, y)``
+              of the samples in the Cartesian volume, for :func:`scipy.ndimage.map_coordinates`.
+            - ``coordinates``: ``(n_rho, n_theta, n_phi, 3)`` float32 ``[x, y, z]`` positions of
+              the samples in metres, with the apex at the origin.
+    """
+    n_rho, n_theta, n_phi = polar_shape
+    rho = np.linspace(*frustum["rho_range"], n_rho)
+    tan_theta = np.tan(np.linspace(*frustum["theta_range"], n_theta))
+    tan_phi = np.tan(np.linspace(*frustum["phi_range"], n_phi))
+
+    # Same as zea.display.frustum_convert_rtp2xyz, in NumPy so that conversion workers do not
+    # initialise the ML backend.
+    rho, tan_theta, tan_phi = np.meshgrid(rho, tan_theta, tan_phi, indexing="ij")
+    z = rho / np.sqrt(1 + tan_theta**2 + tan_phi**2)
+    x = z * tan_theta
+    y = z * tan_phi
+
+    apex = np.asarray(frustum["apex"], dtype=np.float64)
+    indices = np.stack(
+        [apex[0] + z / spacing[0], apex[1] + x / spacing[1], apex[2] + y / spacing[2]]
+    )
+    coordinates = np.stack([x, y, z], axis=-1).astype(np.float32)
+    return indices, coordinates
+
+
+def process_cetus(source_path, output_path, overwrite=False, polar_shape=DEFAULT_POLAR_SHAPE):
     """Convert a single CETUS patient time-point to a zea HDF5 file.
 
-    Each file stores the 3D B-mode volume as ``image`` (scan-converted image).
+    Each file stores the 3D B-mode volume as ``image`` (scan-converted image) and the
+    same volume resampled onto a polar ``(rho, theta, phi)`` grid as ``image_polar``.
+    The polar grid spans the scan frustum detected with
+    :func:`~zea.tools.fit_scan_cone.detect_frustum_parameters` and is sampled with
+    trilinear interpolation. Its ranges are stored as custom elements in the
+    ``polar_geometry`` group: ``rho_range`` (m), ``theta_range`` and ``phi_range`` (rad),
+    and the ``apex`` as a fractional ``(z, x, y)`` voxel index into ``image``.
+
     If a corresponding ground truth segmentation file exists, it is stored as a
-    ``Segmentation`` map under ``data/segmentation``. Both maps share a
-    per-voxel coordinate grid (shape ``(D, H, W, 3)``) derived from the NIfTI
-    voxel spacing.
+    ``Segmentation`` map under ``data/segmentation`` and shares the per-voxel coordinates
+    of ``image``. All coordinates are ``[x, y, z]`` positions in metres with the estimated
+    apex at the origin.
 
     Patient ID and citation are stored in the ``metadata`` group.
     License information is embedded in the file description.
@@ -137,7 +218,14 @@ def process_cetus(source_path, output_path, overwrite=False):
         output_path (str or Path): Path to the output ``.hdf5`` file.
         overwrite (bool, optional): Whether to overwrite an existing output file.
             Defaults to False.
+        polar_shape (tuple, optional): Shape ``(n_rho, n_theta, n_phi)`` of the polar volume.
+            Defaults to :data:`DEFAULT_POLAR_SHAPE`.
+
+    Raises:
+        ValueError: If the scan frustum cannot be detected.
     """
+    from scipy.ndimage import map_coordinates
+
     source_path = Path(source_path)
     output_path = Path(output_path)
 
@@ -151,11 +239,11 @@ def process_cetus(source_path, output_path, overwrite=False):
 
     # Load B-mode volume
     volume, metadata = sitk_load(source_path)
-    # volume shape: (depth, height, width) — 3D
+    # volume shape: (depth, height, width) = (z, x, y), with the apex at the top.
 
-    # Voxel spacing in meters (NIfTI stores in mm-like units depending on header;
-    # CETUS uses meters based on the spacing values ~0.0005763)
-    voxel_spacing = np.array(metadata["spacing"], dtype=np.float64)
+    # Voxel spacing in meters (CETUS stores it in metres, ~0.0005763). SimpleITK lists the
+    # spacing in image (x, y, z) order, which is the reverse of the NumPy axes.
+    voxel_spacing = np.array(metadata["spacing"][::-1], dtype=np.float64)
 
     # The CETUS volumes have a background padding value that is nonzero and varies per file.
     # Here we detect it from the histogram and create a binary mask so that
@@ -164,8 +252,15 @@ def process_cetus(source_path, output_path, overwrite=False):
     bg_mask = volume.astype(int) == bg_level
 
     # Convert B-mode intensity [0, 255] to dB range [-60, 0].
-    volume_db = (volume / 255.0) * 60.0 - 60.0
+    volume_db = volume.astype(np.float32) * np.float32(60.0 / 255.0) - np.float32(60.0)
     volume_db[bg_mask] = -60.0
+
+    # Estimate the scan frustum from the voxels that hold data, and resample onto it.
+    frustum = detect_frustum_parameters(~bg_mask, spacing=voxel_spacing)
+    log.debug("%s: detected scan frustum %s", source_path.name, frustum)
+    polar_indices, polar_coordinates = polar_grid(frustum, polar_shape, voxel_spacing)
+    polar_values = map_coordinates(volume_db, polar_indices, order=1, mode="constant", cval=-60.0)
+    polar_values = np.clip(polar_values, -60.0, 0.0).astype(np.float32)
 
     # Store as image with shape (n_frames, depth, height, width).
     # For 3D volumes, n_frames=1 (single time point: ED or ES).
@@ -181,23 +276,37 @@ def process_cetus(source_path, output_path, overwrite=False):
     time_point = stem.split("_")[-1]  # "ED" or "ES"
     patient_name = stem.split("_")[0]  # e.g. "patient01"
 
-    # Build data dict
-    D, H, W = volume.shape
-
-    # Build per-voxel coordinate grid from voxel spacing.
-    # Shape: (1, D, H, W, 3) — valid for both image (1,D,H,W) and segmentation (1,D,H,W,1).
-    d_range = np.arange(D, dtype=np.float32) * voxel_spacing[0]
-    h_range = np.arange(H, dtype=np.float32) * voxel_spacing[1]
-    w_range = np.arange(W, dtype=np.float32) * voxel_spacing[2]
-    d_grid, h_grid, w_grid = np.meshgrid(d_range, h_range, w_range, indexing="ij")
-    coordinates = np.stack([d_grid, h_grid, w_grid], axis=-1)  # (D, H, W, 3)
+    # Per-voxel [x, y, z] positions, shared by image (1, D, H, W) and segmentation
+    # (1, D, H, W, 1), in the same apex-centred frame as the polar coordinates.
+    coordinates = cartesian_coordinates(volume.shape, frustum["apex"], voxel_spacing)
 
     data = {
         "image": {
-            "values": image_values.astype(np.float32),
+            "values": image_values,
             "coordinates": coordinates,
-        }
+        },
+        "image_polar": {
+            "values": polar_values[np.newaxis, ...],  # (1, n_rho, n_theta, n_phi)
+            "coordinates": polar_coordinates,
+        },
     }
+
+    polar_geometry = {
+        "rho_range": ("m", "Radial range of image_polar, measured from the apex."),
+        "theta_range": ("rad", "Azimuth range of image_polar, along x (second axis of image)."),
+        "phi_range": ("rad", "Elevation range of image_polar, along y (third axis of image)."),
+        "apex": ("voxel", "Estimated apex as a fractional (z, x, y) voxel index into image."),
+    }
+    custom = [
+        CustomElement(
+            name=name,
+            data=np.asarray(frustum[name], dtype=np.float32),
+            description=description,
+            unit=unit,
+            group_name="polar_geometry",
+        )
+        for name, (unit, description) in polar_geometry.items()
+    ]
 
     if gt_path.exists():
         gt_volume, _ = sitk_load(gt_path)
@@ -213,7 +322,8 @@ def process_cetus(source_path, output_path, overwrite=False):
     # Build description for this file
     file_description = (
         f"CETUS dataset - {patient_name} {time_point} - "
-        f"3D echocardiographic volume converted to zea format. "
+        f"3D echocardiographic volume converted to zea format, with a polar resampling "
+        f"on an estimated scan frustum (image_polar). "
         f"Voxel spacing: {voxel_spacing.tolist()} m. "
         f"License: {CETUS_LICENSE}. "
         f"Citation: {CETUS_CITATION}"
@@ -234,7 +344,10 @@ def process_cetus(source_path, output_path, overwrite=False):
         # - Philips system refered as iE33, using a X5-1 probe;
         # - Siemens system refered as SC2000, using 4Z1c probe.
         description=file_description,
+        custom=custom,
         overwrite=overwrite,
+        # image_polar is not a built-in data field, which File.create warns about.
+        ignore_warnings=True,
     )
 
 
@@ -242,16 +355,16 @@ def _process_task(task):
     """Unpack a task tuple and invoke process_cetus in a worker process.
 
     Args:
-        task (tuple): ``(source_file_str, output_file_str)``
+        task (tuple): ``(source_file_str, output_file_str, polar_shape)``
     """
-    source_file_str, output_file_str = task
+    source_file_str, output_file_str, polar_shape = task
     source_file = Path(source_file_str)
     output_file = Path(output_file_str)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        process_cetus(source_file, output_file, overwrite=False)
+        process_cetus(source_file, output_file, overwrite=False, polar_shape=polar_shape)
     except Exception:
         log.error("Error processing %s", log.yellow(source_file))
         raise
@@ -303,12 +416,17 @@ def convert_cetus(args):
               Girder server.
             - no_hyperthreading (bool, optional): If True, run tasks serially instead
               of using a process pool.
+            - polar_shape (tuple, optional): Shape ``(n_rho, n_theta, n_phi)`` of the
+              polar volumes. Defaults to :data:`DEFAULT_POLAR_SHAPE`.
             - upload (bool, optional): If True, upload the converted dataset to
               HuggingFace Hub after conversion. Only for zea maintainers with push
               access to the repository.
     """
     cetus_source_folder = Path(args.src)
     cetus_output_folder = Path(args.dst)
+    polar_shape = tuple(getattr(args, "polar_shape", DEFAULT_POLAR_SHAPE))
+    if len(polar_shape) != 3 or min(polar_shape) < 2:
+        raise ValueError(f"polar_shape must be three sizes of at least 2, got {polar_shape}")
 
     check_output_dir_ownership(cetus_output_folder, _HF_REPO_ID)
 
@@ -351,7 +469,7 @@ def convert_cetus(args):
         output_file = cetus_output_folder / split / patient_name / output_name
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        tasks.append((str(source_file), str(output_file)))
+        tasks.append((str(source_file), str(output_file), polar_shape))
 
     if not tasks:
         log.info("No CETUS files found to process.")
@@ -483,12 +601,36 @@ test/
 Each HDF5 file follows the
 [zea data format](https://github.com/tue-bmd/zea) and contains:
 
-- `data/image/values` - B-mode volume in dB, shape `(1, depth, height, width)`
-- `data/image/coordinates` - voxel positions in metres, shape `(depth, height, width, 3)`
-- `data/segmentation/values` - binary LV endocardium mask, shape `(1, depth, height, width, 1)`
+- `data/image/values` - B-mode volume in dB, shape `(1, z, x, y)`, with depth `z` first
+- `data/image/coordinates` - voxel positions `[x, y, z]` in metres with the estimated apex
+  at the origin, shape `(z, x, y, 3)`
+- `data/image_polar/values` - the B-mode volume resampled onto a polar grid, in dB, shape
+  `(1, rho, theta, phi)`, `(1, 256, 128, 128)` by default (`--polar-shape`)
+- `data/image_polar/coordinates` - `[x, y, z]` position in metres of every polar sample, in
+  the same frame as `data/image/coordinates`, shape `(rho, theta, phi, 3)`
+- `custom/polar_geometry/rho_range`, `theta_range`, `phi_range` - extent of the polar grid
+  (metres and radians), and `custom/polar_geometry/apex` - the apex as a `(z, x, y)` voxel
+  index into `data/image`
+- `data/segmentation/values` - binary LV endocardium mask, shape `(1, z, x, y, 1)`
 - `data/segmentation/labels` - `["endocardium"]`
 - `metadata/subject/id` - patient name (e.g. `patient01`)
 - `metadata/annotations/label` - time point: `["ED"]` or `["ES"]`
+
+## Polar volumes
+
+CETUS ships only the scan-converted (Cartesian) volumes, without the acquisition geometry.
+For every volume, the scan frustum (apex, azimuth `theta` and elevation `phi` ranges, and
+depth) is estimated from the voxels that hold data, with
+`zea.tools.fit_scan_cone.detect_frustum_parameters`. The volume is then resampled onto a
+regular `(rho, theta, phi)` grid with trilinear interpolation, using the zea frustum
+convention (`tan(theta) = x / z`, `tan(phi) = y / z`). It can be scan converted back with
+`zea.display.scan_convert_3d` and the ranges in `custom/polar_geometry`.
+
+This is an inverse scan conversion, so it adds an interpolation step and only approximates
+the original beam geometry. For some scanners the sector is not an exact frustum, and the
+polar grid is a frustum that encloses the whole sector. Parts of the polar volume
+therefore lie outside the sector, as do sector corners that were cropped off the original
+Cartesian volumes. These samples are -60 dB.
 
 ## License
 
