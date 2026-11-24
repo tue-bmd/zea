@@ -27,7 +27,7 @@ DATASETS = {
     "zeahub/camus": (1000, 24.8),
     "zeahub/camus-sample": (6, 0.16),
     "zeahub/cetus-miccai-2014": (90, 2.4),
-    "zeahub/DehazingEcho2025": (1, 0.002),
+    "zeahub/DehazingEcho2025": (125, 0.23),
     "zeahub/echoxflow": (13619, 275.7),
     "zeahub/phantoms": (2, 5.8),
     "zeahub/picmus": (12, 0.65),
