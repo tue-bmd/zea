@@ -29,6 +29,7 @@ Changed
 
 Fixed
 ^^^^^
+- :class:`zea.ops.Map` with ``jit_options=None`` and a batch dimension unrolled its patch loop on JAX, so memory grew with the number of patches; it now runs eagerly (:gh:`x` by :user:`wesselvannierop`)
 - Logging a character the console can't encode (e.g. ``→`` on a redirected Windows stdout) printed a ``--- Logging error ---`` traceback instead of the message; such characters are now escaped (:gh:`721` by :user:`wesselvannierop`)
 - :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
 

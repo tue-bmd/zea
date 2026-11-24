@@ -491,6 +491,65 @@ def test_map_inside_outer_jit_does_not_disable_vmap_jit():
     assert standalone._inside_outer_jit is False
 
 
+def _subprocess_map_without_jit_runs_eagerly():  # pragma: no cover
+    """Check that a jit_options=None Map with a batch dim never traces its inner op."""
+    import os
+
+    os.environ["KERAS_BACKEND"] = "jax"
+
+    import jax
+    import keras
+    import numpy as np
+
+    from zea import ops
+    from zea.ops import Map
+
+    class RecordTracing(ops.Operation):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.traced = []
+
+        def call(self, data):
+            self.traced.append(isinstance(data, jax.core.Tracer))
+            return {"data": keras.ops.multiply(data, 2.0)}
+
+    recorder = RecordTracing()
+    mapped = Map(
+        operations=[recorder],
+        argnames="data",
+        batch_size=2,
+        jit_options=None,
+        with_batch_dim=True,
+    )
+    data = np.arange(3 * 6, dtype="float32").reshape(3, 6)  # 3 frames of 6 elements
+
+    out = mapped(data=data)["data"]
+
+    np.testing.assert_allclose(keras.ops.convert_to_numpy(out), 2 * data)
+    # 3 frames x 3 patches, all eager
+    assert recorder.traced == [False] * 9, recorder.traced
+
+
+def test_map_without_jit_runs_batch_and_patches_eagerly():
+    """A Map with jit_options=None and a batch dim must not trace its batch loop.
+
+    Runs in a subprocess, as `run_in_backend` disables jit.
+    """
+    missing = missing_required_backends(["jax"])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_map_without_jit_runs_eagerly))
+    code += "\n_subprocess_map_without_jit_runs_eagerly()\n"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, (
+        f"The Map traced its batch loop without jit.\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+
+
 def test_inside_outer_jit_propagates_transitively():
     """jit_options='pipeline' must mark every descendant (any depth) as inside the outer JIT."""
     leaf_op = AddOperation()

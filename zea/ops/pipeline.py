@@ -13,7 +13,7 @@ from keras import ops
 from zea import backend, log
 from zea.backend import func_on_device, jit
 from zea.config import Config
-from zea.func.tensor import vmap
+from zea.func.tensor import simple_map, vmap
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.ops_list import OperationList
 from zea.internal.precision import LOW_PRECISION_DTYPES
@@ -1161,6 +1161,11 @@ class Map(Pipeline):
                 "Consider setting one of them to process data in chunks or batches."
             )
 
+    @property
+    def _runs_eagerly(self):
+        """True when neither this Map nor an outer pipeline jits it."""
+        return not bool(self.jit_options) and not self._inside_outer_jit
+
     def call_item(self, **inputs):
         """Process data in patches."""
         mapped_args = []
@@ -1182,7 +1187,7 @@ class Map(Pipeline):
             chunks=self.chunks,
             batch_size=self.batch_size,
             fn_supports_batch=True,
-            disable_jit=not bool(self.jit_options) and not self._inside_outer_jit,
+            disable_jit=self._runs_eagerly,
         )(*mapped_args)
 
         return out
@@ -1235,7 +1240,9 @@ class Map(Pipeline):
         """Process input data through the pipeline."""
         if self._with_batch_dim:
             input_data = inputs.pop(self.key)
-            output = ops.map(
+            # A traced ops.map would unroll call_item's eager patch loop.
+            map_fn = simple_map if self._runs_eagerly else ops.map
+            output = map_fn(
                 lambda x: self.call_item(**{self.key: x, **inputs}),
                 input_data,
             )
