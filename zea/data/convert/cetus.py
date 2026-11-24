@@ -255,8 +255,11 @@ def process_cetus(source_path, output_path, overwrite=False, polar_shape=DEFAULT
     volume_db = volume.astype(np.float32) * np.float32(60.0 / 255.0) - np.float32(60.0)
     volume_db[bg_mask] = -60.0
 
-    # Estimate the scan frustum from the voxels that hold data, and resample onto it.
-    frustum = detect_frustum_parameters(~bg_mask, spacing=voxel_spacing)
+    # Estimate the scan frustum from the voxels that hold data, and resample onto it. Besides
+    # the background level, the raw volumes have zeros in the last plane(s) along each axis.
+    # Both are at the -60 dB floor, so only voxels above it count as data. Otherwise the zero
+    # planes join the sector wherever it touches those borders.
+    frustum = detect_frustum_parameters(volume_db > -60.0, spacing=voxel_spacing)
     log.debug("%s: detected scan frustum %s", source_path.name, frustum)
     polar_indices, polar_coordinates = polar_grid(frustum, polar_shape, voxel_spacing)
     polar_values = map_coordinates(volume_db, polar_indices, order=1, mode="constant", cval=-60.0)

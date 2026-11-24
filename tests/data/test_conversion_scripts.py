@@ -1854,6 +1854,36 @@ def test_cetus_polar_volume_matches_geometry(tmp_path):
     np.testing.assert_allclose(resampled, polar, atol=1e-3)
 
 
+def test_cetus_zero_padding_planes(tmp_path):
+    """Raw CETUS volumes have zeros in the last plane along each axis, as well as the
+    background level. Where the sector is clipped by those borders, the zeros must not be
+    mistaken for data, or no sector edge can be found."""
+    from zea.data.convert.cetus import process_cetus
+
+    shape, apex = (48, 50, 46), (-2.0, 25.0, 23.0)
+    theta, phi = (-0.75, 0.75), (-0.7, 0.7)
+    # Wide and deep enough to be clipped by the lateral borders and the bottom of the volume
+    sector = make_frustum_mask(shape, apex, theta, phi, 60.0)
+    vol = np.full(shape, 10.0, dtype=np.float32)
+    vol[sector] = np.random.default_rng(DEFAULT_TEST_SEED).uniform(30, 255, sector.sum())
+    vol[-1] = vol[:, -1] = vol[:, :, -1] = 0.0
+
+    source = tmp_path / "patient01_ED.nii.gz"
+    image = sitk.GetImageFromArray(vol)
+    image.SetSpacing((CETUS_TEST_SPACING,) * 3)
+    sitk.WriteImage(image, str(source))
+    output = tmp_path / "patient01_ED.hdf5"
+    process_cetus(source, output, polar_shape=(24, 12, 12))
+
+    with File(output, "r") as f:
+        geometry = {
+            e.name: np.asarray(e.data, dtype=np.float64) for e in f.custom["polar_geometry"]
+        }
+    np.testing.assert_allclose(geometry["theta_range"], theta, atol=np.radians(2))
+    np.testing.assert_allclose(geometry["phi_range"], phi, atol=np.radians(2))
+    np.testing.assert_allclose(geometry["apex"], apex, atol=1.5)
+
+
 def test_cetus_polar_grid_uses_zea_frustum_convention():
     """polar_grid places samples where zea.display.frustum_convert_rtp2xyz does, so that
     zea.display.scan_convert_3d inverts the polar resampling."""
