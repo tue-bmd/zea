@@ -8,6 +8,7 @@ import keras
 from keras import ops
 
 from zea.backend import jit
+from zea.func import tensor
 from zea.internal.checks import _assert_keys_and_axes
 from zea.internal.core import (
     DataTypes,
@@ -610,7 +611,7 @@ class Lambda(Operation):
     def call(self, **kwargs):
         data = kwargs[self.key]
         if self.with_batch_dim:
-            data = ops.map(self.func, data)
+            data = tensor.map(self.func, data)
         else:
             data = self.func(data)
         return {self.output_key: data}

@@ -8,6 +8,7 @@ from keras import ops
 from zea import log
 from zea.beamform.beamformer import tof_correction
 from zea.display import scan_convert
+from zea.func import tensor
 from zea.func.tensor import (
     apply_along_axis,
     correlate,
@@ -150,7 +151,7 @@ class Simulate(Operation):
             # A stateless seed inside `map` repeats the same noise for every item, so instead, first
             # simulate everything and then apply TGC and nosie.
             mapped_kwargs = {**simulate_kwargs, "noise_level_db": None, "tgc_max_db": 0.0}
-            simulated_rf = ops.map(
+            simulated_rf = tensor.map(
                 lambda inputs: simulate(
                     scatterer_positions=inputs["positions"],
                     scatterer_magnitudes=inputs["magnitudes"],
@@ -279,7 +280,7 @@ class TOFCorrection(Operation):
         if not self.with_batch_dim:
             tof_corrected = tof_correction(raw_data, **tof_kwargs)
         else:
-            tof_corrected = ops.map(
+            tof_corrected = tensor.map(
                 lambda data: tof_correction(data, **tof_kwargs),
                 raw_data,
             )
@@ -1451,7 +1452,7 @@ class CommonMidpointPhaseError(Operation):
         if not self.with_batch_dim:
             pemap = self.process_phase_map(data)
         else:
-            pemap = ops.map(
+            pemap = tensor.map(
                 lambda d: self.process_phase_map(d),
                 data,
             )

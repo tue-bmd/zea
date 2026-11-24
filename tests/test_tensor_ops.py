@@ -593,16 +593,6 @@ def test_vmap(func, in_axes, out_axes, batch_size, chunks, fn_supports_batch):
         chunks=chunks,
         fn_supports_batch=fn_supports_batch,
     )(x_tensor, y_tensor)
-    no_jit_result = zea.func.vmap(
-        func,
-        in_axes,
-        out_axes,
-        batch_size=batch_size,
-        chunks=chunks,
-        fn_supports_batch=fn_supports_batch,
-        disable_jit=True,
-    )(x_tensor, y_tensor)
-    np.testing.assert_allclose(no_jit_result, expected, rtol=1e-5, atol=1e-5)
     np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
 
     if func == "multiple_out":
@@ -655,10 +645,9 @@ def test_vmap_none_arg():
     "vmap_kwargs",
     [
         {},
-        {"disable_jit": True},
         {"batch_size": 2},
         {"chunks": 2},
-        {"batch_size": 2, "fn_supports_batch": True, "disable_jit": True},
+        {"batch_size": 2, "fn_supports_batch": True},
     ],
 )
 @backend_equality_check()
@@ -693,13 +682,12 @@ def test_vmap_none_arg_positions(none_pattern, vmap_kwargs):
 
 _VMAP_PATHS = [
     {},
-    {"disable_jit": True},
     {"batch_size": 2},
-    {"chunks": 2, "disable_jit": True},
+    {"chunks": 2},
 ]
 _VMAP_BATCH_PATHS = [
     {"batch_size": 2, "fn_supports_batch": True},
-    {"chunks": 2, "fn_supports_batch": True, "disable_jit": True},
+    {"chunks": 2, "fn_supports_batch": True},
 ]
 # These outputs and inputs do not use axes, so `fun` also works on a whole batch.
 _VMAP_DEFAULT_AXES_CASES = [
@@ -1008,11 +996,7 @@ def test_vmap_out_axes_none(vmap_kwargs):
     axes = {"in_axes": (0, None), "out_axes": (0, None)}
     args = (ops.convert_to_tensor(a), ops.convert_to_tensor(b))
 
-    is_native = (
-        keras.backend.backend() == "jax"
-        and not vmap_kwargs.get("disable_jit", False)
-        and not vmap_kwargs.get("fn_supports_batch", False)
-    )
+    is_native = keras.backend.backend() == "jax" and not vmap_kwargs.get("fn_supports_batch", False)
     if not is_native:
         with pytest.raises(ValueError, match="out_axes=None"):
             zea.func.vmap(fun, **axes, **vmap_kwargs)
@@ -1135,51 +1119,34 @@ def test_vmap_invalid_axis_types_raise_like_jax(axes):
         zea.func.vmap(lambda x: x, **axes)
 
 
+@pytest.mark.parametrize("structure", ["tensor", "tuple", "dict"])
 @backend_equality_check()
-def test_simple_map_one_input():
-    """Test the `zea` `simple_map` function against `keras.ops.map`."""
+def test_map_matches_ops_map(structure):
+    """`zea.func.map` should give the same outputs as `keras.ops.map`, for nested structures."""
+    import keras
     from keras import ops
 
     import zea
 
-    # One input
-    def func_one_input(x):
-        return x * 2
-
     rng = default_rng(DEFAULT_TEST_SEED)
-    x = rng.standard_normal((10, 5)).astype(np.float32)
-    x_tensor = ops.convert_to_tensor(x)
-    expected_one_input = ops.map(func_one_input, x_tensor)
-    result_one_input = zea.func.simple_map(func_one_input, x_tensor)
-    np.testing.assert_allclose(result_one_input, expected_one_input, rtol=1e-5, atol=1e-5)
+    x = ops.convert_to_tensor(rng.standard_normal((4, 3)).astype("float32"))
+    y = ops.convert_to_tensor(rng.standard_normal((4, 3)).astype("float32"))
+    f, xs = {
+        "tensor": (lambda a: a * 2, x),
+        "tuple": (lambda t: (t[0] + t[1], t[0] * t[1]), (x, y)),
+        "dict": (lambda d: {"sum": d["a"] + d["b"]}, {"a": x, "b": y}),
+    }[structure]
 
-    return result_one_input
+    result = zea.func.map(f, xs)
 
-
-@backend_equality_check()
-def test_simple_map_multiple_inputs():
-    """Test the `zea` `simple_map` function against `keras.ops.map`."""
-    from keras import ops
-
-    import zea
-
-    # Multiple inputs
-    def func_multiple_inputs(inputs):
-        x, y = inputs
-        return x + y
-
-    rng = default_rng(DEFAULT_TEST_SEED)
-    x = rng.standard_normal((10, 5)).astype(np.float32)
-    y = rng.standard_normal((10, 5)).astype(np.float32)
-    x_tensor = ops.convert_to_tensor(x)
-    y_tensor = ops.convert_to_tensor(y)
-    expected_multiple_inputs = ops.map(func_multiple_inputs, [x_tensor, y_tensor])
-    result_multiple_inputs = zea.func.simple_map(func_multiple_inputs, [x_tensor, y_tensor])
-    np.testing.assert_allclose(
-        result_multiple_inputs, expected_multiple_inputs, rtol=1e-5, atol=1e-5
-    )
-
-    return result_multiple_inputs
+    expected = ops.map(f, xs)
+    result_leaves = keras.tree.flatten(result)
+    expected_leaves = keras.tree.flatten(expected)
+    assert len(result_leaves) == len(expected_leaves)
+    for r, e in zip(result_leaves, expected_leaves):
+        assert tuple(ops.shape(r)) == tuple(ops.shape(e))
+        np.testing.assert_allclose(ops.convert_to_numpy(r), ops.convert_to_numpy(e), rtol=1e-6)
+    return ops.convert_to_numpy(result_leaves[0])
 
 
 @pytest.mark.parametrize(

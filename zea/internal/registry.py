@@ -207,7 +207,7 @@ class RegisterDecorator:
 probe_registry = RegisterDecorator()
 beamformer_registry = RegisterDecorator()
 metrics_registry = RegisterDecorator(
-    items_to_register=["name", "paired", "jittable", "torch_vmappable", "torch_jittable"]
+    items_to_register=["name", "paired", "jittable", "batched", "torch_jittable"]
 )
 checks_registry = RegisterDecorator(items_to_register=["data_type"])
 ops_registry = RegisterDecorator(items_to_register=["name"])

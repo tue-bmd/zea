@@ -13,7 +13,8 @@ from keras import ops
 from zea import backend, log
 from zea.backend import func_on_device, jit
 from zea.config import Config
-from zea.func.tensor import simple_map, vmap
+from zea.func import tensor
+from zea.func.tensor import vmap
 from zea.internal.core import DataTypes, ZEADecoderJSON, ZEAEncoderJSON, dict_to_tensor
 from zea.internal.ops_list import OperationList
 from zea.internal.precision import LOW_PRECISION_DTYPES
@@ -136,7 +137,7 @@ class Pipeline:
                 - "ops": compiles each operation separately. This preserves python control flow and
                   caching functionality, but speeds up the operations.
 
-                - None: disables JIT compilation.
+                - None: disables JIT compilation, so the operations run eagerly.
 
                 Defaults to "ops".
 
@@ -1058,20 +1059,6 @@ class Pipeline:
         return prepared
 
 
-def _is_traced(x):
-    """True when ``x`` is being traced by a jit or graph we did not set up."""
-    name = keras.backend.backend()
-    if name == "jax":
-        import jax
-
-        return isinstance(x, jax.core.Tracer)
-    if name == "tensorflow":
-        import tensorflow as tf
-
-        return not tf.executing_eagerly()
-    return False
-
-
 @ops_registry("map")
 class Map(Pipeline):
     """
@@ -1175,11 +1162,6 @@ class Map(Pipeline):
                 "Consider setting one of them to process data in chunks or batches."
             )
 
-    @property
-    def _runs_eagerly(self):
-        """True when neither this Map nor an outer pipeline jits it."""
-        return not bool(self.jit_options) and not self._inside_outer_jit
-
     def call_item(self, **inputs):
         """Process data in patches."""
         mapped_args = []
@@ -1201,7 +1183,6 @@ class Map(Pipeline):
             chunks=self.chunks,
             batch_size=self.batch_size,
             fn_supports_batch=True,
-            disable_jit=self._runs_eagerly,
         )(*mapped_args)
 
         return out
@@ -1254,10 +1235,7 @@ class Map(Pipeline):
         """Process input data through the pipeline."""
         if self._with_batch_dim:
             input_data = inputs.pop(self.key)
-            # A traced ops.map would unroll call_item's eager patch loop.
-            eager = self._runs_eagerly and not _is_traced(input_data)
-            map_fn = simple_map if eager else ops.map
-            output = map_fn(
+            output = tensor.map(
                 lambda x: self.call_item(**{self.key: x, **inputs}),
                 input_data,
             )
@@ -1744,7 +1722,7 @@ class DelayMultiplyAndSum(Operation):
             beamformed_data = self.process_image(data)
         else:
             # Apply process_image to each item in the batch
-            beamformed_data = ops.map(self.process_image, data)
+            beamformed_data = tensor.map(self.process_image, data)
 
         return {self.output_key: beamformed_data}
 
@@ -2067,7 +2045,7 @@ class MinimumVariance(Operation):
         )
 
         # One transmit at a time keeps only a single (n_pix, M, M) covariance in memory.
-        per_transmit = ops.map(
+        per_transmit = tensor.map(
             lambda transmit: self._beamform_transmit(transmit, subarray_length, axial_stride),
             data,
         )
@@ -2170,7 +2148,7 @@ class MinimumVariance(Operation):
         if not self.with_batch_dim:
             beamformed_data = self.process_image(data, stride)
         else:
-            beamformed_data = ops.map(lambda image: self.process_image(image, stride), data)
+            beamformed_data = tensor.map(lambda image: self.process_image(image, stride), data)
         return {self.output_key: beamformed_data}
 
 
@@ -2504,7 +2482,7 @@ class ADMIRE(Operation):
 
         if not self.with_batch_dim:
             return process_image
-        return lambda data: ops.map(process_image, data)
+        return lambda data: tensor.map(process_image, data)
 
 
 @ops_registry("refocus")
