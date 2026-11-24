@@ -1884,6 +1884,37 @@ def test_cetus_zero_padding_planes(tmp_path):
     np.testing.assert_allclose(geometry["apex"], apex, atol=1.5)
 
 
+@pytest.mark.parametrize("no_hyperthreading", [True, False], ids=["serial", "parallel"])
+def test_cetus_conversion_reports_failed_files(tmp_path, attach_caplog, no_hyperthreading):
+    """A file that fails is logged by name, counted in the summary, and fails the run after
+    the other files are written, so an incomplete dataset is never uploaded."""
+    from zea.data.convert.cetus import convert_cetus
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    (src / "patient01").mkdir(parents=True)
+    write_cetus_test_volume(src / "patient01" / "patient01_ED.nii.gz", np.random.default_rng(0))
+    # A box has no scan frustum, so its conversion fails
+    box = np.full((24, 24, 24), 10.0, dtype=np.float32)
+    box[2:20, 4:20, 4:20] = 200.0
+    sitk.WriteImage(sitk.GetImageFromArray(box), str(src / "patient01" / "patient01_ES.nii.gz"))
+
+    args = types.SimpleNamespace(
+        src=src,
+        dst=dst,
+        no_hyperthreading=no_hyperthreading,
+        polar_shape=CETUS_TEST_POLAR_SHAPE,
+    )
+    with pytest.raises(RuntimeError, match=r"1 of 2 CETUS files failed.*patient01_ES\.nii\.gz"):
+        convert_cetus(args)
+
+    assert (dst / "train" / "patient01" / "patient01_ED.hdf5").exists()
+    assert not (dst / "train" / "patient01" / "patient01_ES.hdf5").exists()
+    assert (dst / "README.md").exists()
+    errors = [r.getMessage() for r in attach_caplog.records if r.levelname == "ERROR"]
+    assert any("patient01_ES.nii.gz" in message for message in errors), errors
+    assert any("1 of 2 files" in r.getMessage() for r in attach_caplog.records)
+
+
 def test_cetus_polar_grid_uses_zea_frustum_convention():
     """polar_grid places samples where zea.display.frustum_convert_rtp2xyz does, so that
     zea.display.scan_convert_3d inverts the polar resampling."""

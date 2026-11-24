@@ -51,7 +51,8 @@ Dataset splits:
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -365,12 +366,7 @@ def _process_task(task):
     output_file = Path(output_file_str)
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        process_cetus(source_file, output_file, overwrite=False, polar_shape=polar_shape)
-    except Exception:
-        log.error("Error processing %s", log.yellow(source_file))
-        raise
+    process_cetus(source_file, output_file, overwrite=False, polar_shape=polar_shape)
 
 
 def download_cetus(  # pragma: no cover
@@ -424,6 +420,10 @@ def convert_cetus(args):
             - upload (bool, optional): If True, upload the converted dataset to
               HuggingFace Hub after conversion. Only for zea maintainers with push
               access to the repository.
+
+    Raises:
+        RuntimeError: If any file failed to convert, after the other files are written and
+            before anything is uploaded. Each failure is logged with its file name.
     """
     cetus_source_folder = Path(args.src)
     cetus_output_folder = Path(args.dst)
@@ -480,40 +480,44 @@ def convert_cetus(args):
 
     log.info(f"Found {len(tasks)} files to convert.")
 
+    # Source file -> exception, for every file that failed to convert
+    failures = {}
     if getattr(args, "no_hyperthreading", False):
         log.info("Running tasks serially (no ProcessPoolExecutor)")
-        for t in tqdm(tasks, desc="Processing files (serial)"):
+        for task in tqdm(tasks, desc="Processing files (serial)"):
             try:
-                _process_task(t)
+                _process_task(task)
             except Exception as exc:
-                log.error("Failed to process %s: %s", log.yellow(t[0]), exc)
-        log.info(
-            "Conversion complete. %d files written to %s",
-            len(tasks),
-            log.yellow(cetus_output_folder),
-        )
+                failures[task[0]] = exc
+                log.error("Failed to convert %s: %s", log.yellow(task[0]), exc)
+    else:
+        # No more workers than files: the default is one per CPU, all forked up front.
+        with ProcessPoolExecutor(max_workers=min(len(tasks), os.cpu_count() or 1)) as exe:
+            futures = {exe.submit(_process_task, task): task for task in tasks}
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Processing files"):
+                try:
+                    future.result()
+                except Exception as exc:
+                    source = futures[future][0]
+                    failures[source] = exc
+                    log.error("Failed to convert %s: %s", log.yellow(source), exc)
 
-        write_dataset_card(cetus_output_folder, _DATASET_CARD)
-
-        if getattr(args, "upload", False):
-            upload_cetus(cetus_output_folder, revision=args.revision)
-        return
-
-    # Parallel processing
-    with ProcessPoolExecutor() as exe:
-        futures = [exe.submit(_process_task, t) for t in tasks]
-        for future in tqdm(futures, desc="Processing files"):
-            try:
-                future.result()
-            except Exception as exc:
-                log.error("Failed to process a file: %s", exc)
     log.info(
-        "Conversion complete. %d files written to %s",
+        "Conversion complete. %d of %d files converted or already present in %s.",
+        len(tasks) - len(failures),
         len(tasks),
         log.yellow(cetus_output_folder),
     )
 
+    # Written even after failures, so that a rerun into this folder passes the ownership check.
     write_dataset_card(cetus_output_folder, _DATASET_CARD)
+
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} of {len(tasks)} CETUS files failed to convert: "
+            f"{', '.join(Path(source).name for source in sorted(failures))}. "
+            "See the errors above."
+        )
 
     if getattr(args, "upload", False):
         upload_cetus(cetus_output_folder, revision=args.revision)
