@@ -258,8 +258,10 @@ class _CapturingHandler:
     temporarily removed so it can't double-count effects like bar redraws.
     """
 
+    def __init__(self, stream=None):
+        self.stream = io.StringIO() if stream is None else stream
+
     def __enter__(self):
-        self.stream = io.StringIO()
         self.handler = log._ProgressAwareStreamHandler(stream=self.stream)
         self.handler.setFormatter(logging.Formatter("%(message)s"))
         self._saved_handlers = list(log.logger.handlers)
@@ -313,3 +315,20 @@ def test_handler_behaves_like_plain_stream_handler_when_idle():
         log.info("plain message")
         out = stream.getvalue()
     assert out == "plain message\n"
+
+
+def test_handler_escapes_characters_the_stream_cannot_encode():
+    # A strict cp1252 stream mimics a redirected stdout on Windows.
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="cp1252", errors="strict", newline="\n")
+    handler_errors = []
+    with _CapturingHandler(stream) as stream:
+        stream_handler = log.logger.handlers[0]
+        stream_handler.handleError = handler_errors.append
+        log.info("arrow → café")
+        stream.flush()
+    assert not handler_errors
+    # Encodable characters (é) pass through, the rest are escaped.
+    assert buffer.getvalue().decode("cp1252") == "arrow \\u2192 café\n"
+    # The stream itself is left untouched.
+    assert stream.errors == "strict"

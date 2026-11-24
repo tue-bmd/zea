@@ -171,11 +171,7 @@ def test_iq_matches_demodulated_rf(
     the even-length Nyquist bin and the inverse-FFT normalization of the IQ
     path all at once.
 
-    Refocus decodes circularly in fast time, so this round trip only holds exactly
-    against an equally circular demodulation. ``pad_fast_time=False`` therefore
-    stays pinned here: the padded default is aperiodic by design, and comparing it
-    against a circular decode would measure that mismatch instead of the frequency
-    conventions above.
+    Uses ``pad_fast_time=False``: the round trip is only exact for circular decoding.
     """
     import keras
 
@@ -193,7 +189,7 @@ def test_iq_matches_demodulated_rf(
             )
         )
 
-    op = Refocus(method=method, param=param, with_batch_dim=False)
+    op = Refocus(method=method, param=param, pad_fast_time=False, with_batch_dim=False)
 
     iq_data = _demodulate(bandlimited_rf_data)
     assert iq_data.shape == (N_TX, N_AX, N_EL, 2)
@@ -214,6 +210,68 @@ def test_iq_matches_demodulated_rf(
         f"method={method} param={param}: IQ decoding does not match the "
         f"demodulated RF decoding (relative max error {error:.3e} >= {tol:.3e})"
     )
+
+
+@pytest.mark.parametrize("method", ["adjoint", "tikhonov", "rsvd", "tsvd"])
+@pytest.mark.parametrize("data_kind", ["rf", "iq"])
+def test_padding_matches_manually_padded_record(
+    method, data_kind, probe_geometry, plane_wave_delays, rf_data, iq_data
+):
+    """Padding equals decoding a manually zero-padded record, cropped back."""
+    import keras
+
+    from zea.ops import Refocus
+
+    data = rf_data if data_kind == "rf" else iq_data
+    padded_record = np.concatenate([data, np.zeros_like(data)], axis=1)
+
+    op_padded = Refocus(method=method, pad_fast_time=True, with_batch_dim=False)
+    op_circular = Refocus(method=method, pad_fast_time=False, with_batch_dim=False)
+
+    padded = keras.ops.convert_to_numpy(
+        _call_refocus(op_padded, data, probe_geometry, plane_wave_delays)[op_padded.output_key]
+    )
+    reference = keras.ops.convert_to_numpy(
+        _call_refocus(op_circular, padded_record, probe_geometry, plane_wave_delays)[
+            op_circular.output_key
+        ]
+    )[:, :N_AX]
+
+    assert padded.shape == (N_EL, N_AX, N_EL, data.shape[-1])
+    np.testing.assert_allclose(padded, reference, atol=1e-4 * np.abs(reference).max())
+
+
+@pytest.mark.parametrize("data_kind", ["rf", "iq"])
+def test_padding_removes_wraparound(data_kind):
+    """An impulse shifted before the record start wraps to the end only without padding."""
+    import keras
+
+    from zea.ops import Refocus
+
+    n_ax, delay, t_impulse = 64, 10, 4  # decoded impulse lands at 4 - 10 < 0
+    data = np.zeros((1, n_ax, 1, 1 if data_kind == "rf" else 2), np.float32)
+    data[0, t_impulse, 0, 0] = 1.0
+
+    def decode(pad):
+        op = Refocus(method="adjoint", param=0, pad_fast_time=pad, with_batch_dim=False)
+        out = op(
+            data=keras.ops.convert_to_tensor(data),
+            t0_delays=np.full((1, 1), delay / SAMPLING_FREQ, np.float32),
+            sampling_frequency=SAMPLING_FREQ,
+            probe_geometry=np.zeros((1, 3), np.float32),
+            initial_times=np.zeros(1, np.float32),
+            demodulation_frequency=DEMODULATION_FREQ,
+        )[op.output_key]
+        return np.linalg.norm(keras.ops.convert_to_numpy(out)[0, :, 0, :], axis=-1)
+
+    wrapped_at = n_ax + t_impulse - delay
+    circular = decode(pad=False)
+    assert np.argmax(circular) == wrapped_at
+    assert circular[wrapped_at] > 0.9
+
+    padded = decode(pad=True)
+    # Small offset left by the dropped DC bin.
+    assert padded.max() < 2.0 / n_ax
 
 
 def test_iq_requires_demodulation_frequency(probe_geometry, plane_wave_delays, iq_data):

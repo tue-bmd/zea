@@ -159,6 +159,19 @@ class _ProgressAwareStreamHandler(logging.StreamHandler):
     - If neither applies, this behaves like a plain ``StreamHandler``.
     """
 
+    def format(self, record):
+        msg = super().format(record)
+        # On Windows, a redirected stdout uses the legacy codepage (e.g. cp1252),
+        # which can't encode the Unicode characters (arrows, checkmarks, ...) used
+        # in log messages; writing them would raise from inside logging ("---
+        # Logging error ---"). Escape what the stream can't encode, without
+        # touching the stream itself (it's shared with the rest of the process).
+        encoding = getattr(self.stream, "encoding", None)
+        if encoding:
+            with contextlib.suppress(LookupError):
+                msg = msg.encode(encoding, "backslashreplace").decode(encoding)
+        return msg
+
     def emit(self, record):
         try:
             msg = self.format(record)
