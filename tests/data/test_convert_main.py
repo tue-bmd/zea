@@ -74,6 +74,14 @@ def test_positional_src_dst_required():
         parse_args(["camus"])
 
 
+def test_cetus_polar_volumes_on_by_default():
+    """CETUS stores the polar volumes unless --no-polar is given."""
+    args = parse_args(["cetus", "src", "dst"])
+    assert args.no_polar is False
+    assert args.polar_shape == (256, 128, 128)
+    assert parse_args(["cetus", "src", "dst", "--no-polar"]).no_polar is True
+
+
 def test_positional_src_dst_parsed_as_path():
     args = parse_args(["camus", "raw/", "output/"])
     assert args.src == Path("raw/")

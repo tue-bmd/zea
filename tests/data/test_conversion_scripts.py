@@ -520,6 +520,19 @@ def write_cetus_test_volume(path, rng):
         sitk.WriteImage(image, str(path).replace(".nii.gz", f"{suffix}.nii.gz"))
 
 
+def read_polar_geometry(f):
+    """``custom/polar_geometry`` of a converted CETUS file: the ranges and apex as float64
+    arrays, and ``sector_type`` as a string."""
+    geometry = {}
+    for element in f.custom["polar_geometry"]:
+        if element.name == "sector_type":
+            data = element.data
+            geometry[element.name] = data.decode() if isinstance(data, bytes) else str(data)
+        else:
+            geometry[element.name] = np.asarray(element.data, dtype=np.float64)
+    return geometry
+
+
 def create_cetus_test_data(src):
     """Create CETUS-like NIfTI test data.
 
@@ -886,8 +899,9 @@ def verify_converted_cetus_test_data(dst):
         # The synthetic sector is a frustum that fits in the volume, so the polar grid is
         # (nearly) all data.
         assert np.mean(polar <= -60) < 0.05
-        geometry = {e.name: np.asarray(e.data) for e in f.custom["polar_geometry"]}
-        assert set(geometry) == {"rho_range", "theta_range", "phi_range", "apex"}
+        geometry = read_polar_geometry(f)
+        assert set(geometry) == {"rho_range", "theta_range", "phi_range", "apex", "sector_type"}
+        assert geometry["sector_type"] == "pyramid"
         np.testing.assert_allclose(geometry["apex"], CETUS_TEST_FRUSTUM["apex"], atol=1.0)
 
     # Exercise the error branch of get_split (not reachable via normal conversion)
@@ -1829,9 +1843,7 @@ def test_cetus_polar_volume_matches_geometry(tmp_path):
         image_coords = f.data.image.coordinates[:]
         polar = f.data.image_polar.values[0]
         polar_coords = f.data.image_polar.coordinates[:]
-        geometry = {
-            e.name: np.asarray(e.data, dtype=np.float64) for e in f.custom["polar_geometry"]
-        }
+        geometry = read_polar_geometry(f)
 
     tol = np.radians(2)
     np.testing.assert_allclose(geometry["theta_range"], CETUS_TEST_FRUSTUM["theta_range"], atol=tol)
@@ -1876,12 +1888,71 @@ def test_cetus_zero_padding_planes(tmp_path):
     process_cetus(source, output, polar_shape=(24, 12, 12))
 
     with File(output, "r") as f:
-        geometry = {
-            e.name: np.asarray(e.data, dtype=np.float64) for e in f.custom["polar_geometry"]
-        }
+        geometry = read_polar_geometry(f)
     np.testing.assert_allclose(geometry["theta_range"], theta, atol=np.radians(2))
     np.testing.assert_allclose(geometry["phi_range"], phi, atol=np.radians(2))
     np.testing.assert_allclose(geometry["apex"], apex, atol=1.5)
+    # Clipping by the borders does not make the sector look like anything but a pyramid
+    assert geometry["sector_type"] == "pyramid"
+
+
+def test_cetus_fan_sector(tmp_path):
+    """A fan of 2-D sectors tilted in elevation is stored with sector_type "fan". Its polar
+    grid is the frustum that encloses the fan, so at zero elevation the azimuth edges of the
+    grid lie outside the sector, while the central azimuth plane is all data."""
+    from zea.data.convert.cetus import process_cetus
+
+    shape, apex = (60, 80, 64), (-2.0, 40.0, 32.0)
+    sector = make_frustum_mask(shape, apex, (-0.6, 0.6), (-0.5, 0.5), 60.0, fan_of_sectors=True)
+    vol = np.full(shape, 10.0, dtype=np.float32)
+    vol[sector] = np.random.default_rng(DEFAULT_TEST_SEED).uniform(30, 255, sector.sum())
+
+    source = tmp_path / "patient01_ED.nii.gz"
+    image = sitk.GetImageFromArray(vol)
+    image.SetSpacing((CETUS_TEST_SPACING,) * 3)
+    sitk.WriteImage(image, str(source))
+    output = tmp_path / "patient01_ED.hdf5"
+    process_cetus(source, output, polar_shape=(24, 16, 16))
+
+    with File(output, "r") as f:
+        geometry = read_polar_geometry(f)
+        polar = f.data.image_polar.values[0]
+    assert geometry["sector_type"] == "fan"
+
+    rho = slice(polar.shape[0] // 4, 3 * polar.shape[0] // 4)  # away from the apex and the cap
+    mid_phi = polar.shape[2] // 2
+    assert np.all(polar[rho, [0, -1], mid_phi] <= -60.0)
+    assert np.all(polar[rho, polar.shape[1] // 2, :] > -60.0)
+
+
+def test_cetus_no_polar(tmp_path):
+    """With no_polar (--no-polar), only the Cartesian volume is stored, with the same values
+    and apex-centred coordinates as when the polar volume is stored too. Such a conversion
+    cannot be uploaded, since the dataset on the Hub includes the polar volumes."""
+    from zea.data.convert.cetus import convert_cetus
+
+    src = tmp_path / "src"
+    (src / "patient01").mkdir(parents=True)
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    write_cetus_test_volume(src / "patient01" / "patient01_ED.nii.gz", rng)
+
+    def convert(dst, **kwargs):
+        args = types.SimpleNamespace(src=src, dst=dst, no_hyperthreading=True, **kwargs)
+        convert_cetus(args)
+        return dst / "train" / "patient01" / "patient01_ED.hdf5"
+
+    cartesian = convert(tmp_path / "cartesian", no_polar=True)
+    both = convert(tmp_path / "both", polar_shape=CETUS_TEST_POLAR_SHAPE)
+
+    with File(cartesian, "r") as f, File(both, "r") as g:
+        assert "image_polar" not in f["data"]
+        assert "image_polar" in g["data"]
+        assert len(f.custom) == 0
+        for key in ("data/image/values", "data/image/coordinates", "data/segmentation/values"):
+            np.testing.assert_array_equal(f.dataset(key)[()], g.dataset(key)[()])
+
+    with pytest.raises(ValueError, match="--no-polar cannot be combined with --upload"):
+        convert(tmp_path / "upload", no_polar=True, upload=True)
 
 
 @pytest.mark.parametrize("no_hyperthreading", [True, False], ids=["serial", "parallel"])

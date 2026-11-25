@@ -9,7 +9,8 @@ This module provides functionality to:
 4. Crop and center the image around the cone
 5. Visualize the detected cone and its parameters
 6. Detect the scan frustum of a 3-D volume (:func:`detect_frustum_parameters`), so it can be
-   resampled onto a polar ``(rho, theta, phi)`` grid
+   resampled onto a polar ``(rho, theta, phi)`` grid, and tell whether the sector is a pyramid
+   or a fan of tilted 2-D sectors
 """
 
 import argparse
@@ -544,6 +545,91 @@ def _distance_range(mask, apex, spacing):
     return float(np.sqrt(r_sq_min)), float(np.sqrt(r_sq_max))
 
 
+def _edge_widening(mask, apex, spacing, rho_max, axis, min_points, n_bins=16):
+    """How much the edges along one lateral axis widen towards the edges of the other axis.
+
+    Every line of voxels along ``axis`` (one per depth and position on the other lateral axis)
+    has an outermost data voxel on both sides. Seen from the apex, it lies at an edge angle with
+    ``tan(edge) = lateral / depth`` on a line at ``tan(across) = other / depth``. The lines are
+    grouped into ``n_bins`` bins of ``across``, and the outermost edge of each bin is fitted as
+    ``|tan(edge)| = a * sec(across) ** k`` with the Theil-Sen estimator. A pyramid has the same
+    edge angle on every line, so ``k = 0``. A fan of 2-D sectors in the plane of ``axis``,
+    tilted along the other axis, has ``tan(edge) = tan(edge_in_plane) * sec(across)``, so
+    ``k = 1``.
+
+    Taking the outermost edge per bin, rather than fitting every line, keeps dark regions at the
+    sector edge from pulling the edge inward: one line per bin that reaches the edge suffices.
+    Lines whose outermost voxel lies on the volume border (where the sector is clipped), near
+    the far cap (``rho > 0.9 * rho_max``) or close to the apex (``rho < 0.3 * rho_max``, where
+    the voxels are too coarse to resolve the angle) are not used.
+
+    Returns:
+        The exponent ``k`` averaged over both edges, or NaN if neither edge has at least
+        ``min_points`` usable lines in four or more bins.
+    """
+    from scipy.stats import theilslopes
+
+    other = 3 - axis
+    n_lateral = mask.shape[axis]
+    has_data = mask.any(axis=axis)  # (n_z, n_other)
+    first = np.argmax(mask, axis=axis)
+    last = n_lateral - 1 - np.argmax(np.flip(mask, axis=axis), axis=axis)
+
+    depth = ((np.arange(mask.shape[0]) - apex[0]) * spacing[0])[:, None]
+    across = ((np.arange(mask.shape[other]) - apex[other]) * spacing[other])[None, :]
+    safe_depth = np.where(depth > 0, depth, np.inf)
+    tan_across = np.broadcast_to(across / safe_depth, has_data.shape)
+
+    exponents = []
+    for index, on_border in ((first, first == 0), (last, last == n_lateral - 1)):
+        lateral = (index - apex[axis]) * spacing[axis]
+        rho = np.sqrt(depth**2 + lateral**2 + across**2)
+        tan_edge = np.abs(lateral) / safe_depth
+        usable = (
+            has_data
+            & (depth > 0)
+            & ~on_border
+            & (rho > 0.3 * rho_max)
+            & (rho < 0.9 * rho_max)
+            & (tan_edge > 0.05)  # an edge near the depth axis has no measurable widening
+        )
+        if usable.sum() < min_points:
+            continue
+        t_across, t_edge = tan_across[usable], tan_edge[usable]
+        bin_edges = np.linspace(t_across.min(), t_across.max(), n_bins + 1)
+        which = np.clip(np.digitize(t_across, bin_edges) - 1, 0, n_bins - 1)
+        x, y = [], []
+        for b in range(n_bins):
+            in_bin = np.flatnonzero(which == b)
+            if len(in_bin) >= 5:
+                outermost = in_bin[np.argmax(t_edge[in_bin])]
+                x.append(0.5 * np.log1p(t_across[outermost] ** 2))  # log(sec(across))
+                y.append(np.log(t_edge[outermost]))
+        if len(x) < 4 or np.ptp(x) < 1e-3:
+            continue
+        # The median of the pairwise slopes, so that a few bins with a protrusion beyond the
+        # sector, or a dark region at its edge, do not tilt the fit. These bins are often the
+        # outermost ones, which would dominate a least-squares fit.
+        exponents.append(float(theilslopes(y, x).slope))
+    return float(np.mean(exponents)) if exponents else float("nan")
+
+
+def _classify_sector(theta_widening, phi_widening, tolerance=0.5):
+    """Name the sector shape from the edge widening exponents of :func:`_edge_widening`.
+
+    A pyramid has exponents ``(0, 0)`` and a fan of azimuth sectors tilted in elevation
+    ``(1, 0)``. Anything else, or an exponent that could not be measured, is ``"unknown"``.
+    """
+    if not (np.isfinite(theta_widening) and np.isfinite(phi_widening)):
+        return "unknown"
+    if abs(phi_widening) < tolerance:
+        if abs(theta_widening) < tolerance:
+            return "pyramid"
+        if abs(theta_widening - 1) < tolerance:
+            return "fan"
+    return "unknown"
+
+
 def detect_frustum_parameters(
     mask,
     spacing=(1.0, 1.0, 1.0),
@@ -576,14 +662,26 @@ def detect_frustum_parameters(
     4. Fit a line to each of the four edges, iteratively rejecting outliers.
     5. Refit the four lines so that they all pass through a single apex.
     6. Take the radial range from the nearest and farthest data voxel seen from the apex.
+    7. Classify the sector as a pyramid or a fan (see below) from how its edges widen.
 
     The fitted faces pass through the centres of the outermost data voxels, as in the 2-D case,
     so samples on the boundary of the polar grid land on data rather than on background.
 
-    Not every scanner acquires a true frustum. If the volume is a fan of tilted 2-D sectors, its
-    cross-sections are barrel-shaped instead of rectangular. The silhouette edges are then the
-    corner rays of the sector, so the result is a frustum that encloses the whole sector, and
-    parts of the polar grid near the middle of its sides fall outside the sector.
+    Not every scanner acquires a true frustum. Some acquire a fan of 2-D azimuth sectors, each
+    tilted to a different elevation, with the azimuth angle measured within each tilted plane.
+    Seen in the frustum convention, such a sector is narrowest in azimuth at zero elevation and
+    widens towards the elevation edges (``tan(theta) = tan(theta_in_plane) / cos(phi)``), so its
+    constant-depth cross-sections are pincushion-shaped instead of rectangular. The silhouette
+    edges are then the corner rays of the sector, so the result is a frustum that encloses the
+    whole sector, and parts of the polar grid near the middle of its azimuth sides fall outside
+    the sector.
+
+    To tell the two apart, the outermost data voxels along each lateral axis are fitted as
+    ``|tan(edge)| = a / cos(across) ** k``, where ``across`` is the angle along the other lateral
+    axis, using the outermost voxel in each range of ``across`` so that dark regions at the
+    sector edge do not pull the edge inward. A pyramid has ``k = 0`` for both axes. A fan of
+    azimuth sectors tilted in elevation has ``k = 1`` for the azimuth edges and ``k = 0`` for
+    the elevation edges.
 
     Args:
         mask (np.ndarray): Boolean array of shape ``(n_z, n_x, n_y)`` that is ``True`` for
@@ -611,6 +709,13 @@ def detect_frustum_parameters(
         - ``apex_depth_spread``: Difference in voxels between the apex depths found from the
           ``x`` and ``y`` silhouettes separately. Large values mean that the edges do not meet
           in one point, so the volume is not well described by a frustum.
+        - ``sector_type``: Shape of the sector. ``"pyramid"`` if it is the frustum itself, so
+          the polar grid lies inside the sector. ``"fan"`` if it is a fan of azimuth sectors
+          tilted in elevation, which the frustum encloses, so the polar grid has empty regions
+          at its azimuth edges. ``"unknown"`` if it is neither, or the widening could not be
+          measured.
+        - ``edge_widening``: The exponents ``(k_theta, k_phi)`` from which ``sector_type`` is
+          derived: about ``(0, 0)`` for a pyramid and ``(1, 0)`` for a fan.
 
     Raises:
         ValueError: If ``mask`` is not 3-D, contains no data, or no frustum can be fitted, for
@@ -685,6 +790,9 @@ def detect_frustum_parameters(
     edge_rms = tuple(
         float(np.sqrt(np.mean((r / s) ** 2))) for r, s in zip(residuals, lateral_spacing)
     )
+    edge_widening = tuple(
+        _edge_widening(mask, apex, spacing, rho_range[1], axis, min_edge_points) for axis in (1, 2)
+    )
 
     return {
         "apex": tuple(float(v) for v in apex),
@@ -693,6 +801,8 @@ def detect_frustum_parameters(
         "rho_range": rho_range,
         "edge_rms": edge_rms,
         "apex_depth_spread": float(abs(axis_apex_depths[0] - axis_apex_depths[1]) / spacing[0]),
+        "sector_type": _classify_sector(*edge_widening),
+        "edge_widening": edge_widening,
     }
 
 

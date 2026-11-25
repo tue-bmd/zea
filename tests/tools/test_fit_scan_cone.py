@@ -25,8 +25,8 @@ def make_frustum_mask(
         rho_max: Radius of the far cap, in units of ``spacing``.
         spacing: Voxel size along ``(z, x, y)``.
         fan_of_sectors: If True, model a fan of 2-D sectors tilted in elevation, where
-            ``theta`` is measured within each tilted plane. Its cross-sections are
-            barrel-shaped instead of rectangular.
+            ``theta`` is measured within each tilted plane. Its constant-depth cross-sections
+            are pincushion-shaped instead of rectangular: narrowest in ``x`` at ``y = 0``.
     """
     z, x, y = [(np.arange(n) - a) * s for n, a, s in zip(shape, apex, spacing)]
     z, x, y = z[:, None, None], x[None, :, None], y[None, None, :]
@@ -77,6 +77,8 @@ def test_detect_frustum_recovers_parameters(name):
     assert result["rho_range"][0] < max(0.0, -cfg["apex"][0]) + 1.5
     assert max(result["edge_rms"]) < 1.0
     assert result["apex_depth_spread"] < 1.5
+    assert result["sector_type"] == "pyramid"
+    np.testing.assert_allclose(result["edge_widening"], 0.0, atol=0.15)
 
 
 def test_detect_frustum_physical_spacing():
@@ -95,10 +97,12 @@ def test_detect_frustum_physical_spacing():
     np.testing.assert_allclose(result["theta_range"], theta, atol=np.radians(1.5))
     np.testing.assert_allclose(result["phi_range"], phi, atol=np.radians(1.5))
     np.testing.assert_allclose(result["rho_range"][1], rho, atol=2 * max(spacing))
+    assert result["sector_type"] == "pyramid"
 
 
 def test_detect_frustum_fan_of_sectors_gives_bounding_frustum():
-    """For a fan of tilted 2-D sectors, the frustum spans the corner rays of the sector."""
+    """For a fan of tilted 2-D sectors, the frustum spans the corner rays of the sector, and
+    the sector is recognised as a fan."""
     theta, phi = (-0.6, 0.6), (-0.5, 0.5)
     mask = make_frustum_mask((60, 80, 64), (-2.0, 40.0, 32.0), theta, phi, 60, fan_of_sectors=True)
 
@@ -108,6 +112,21 @@ def test_detect_frustum_fan_of_sectors_gives_bounding_frustum():
     corner = np.arctan(np.tan(theta[1]) / np.cos(phi[1]))
     np.testing.assert_allclose(result["theta_range"], (-corner, corner), atol=np.radians(1.5))
     np.testing.assert_allclose(result["phi_range"], phi, atol=np.radians(1.5))
+    # The azimuth edges widen as 1 / cos(phi), the elevation edges do not widen.
+    assert result["sector_type"] == "fan"
+    np.testing.assert_allclose(result["edge_widening"], (1.0, 0.0), atol=0.3)
+
+
+def test_detect_frustum_other_sector_shapes_are_unknown():
+    """A fan whose sectors lie in the elevation plane is neither of the known shapes."""
+    mask = make_frustum_mask(
+        (60, 80, 64), (-2.0, 40.0, 32.0), (-0.6, 0.6), (-0.5, 0.5), 60, fan_of_sectors=True
+    )
+
+    result = detect_frustum_parameters(mask.transpose(0, 2, 1))  # swap azimuth and elevation
+
+    assert result["sector_type"] == "unknown"
+    np.testing.assert_allclose(result["edge_widening"], (0.0, 1.0), atol=0.3)
 
 
 def test_detect_frustum_ignores_stray_voxels():
