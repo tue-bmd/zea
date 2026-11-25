@@ -416,14 +416,14 @@ def plot_biplanes(
             ax3d.set_yticks(np.linspace(0, volume.shape[1], len(show_axes["y_extent"])))
             ax3d.set_yticklabels(show_axes["y_extent"])
         if "z_extent" in show_axes:
-            ax3d.set_zticks(  # ty: ignore[call-non-callable]
+            ax3d.set_zticks(  # ty: ignore[not-callable]
                 np.linspace(
                     0,
                     volume.shape[2],
                     len(show_axes["z_extent"]),
                 )
             )
-            ax3d.set_zticklabels(show_axes["z_extent"])  # ty: ignore[call-non-callable]
+            ax3d.set_zticklabels(show_axes["z_extent"])  # ty: ignore[not-callable]
     else:
         ax3d.set_axis_off()
 

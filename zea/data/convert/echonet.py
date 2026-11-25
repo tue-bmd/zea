@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import yaml
 from scipy.interpolate import CloughTocher2DInterpolator, LinearNDInterpolator
-from scipy.spatial import Delaunay, cKDTree
+from scipy.spatial import Delaunay, KDTree
 from tqdm import tqdm
 
 from zea import log
@@ -241,7 +241,7 @@ def _polar_grid(rows, cols, tip, r_max, angle):
 def _nearest_indices(rows, cols, tip, r_max, angle):
     # What NearestNDInterpolator looks up, without rebuilding its KD-tree on every call.
     tri, new_points = _polar_grid(rows, cols, tip, r_max, angle)
-    return cKDTree(tri.points).query(new_points)[1]
+    return KDTree(tri.points).query(new_points)[1]
 
 
 def cartesian_to_polar_matrix(
