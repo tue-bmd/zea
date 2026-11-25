@@ -3,6 +3,7 @@ Identifies the scan cone of an ultrasound image and crops it such that the apex 
 is at the top center of the image. In this form, it can be scan converted to polar coordinates.
 
 This module provides functionality to:
+
 1. Detect the scan cone boundaries in ultrasound images
 2. Fit lines to the cone edges
 3. Calculate cone parameters (apex position, opening angle, etc.)
