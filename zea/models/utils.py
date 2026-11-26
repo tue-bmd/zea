@@ -55,6 +55,15 @@ class LossTrackerWrapper:
                 self.trackers[self.prefix] = keras.metrics.Mean(name=self.prefix)
             self.trackers[self.prefix].update_state(loss_value)
 
+    def build(self):
+        """Create the default tracker now rather than on the first update.
+
+        Needed when updates run inside a jitted step (JAX), where the metric's
+        variables must exist before tracing. Dict-valued losses are not supported then.
+        """
+        if self.prefix not in self.trackers:
+            self.trackers[self.prefix] = keras.metrics.Mean(name=self.prefix)
+
     def result(self):
         """
         Return a dictionary with the current average results.
