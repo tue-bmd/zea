@@ -768,6 +768,10 @@ class _Cetus:
     """Download the CETUS dataset from the server, will be saved to the --src path."""
     no_hyperthreading: bool = False
     """Disable hyperthreading for multiprocessing."""
+    polar_shape: tuple[int, int, int] = (256, 128, 128)
+    """Shape (n_rho, n_theta, n_phi) of the polar volumes stored as image_polar."""
+    no_polar: bool = False
+    """Store only the Cartesian volumes, without the polar volumes (image_polar)."""
     upload: bool = False
     """Upload the converted dataset to HuggingFace Hub (zeahub/cetus-miccai-2014)."""
     revision: str | None = None

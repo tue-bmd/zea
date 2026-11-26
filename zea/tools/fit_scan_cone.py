@@ -3,11 +3,15 @@ Identifies the scan cone of an ultrasound image and crops it such that the apex 
 is at the top center of the image. In this form, it can be scan converted to polar coordinates.
 
 This module provides functionality to:
+
 1. Detect the scan cone boundaries in ultrasound images
 2. Fit lines to the cone edges
 3. Calculate cone parameters (apex position, opening angle, etc.)
 4. Crop and center the image around the cone
 5. Visualize the detected cone and its parameters
+6. Detect the scan frustum of a 3-D volume (:func:`detect_frustum_parameters`), so it can be
+   resampled onto a polar ``(rho, theta, phi)`` grid, and tell whether the sector is a pyramid
+   or a fan of tilted 2-D sectors
 """
 
 import argparse
@@ -423,6 +427,393 @@ def fit_and_crop_around_scan_cone(
     cropped_image = np.squeeze(cropped_image, axis=0)
 
     return cropped_image, cone_params
+
+
+# ---------------------------------------------------------------------------
+# 3-D scan frustum
+# ---------------------------------------------------------------------------
+
+
+def _largest_connected_component(mask):
+    """Keep only the largest connected component of a boolean mask."""
+    from scipy import ndimage
+
+    labels, n_labels = ndimage.label(mask)
+    if n_labels <= 1:
+        return mask
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0  # background
+    return labels == np.argmax(sizes)
+
+
+def _silhouette_edges(silhouette):
+    """Outermost data index on the low and high side of each row of a 2-D silhouette.
+
+    Rows without data are NaN.
+    """
+    has_data = silhouette.any(axis=1)
+    n_lateral = silhouette.shape[1]
+    low = np.argmax(silhouette, axis=1).astype(np.float64)
+    high = (n_lateral - 1 - np.argmax(silhouette[:, ::-1], axis=1)).astype(np.float64)
+    low[~has_data] = np.nan
+    high[~has_data] = np.nan
+    return low, high
+
+
+def _straight_edge_rows(edge, opposite_edge, n_lateral, is_low):
+    """Rows in which a silhouette edge lies on the straight side of the sector.
+
+    An outward-moving edge is straight until the far cap bends it back in. If its
+    outermost point is already on the first data row, it can instead be an inward-moving
+    edge of an off-axis sector. In that case use the opposite edge's outermost row: that
+    farther-out ray reaches the spherical cap first, so this is a conservative cutoff.
+    Rows where the edge touches either volume border are excluded as clipped.
+    """
+    valid = np.isfinite(edge)
+    outward = np.where(valid, -edge if is_low else edge, -np.inf)
+    last_row = np.argmax(outward)  # first row where the edge is furthest out
+    if valid.any() and last_row == np.flatnonzero(valid)[0]:
+        opposite_valid = np.isfinite(opposite_edge)
+        opposite_outward = np.where(
+            opposite_valid, opposite_edge if is_low else -opposite_edge, -np.inf
+        )
+        last_row = np.argmax(opposite_outward)
+    rows = np.arange(len(edge))
+    on_border = (edge <= 0) | (edge >= n_lateral - 1)
+    return valid & (rows <= last_row) & ~on_border
+
+
+def _fit_line_robust(z, e, min_scale, threshold, n_iter=5):
+    """Fit ``e = a + b * z`` by least squares, iteratively discarding outliers.
+
+    Points further than ``threshold`` robust standard deviations (estimated from the median
+    absolute residual, but at least ``min_scale``) from the line are excluded from the next fit.
+
+    Returns:
+        Tuple ``(a, b, inliers)``.
+    """
+    inliers = np.ones(z.shape, dtype=bool)
+    for _ in range(n_iter):
+        design = np.stack([np.ones(inliers.sum()), z[inliers]], axis=1)
+        (a, b), *_ = np.linalg.lstsq(design, e[inliers], rcond=None)
+        residual = e - (a + b * z)
+        scale = max(1.4826 * np.median(np.abs(residual[inliers])), min_scale)
+        new_inliers = np.abs(residual) <= threshold * scale
+        if new_inliers.sum() < 2 or np.array_equal(new_inliers, inliers):
+            break
+        inliers = new_inliers
+    return a, b, inliers
+
+
+def _fit_edges_through_apex(edges, z_apex):
+    """Fit each pair of opposite edges as two lines through one apex at depth ``z_apex``.
+
+    For each lateral axis the low edge is modelled as ``e = c + s_low * (z - z_apex)`` and the
+    high edge as ``e = c + s_high * (z - z_apex)``, which is linear in ``(c, s_low, s_high)``.
+
+    Args:
+        edges: Per lateral axis, a pair ``((z_low, e_low), (z_high, e_high))`` of edge points.
+        z_apex: Depth of the apex.
+
+    Returns:
+        Tuple of the per-axis parameters ``[(c, s_low, s_high), ...]``, the per-edge residuals
+        ``[r_low, r_high, ...]`` and the total sum of squared residuals.
+    """
+    params, residuals, sse = [], [], 0.0
+    for (z_low, e_low), (z_high, e_high) in edges:
+        n_low = len(z_low)
+        design = np.zeros((n_low + len(z_high), 3))
+        design[:, 0] = 1.0
+        design[:n_low, 1] = z_low - z_apex
+        design[n_low:, 2] = z_high - z_apex
+        target = np.concatenate([e_low, e_high])
+        solution, *_ = np.linalg.lstsq(design, target, rcond=None)
+        residual = design @ solution - target
+        params.append(solution)
+        residuals.extend([residual[:n_low], residual[n_low:]])
+        sse += float(np.sum(residual**2))
+    return params, residuals, sse
+
+
+def _distance_range(mask, apex, spacing):
+    """Distance from ``apex`` to the nearest and farthest ``True`` voxel of ``mask``.
+
+    Works one depth slice at a time to avoid materialising every voxel's coordinates.
+    """
+    z = (np.arange(mask.shape[0]) - apex[0]) * spacing[0]
+    x = (np.arange(mask.shape[1]) - apex[1]) * spacing[1]
+    y = (np.arange(mask.shape[2]) - apex[2]) * spacing[2]
+    lateral_sq = x[:, None] ** 2 + y[None, :] ** 2
+    r_sq_min, r_sq_max = np.inf, -np.inf
+    for z_slice, plane in zip(z, mask):
+        if plane.any():
+            r_sq = lateral_sq[plane]
+            r_sq_min = min(r_sq_min, z_slice**2 + r_sq.min())
+            r_sq_max = max(r_sq_max, z_slice**2 + r_sq.max())
+    return float(np.sqrt(r_sq_min)), float(np.sqrt(r_sq_max))
+
+
+def _edge_widening(mask, apex, spacing, rho_max, axis, min_points, n_bins=16):
+    """How much the edges along one lateral axis widen towards the edges of the other axis.
+
+    Every line of voxels along ``axis`` (one per depth and position on the other lateral axis)
+    has an outermost data voxel on both sides. Seen from the apex, it lies at an edge angle with
+    ``tan(edge) = lateral / depth`` on a line at ``tan(across) = other / depth``. The lines are
+    grouped into ``n_bins`` bins of ``across``, and the outermost edge of each bin is fitted as
+    ``|tan(edge)| = a * sec(across) ** k`` with the Theil-Sen estimator. A pyramid has the same
+    edge angle on every line, so ``k = 0``. A fan of 2-D sectors in the plane of ``axis``,
+    tilted along the other axis, has ``tan(edge) = tan(edge_in_plane) * sec(across)``, so
+    ``k = 1``.
+
+    Taking the outermost edge per bin, rather than fitting every line, keeps dark regions at the
+    sector edge from pulling the edge inward: one line per bin that reaches the edge suffices.
+    Lines whose outermost voxel lies on the volume border (where the sector is clipped), near
+    the far cap (``rho > 0.9 * rho_max``) or close to the apex (``rho < 0.3 * rho_max``, where
+    the voxels are too coarse to resolve the angle) are not used.
+
+    Returns:
+        The exponent ``k`` averaged over both edges, or NaN if neither edge has at least
+        ``min_points`` usable lines in four or more bins.
+    """
+    from scipy.stats import theilslopes
+
+    other = 3 - axis
+    n_lateral = mask.shape[axis]
+    has_data = mask.any(axis=axis)  # (n_z, n_other)
+    first = np.argmax(mask, axis=axis)
+    last = n_lateral - 1 - np.argmax(np.flip(mask, axis=axis), axis=axis)
+
+    depth = ((np.arange(mask.shape[0]) - apex[0]) * spacing[0])[:, None]
+    across = ((np.arange(mask.shape[other]) - apex[other]) * spacing[other])[None, :]
+    safe_depth = np.where(depth > 0, depth, np.inf)
+    tan_across = np.broadcast_to(across / safe_depth, has_data.shape)
+
+    exponents = []
+    for index, on_border in ((first, first == 0), (last, last == n_lateral - 1)):
+        lateral = (index - apex[axis]) * spacing[axis]
+        rho = np.sqrt(depth**2 + lateral**2 + across**2)
+        tan_edge = np.abs(lateral) / safe_depth
+        usable = (
+            has_data
+            & (depth > 0)
+            & ~on_border
+            & (rho > 0.3 * rho_max)
+            & (rho < 0.9 * rho_max)
+            & (tan_edge > 0.05)  # an edge near the depth axis has no measurable widening
+        )
+        if usable.sum() < min_points:
+            continue
+        t_across, t_edge = tan_across[usable], tan_edge[usable]
+        bin_edges = np.linspace(t_across.min(), t_across.max(), n_bins + 1)
+        which = np.clip(np.digitize(t_across, bin_edges) - 1, 0, n_bins - 1)
+        x, y = [], []
+        for b in range(n_bins):
+            in_bin = np.flatnonzero(which == b)
+            if len(in_bin) >= 5:
+                outermost = in_bin[np.argmax(t_edge[in_bin])]
+                x.append(0.5 * np.log1p(t_across[outermost] ** 2))  # log(sec(across))
+                y.append(np.log(t_edge[outermost]))
+        if len(x) < 4 or np.ptp(x) < 1e-3:
+            continue
+        # The median of the pairwise slopes, so that a few bins with a protrusion beyond the
+        # sector, or a dark region at its edge, do not tilt the fit. These bins are often the
+        # outermost ones, which would dominate a least-squares fit.
+        exponents.append(float(theilslopes(y, x).slope))
+    return float(np.mean(exponents)) if exponents else float("nan")
+
+
+def _classify_sector(theta_widening, phi_widening, tolerance=0.5):
+    """Name the sector shape from the edge widening exponents of :func:`_edge_widening`.
+
+    A pyramid has exponents ``(0, 0)`` and a fan of azimuth sectors tilted in elevation
+    ``(1, 0)``. Anything else, or an exponent that could not be measured, is ``"unknown"``.
+    """
+    if not (np.isfinite(theta_widening) and np.isfinite(phi_widening)):
+        return "unknown"
+    if abs(phi_widening) < tolerance:
+        if abs(theta_widening) < tolerance:
+            return "pyramid"
+        if abs(theta_widening - 1) < tolerance:
+            return "fan"
+    return "unknown"
+
+
+def detect_frustum_parameters(
+    mask,
+    spacing=(1.0, 1.0, 1.0),
+    keep_largest_component=True,
+    min_edge_points=10,
+    outlier_threshold=3.0,
+):
+    """Detect the scan frustum of a scan-converted 3-D ultrasound volume.
+
+    This is the 3-D counterpart of :func:`detect_cone_parameters`. Seen from its apex, the
+    imaging sector of a volumetric scan spans a range of azimuth angles ``theta`` and elevation
+    angles ``phi`` and is closed at depth by a spherical cap. This function estimates the apex
+    and these ranges in the frustum convention of :func:`zea.display.frustum_convert_rtp2xyz`
+    (``tan(theta) = x / z``, ``tan(phi) = y / z``), so the volume can be resampled onto a polar
+    ``(rho, theta, phi)`` grid and scan converted back with :func:`zea.display.scan_convert_3d`.
+
+    The volume is indexed ``(z, x, y)``, as for 3-D maps in the zea format: depth along the first
+    axis, with the apex at the top (towards index 0, possibly above the volume), azimuth along
+    the second axis and elevation along the third.
+
+    The detection works on silhouettes, which keeps it as simple as the 2-D case:
+
+    1. Optionally keep only the largest connected component of ``mask``, which drops stray
+       voxels outside the sector.
+    2. Project the mask along each lateral axis. Each projection is a 2-D sector whose straight
+       sides are rays from the apex.
+    3. In every depth row of a projection, take the outermost data voxel on both sides. Rows
+       where the sector is clipped by the volume border, and rows beyond the straight side
+       (where the far cap begins), are not used. For an inward-moving off-axis edge, the
+       opposite, outward-moving edge determines a conservative end of the straight side.
+    4. Fit a line to each of the four edges, iteratively rejecting outliers.
+    5. Refit the four lines so that they all pass through a single apex.
+    6. Take the radial range from the nearest and farthest data voxel seen from the apex.
+    7. Classify the sector as a pyramid or a fan (see below) from how its edges widen.
+
+    The fitted faces pass through the centres of the outermost data voxels, as in the 2-D case,
+    so samples on the boundary of the polar grid land on data rather than on background.
+
+    Not every scanner acquires a true frustum. Some acquire a fan of 2-D azimuth sectors, each
+    tilted to a different elevation, with the azimuth angle measured within each tilted plane.
+    Seen in the frustum convention, such a sector is narrowest in azimuth at zero elevation and
+    widens towards the elevation edges (``tan(theta) = tan(theta_in_plane) / cos(phi)``), so its
+    constant-depth cross-sections are pincushion-shaped instead of rectangular. The silhouette
+    edges are then the corner rays of the sector, so the result is a frustum that encloses the
+    whole sector, and parts of the polar grid near the middle of its azimuth sides fall outside
+    the sector.
+
+    To tell the two apart, the outermost data voxels along each lateral axis are fitted as
+    ``|tan(edge)| = a / cos(across) ** k``, where ``across`` is the angle along the other lateral
+    axis, using the outermost voxel in each range of ``across`` so that dark regions at the
+    sector edge do not pull the edge inward. A pyramid has ``k = 0`` for both axes. A fan of
+    azimuth sectors tilted in elevation has ``k = 1`` for the azimuth edges and ``k = 0`` for
+    the elevation edges.
+
+    Args:
+        mask (np.ndarray): Boolean array of shape ``(n_z, n_x, n_y)`` that is ``True`` for
+            voxels inside the imaging sector, i.e. voxels that are not background padding.
+        spacing (tuple, optional): Voxel size along ``(z, x, y)``. Distances in the output are
+            in the same unit. Defaults to ``(1.0, 1.0, 1.0)`` (voxels).
+        keep_largest_component (bool, optional): Only use the largest connected component of
+            ``mask``. Defaults to True.
+        min_edge_points (int, optional): Minimum number of depth rows needed to fit each of the
+            four edges. Defaults to 10.
+        outlier_threshold (float, optional): Edge points further than this many robust standard
+            deviations from a fitted edge are rejected. Defaults to 3.0.
+
+    Returns:
+        dict: Frustum parameters, as plain floats:
+
+        - ``apex``: ``(z, x, y)`` position of the apex as a fractional voxel index. ``z`` is
+          negative when the apex lies above the volume.
+        - ``theta_range``: ``(theta_min, theta_max)`` azimuth range in radians, along ``x``.
+        - ``phi_range``: ``(phi_min, phi_max)`` elevation range in radians, along ``y``.
+        - ``rho_range``: ``(rho_min, rho_max)`` distance from the apex to the nearest and the
+          farthest data voxel, in units of ``spacing``.
+        - ``edge_rms``: RMS distance in voxels of the edge points to the fitted edges, in the
+          order ``(x_min, x_max, y_min, y_max)``. Values around 0.5 indicate a clean fit.
+        - ``apex_depth_spread``: Difference in voxels between the apex depths found from the
+          ``x`` and ``y`` silhouettes separately. Large values mean that the edges do not meet
+          in one point, so the volume is not well described by a frustum.
+        - ``sector_type``: Shape of the sector. ``"pyramid"`` if it is the frustum itself, so
+          the polar grid lies inside the sector. ``"fan"`` if it is a fan of azimuth sectors
+          tilted in elevation, which the frustum encloses, so the polar grid has empty regions
+          at its azimuth edges. ``"unknown"`` if it is neither, or the widening could not be
+          measured.
+        - ``edge_widening``: The exponents ``(k_theta, k_phi)`` from which ``sector_type`` is
+          derived: about ``(0, 0)`` for a pyramid and ``(1, 0)`` for a fan.
+
+    Raises:
+        ValueError: If ``mask`` is not 3-D, contains no data, or no frustum can be fitted, for
+            instance because an edge has too few usable points or the sector does not widen
+            with depth.
+    """
+    from scipy.optimize import minimize_scalar
+
+    mask = np.asarray(mask, dtype=bool)
+    if mask.ndim != 3:
+        raise ValueError(f"mask must be 3-D (z, x, y), got shape {mask.shape}")
+    spacing = np.asarray(spacing, dtype=np.float64)
+    if spacing.shape != (3,) or not np.all(np.isfinite(spacing) & (spacing > 0)):
+        raise ValueError(f"spacing must contain three finite positive values, got {spacing}")
+
+    if keep_largest_component:
+        mask = _largest_connected_component(mask)
+    if not mask.any():
+        raise ValueError("Failed to detect scan frustum: the mask contains no data voxels.")
+
+    depth = np.arange(mask.shape[0]) * spacing[0]
+    edges, axis_apex_depths = [], []
+    for axis, name in ((1, "x"), (2, "y")):
+        silhouette = mask.any(axis=3 - axis)  # project along the other lateral axis
+        n_lateral = silhouette.shape[1]
+        pair, lines = [], []
+        low, high = _silhouette_edges(silhouette)
+        for edge, opposite_edge, is_low in ((low, high, True), (high, low, False)):
+            side = f"{name}_{'min' if is_low else 'max'}"
+            rows = _straight_edge_rows(edge, opposite_edge, n_lateral, is_low)
+            if rows.sum() < min_edge_points:
+                raise ValueError(
+                    f"Failed to detect scan frustum: only {rows.sum()} usable depth rows on the "
+                    f"{side} edge (need at least {min_edge_points}). The sector may be clipped "
+                    "by the volume border almost immediately, or the apex is not at the top."
+                )
+            z, e = depth[rows], edge[rows] * spacing[axis]
+            a, b, inliers = _fit_line_robust(
+                z, e, min_scale=0.5 * spacing[axis], threshold=outlier_threshold
+            )
+            if inliers.sum() < min_edge_points:
+                raise ValueError(
+                    f"Failed to detect scan frustum: the {side} edge is not straight "
+                    f"({inliers.sum()} inliers, need at least {min_edge_points})."
+                )
+            pair.append((z[inliers], e[inliers]))
+            lines.append((a, b))
+        (a_low, b_low), (a_high, b_high) = lines
+        if b_high - b_low < 1e-3:
+            raise ValueError(
+                f"Failed to detect scan frustum: the {name} edges do not diverge with depth "
+                f"(slopes {b_low:.3g} and {b_high:.3g}). The apex must be at the top of the "
+                "volume (towards index 0 of the first axis)."
+            )
+        axis_apex_depths.append((a_high - a_low) / (b_low - b_high))
+        edges.append(pair)
+
+    # All four edges should meet in one apex. The x and y silhouettes each give an apex depth;
+    # find the common depth that fits all edges best. For a fixed depth this is linear.
+    margin = 5 * spacing[0]
+    result = minimize_scalar(
+        lambda z_apex: _fit_edges_through_apex(edges, z_apex)[2],
+        bounds=(min(axis_apex_depths) - margin, max(axis_apex_depths) + margin),
+        method="bounded",
+    )
+    z_apex = float(result.x)
+    params, residuals, _ = _fit_edges_through_apex(edges, z_apex)
+    (x_apex, sx_low, sx_high), (y_apex, sy_low, sy_high) = params
+
+    apex = np.array([z_apex / spacing[0], x_apex / spacing[1], y_apex / spacing[2]])
+    rho_range = _distance_range(mask, apex, spacing)
+    lateral_spacing = (spacing[1], spacing[1], spacing[2], spacing[2])
+    edge_rms = tuple(
+        float(np.sqrt(np.mean((r / s) ** 2))) for r, s in zip(residuals, lateral_spacing)
+    )
+    edge_widening = tuple(
+        _edge_widening(mask, apex, spacing, rho_range[1], axis, min_edge_points) for axis in (1, 2)
+    )
+
+    return {
+        "apex": tuple(float(v) for v in apex),
+        "theta_range": (float(np.arctan(sx_low)), float(np.arctan(sx_high))),
+        "phi_range": (float(np.arctan(sy_low)), float(np.arctan(sy_high))),
+        "rho_range": rho_range,
+        "edge_rms": edge_rms,
+        "apex_depth_spread": float(abs(axis_apex_depths[0] - axis_apex_depths[1]) / spacing[0]),
+        "sector_type": _classify_sector(*edge_widening),
+        "edge_widening": edge_widening,
+    }
 
 
 def visualize_scan_cone(image, cone_params, output_dir="output"):

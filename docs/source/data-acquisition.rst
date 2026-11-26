@@ -581,7 +581,7 @@ They are invoked as subcommands of ``zea convert``
 - :mod:`~zea.data.convert.echonet` — **EchoNet-Dynamic**: large-scale cardiac ultrasound video dataset.
 - :mod:`~zea.data.convert.echonetlvh` — **EchoNet-LVH**: cardiac dataset for left ventricular hypertrophy detection.
 - :mod:`~zea.data.convert.camus` — **CAMUS**: Cardiac Acquisitions for Multi-structure Ultrasound Segmentation.
-- :mod:`~zea.data.convert.cetus` — **CETUS**: Challenge on Endocardial Three-dimensional Ultrasound Segmentation (3-D echocardiography).
+- :mod:`~zea.data.convert.cetus` — **CETUS**: Challenge on Endocardial Three-dimensional Ultrasound Segmentation (3-D echocardiography), with each volume also resampled onto a polar grid.
 - :mod:`~zea.data.convert.picmus` — **PICMUS**: Plane-wave Imaging Challenge in Medical Ultrasound.
 - :mod:`~zea.data.convert.echoxflow` — **EchoXFlow**: large-scale echocardiography dataset from Oslo University Hospital.
 - :mod:`~zea.data.convert.images` — **Custom images**: convert any folder of images or image sequences.
