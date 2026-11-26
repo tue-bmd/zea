@@ -54,6 +54,7 @@ Dataset splits:
 from __future__ import annotations
 
 import os
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -157,6 +158,27 @@ def cartesian_coordinates(shape, apex, spacing) -> np.ndarray:
     return coordinates
 
 
+def _polar_grid_slabs(frustum, polar_shape, spacing, slab_size=16):
+    """Yield radial slices, voxel indices and float32 coordinates with bounded temporaries."""
+    n_rho, n_theta, n_phi = polar_shape
+    rho = np.linspace(*frustum["rho_range"], n_rho)
+    tan_theta = np.tan(np.linspace(*frustum["theta_range"], n_theta))[None, :, None]
+    tan_phi = np.tan(np.linspace(*frustum["phi_range"], n_phi))[None, None, :]
+    denominator = np.sqrt(1 + tan_theta**2 + tan_phi**2)
+    apex = np.asarray(frustum["apex"], dtype=np.float64)
+    for start in range(0, n_rho, slab_size):
+        slab = slice(start, min(start + slab_size, n_rho))
+        z = rho[slab, None, None] / denominator
+        indices = np.empty((3, *z.shape), dtype=np.float64)
+        coordinates = np.empty((*z.shape, 3), dtype=np.float32)
+        # Fill final arrays directly, avoiding stacked float64 coordinate copies.
+        for axis, component in ((0, z), (1, z * tan_theta), (2, z * tan_phi)):
+            coordinates[..., (2, 0, 1)[axis]] = component
+            np.divide(component, spacing[axis], out=indices[axis])
+            indices[axis] += apex[axis]
+        yield slab, indices, coordinates
+
+
 def polar_grid(frustum, polar_shape, spacing):
     """Sample positions of a regular ``(rho, theta, phi)`` grid spanning a scan frustum.
 
@@ -177,23 +199,11 @@ def polar_grid(frustum, polar_shape, spacing):
             - ``coordinates``: ``(n_rho, n_theta, n_phi, 3)`` float32 ``[x, y, z]`` positions of
               the samples in metres, with the apex at the origin.
     """
-    n_rho, n_theta, n_phi = polar_shape
-    rho = np.linspace(*frustum["rho_range"], n_rho)
-    tan_theta = np.tan(np.linspace(*frustum["theta_range"], n_theta))
-    tan_phi = np.tan(np.linspace(*frustum["phi_range"], n_phi))
-
-    # Same as zea.display.frustum_convert_rtp2xyz, in NumPy so that conversion workers do not
-    # initialise the ML backend.
-    rho, tan_theta, tan_phi = np.meshgrid(rho, tan_theta, tan_phi, indexing="ij")
-    z = rho / np.sqrt(1 + tan_theta**2 + tan_phi**2)
-    x = z * tan_theta
-    y = z * tan_phi
-
-    apex = np.asarray(frustum["apex"], dtype=np.float64)
-    indices = np.stack(
-        [apex[0] + z / spacing[0], apex[1] + x / spacing[1], apex[2] + y / spacing[2]]
-    )
-    coordinates = np.stack([x, y, z], axis=-1).astype(np.float32)
+    indices = np.empty((3, *polar_shape), dtype=np.float64)
+    coordinates = np.empty((*polar_shape, 3), dtype=np.float32)
+    for slab, slab_indices, slab_coordinates in _polar_grid_slabs(frustum, polar_shape, spacing):
+        indices[:, slab] = slab_indices
+        coordinates[slab] = slab_coordinates
     return indices, coordinates
 
 
@@ -213,9 +223,14 @@ def _polar_volume(volume_db, frustum, polar_shape, spacing, name):
     """
     from scipy.ndimage import map_coordinates
 
-    indices, coordinates = polar_grid(frustum, polar_shape, spacing)
-    values = map_coordinates(volume_db, indices, order=1, mode="constant", cval=-60.0)
-    values = np.clip(values, -60.0, 0.0).astype(np.float32)
+    coordinates = np.empty((*polar_shape, 3), dtype=np.float32)
+    values = np.empty(polar_shape, dtype=np.float32)
+    for slab, indices, slab_coordinates in _polar_grid_slabs(frustum, polar_shape, spacing):
+        coordinates[slab] = slab_coordinates
+        map_coordinates(
+            volume_db, indices, output=values[slab], order=1, mode="constant", cval=-60.0
+        )
+    np.clip(values, -60.0, 0.0, out=values)
     image_polar = {
         "values": values[np.newaxis, ...],  # (1, n_rho, n_theta, n_phi)
         "coordinates": coordinates,
@@ -260,6 +275,36 @@ def _polar_volume(volume_db, frustum, polar_shape, spacing, name):
     return image_polar, custom
 
 
+def _validate_existing_output(output_path, polar_shape):
+    """Reject incompatible existing files rather than silently skipping or overwriting them."""
+    try:
+        with File(output_path, "r") as existing:
+            has_polar = "data/image_polar" in existing
+            if polar_shape is None:
+                if has_polar or "custom/polar_geometry" in existing:
+                    raise ValueError("contains polar data, but Cartesian-only output was requested")
+            else:
+                expected = {
+                    "data/image_polar/values": (1, *polar_shape),
+                    "data/image_polar/coordinates": (*polar_shape, 3),
+                    "custom/polar_geometry/rho_range": (2,),
+                    "custom/polar_geometry/theta_range": (2,),
+                    "custom/polar_geometry/phi_range": (2,),
+                    "custom/polar_geometry/apex": (3,),
+                    "custom/polar_geometry/sector_type": (),
+                }
+                for key, shape in expected.items():
+                    if key not in existing or existing[key].shape != shape:
+                        raise ValueError(
+                            f"{key} is missing or does not have requested shape {shape}"
+                        )
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"Existing output {output_path} is incompatible: {exc}. "
+            "Use a new output directory or explicitly regenerate this file."
+        ) from exc
+
+
 def process_cetus(source_path, output_path, overwrite=False, polar_shape=DEFAULT_POLAR_SHAPE):
     """Convert a single CETUS patient time-point to a zea HDF5 file.
 
@@ -295,7 +340,8 @@ def process_cetus(source_path, output_path, overwrite=False, polar_shape=DEFAULT
             :data:`DEFAULT_POLAR_SHAPE`.
 
     Raises:
-        ValueError: If the scan frustum cannot be detected.
+        ValueError: If the scan frustum cannot be detected or an existing output does not
+            match the requested polar mode and shape.
     """
     source_path = Path(source_path)
     output_path = Path(output_path)
@@ -305,6 +351,7 @@ def process_cetus(source_path, output_path, overwrite=False, polar_shape=DEFAULT
         if overwrite:
             output_path.unlink()
         else:
+            _validate_existing_output(output_path, polar_shape)
             log.info("Output file %s already exists. Skipping.", log.yellow(output_path))
             return
 
@@ -561,7 +608,11 @@ def convert_cetus(args):
                 log.error("Failed to convert %s: %s", log.yellow(task[0]), exc)
     else:
         # No more workers than files: the default is one per CPU, all forked up front.
-        with ProcessPoolExecutor(max_workers=min(len(tasks), os.cpu_count() or 1)) as exe:
+        max_workers = min(len(tasks), os.cpu_count() or 1)
+        # Explicit worker counts bypass ProcessPoolExecutor's default Windows cap.
+        if sys.platform == "win32":
+            max_workers = min(max_workers, 61)
+        with ProcessPoolExecutor(max_workers=max_workers) as exe:
             futures = {exe.submit(_process_task, task): task for task in tasks}
             for future in tqdm(as_completed(futures), total=len(futures), desc="Processing files"):
                 try:
@@ -715,8 +766,10 @@ the original beam geometry. The sector comes in two shapes, stored as
   that encloses the whole sector, so about 5-10% of it lies outside the sector, in curved
   regions at its `theta` edges.
 
-Samples outside the sector, including sector corners that were cropped off the original
-Cartesian volumes, are -60 dB.
+Samples outside the source array are filled with -60 dB. Background padding inside the
+array, including cropped sector corners, is also -60 dB before resampling. Near the sector
+boundary, trilinear interpolation can blend this padding with signal, producing values
+above -60 dB even on the padding side. Exact equality with -60 dB is not a sector mask.
 
 ## License
 

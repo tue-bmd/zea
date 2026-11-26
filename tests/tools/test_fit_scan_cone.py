@@ -166,3 +166,33 @@ def test_detect_frustum_rejects_upside_down_volume():
     mask = make_frustum_mask(cfg["shape"], cfg["apex"], cfg["theta"], cfg["phi"], cfg["rho"])
     with pytest.raises(ValueError):
         detect_frustum_parameters(mask[::-1])
+
+
+@pytest.mark.parametrize("axis", [1, 2], ids=["azimuth", "elevation"])
+@pytest.mark.parametrize("sign", [-1, 1], ids=["negative", "positive"])
+@pytest.mark.parametrize("clipped", [False, True], ids=["cap", "clipped"])
+def test_detect_frustum_same_sign_slopes(axis, sign, clipped):
+    """An off-axis sector need not straddle the depth axis in either projection."""
+    shape = (72, 100, 100)
+    apex = (-4.0, 50.0, 50.0)
+    angles = tuple(np.arctan(sorted([sign * 0.5, sign * 1.0])))
+    theta, phi = (angles, (-0.4, 0.4)) if axis == 1 else ((-0.4, 0.4), angles)
+    rho = 100.0 if clipped else 66.0
+    mask = make_frustum_mask(shape, apex, theta, phi, rho)
+    result = detect_frustum_parameters(mask)
+    # Fitting the outermost voxel centres insets the narrow sector's faces, shifting
+    # their intersection by up to 1.5 depth voxels rather than the true geometric apex.
+    np.testing.assert_allclose(result["apex"], apex, atol=1.5)
+    np.testing.assert_allclose(result["theta_range"], theta, atol=np.radians(1.5))
+    np.testing.assert_allclose(result["phi_range"], phi, atol=np.radians(1.5))
+    assert max(result["edge_rms"]) < 1.0
+
+
+@pytest.mark.parametrize("axis", range(3))
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf, 0.0, -1.0])
+def test_detect_frustum_rejects_invalid_spacing(axis, value):
+    """Invalid spacing is rejected before it enters geometry fitting."""
+    spacing = np.ones(3)
+    spacing[axis] = value
+    with pytest.raises(ValueError, match="three finite positive values"):
+        detect_frustum_parameters(np.ones((20, 20, 20), dtype=bool), spacing=spacing)

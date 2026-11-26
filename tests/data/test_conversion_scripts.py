@@ -1986,7 +1986,8 @@ def test_cetus_conversion_reports_failed_files(tmp_path, attach_caplog, no_hyper
     assert any("1 of 2 files" in r.getMessage() for r in attach_caplog.records)
 
 
-def test_cetus_polar_grid_uses_zea_frustum_convention():
+@pytest.mark.parametrize("shape", [(9, 7, 5), (35, 7, 5)])
+def test_cetus_polar_grid_uses_zea_frustum_convention(shape):
     """polar_grid places samples where zea.display.frustum_convert_rtp2xyz does, so that
     zea.display.scan_convert_3d inverts the polar resampling."""
     from zea.data.convert.cetus import polar_grid
@@ -1998,7 +1999,6 @@ def test_cetus_polar_grid_uses_zea_frustum_convention():
         "theta_range": (-0.7, 0.6),
         "phi_range": (-0.5, 0.65),
     }
-    shape = (9, 7, 5)
     spacing = np.array([0.5e-3, 0.6e-3, 0.7e-3])
     indices, coordinates = polar_grid(frustum, shape, spacing)
     assert indices.shape == (3, *shape)
@@ -2017,6 +2017,127 @@ def test_cetus_polar_grid_uses_zea_frustum_convention():
         + np.stack([z, x, y]) / (spacing[:, None, None, None])
     )
     np.testing.assert_allclose(indices, expected_indices, rtol=1e-6)
+
+
+def test_cetus_polar_sampling_in_slabs(monkeypatch):
+    """Chunked sampling keeps the dense-grid values, including slab seams and fill."""
+    from scipy import ndimage
+
+    from zea.data.convert.cetus import _polar_volume, polar_grid
+
+    frustum = {
+        "apex": (-2.0, 12.0, 10.0),
+        "rho_range": (0.0, 40.0),
+        "theta_range": (-0.6, 0.5),
+        "phi_range": (-0.4, 0.7),
+        "sector_type": "pyramid",
+    }
+    shape, spacing = (35, 7, 5), (1.0, 0.8, 1.2)
+    volume = np.random.default_rng(DEFAULT_TEST_SEED).uniform(-60, 0, (30, 24, 20))
+    indices, coordinates = polar_grid(frustum, shape, spacing)
+    expected = ndimage.map_coordinates(volume, indices, order=1, mode="constant", cval=-60.0)
+    sample = ndimage.map_coordinates
+    slab_sizes = []
+
+    def record_sampling(volume, indices, **kwargs):
+        slab_sizes.append(indices.shape[1])
+        return sample(volume, indices, **kwargs)
+
+    monkeypatch.setattr(ndimage, "map_coordinates", record_sampling)
+    image, _ = _polar_volume(volume, frustum, shape, spacing, "synthetic")
+    assert len(slab_sizes) > 1
+    assert max(slab_sizes) <= 16
+    assert sum(slab_sizes) == shape[0]
+    assert image["values"].dtype == np.float32
+    np.testing.assert_allclose(image["values"][0], expected, atol=4e-6)
+    np.testing.assert_array_equal(image["coordinates"], coordinates)
+
+
+@pytest.mark.parametrize("no_hyperthreading", [True, False], ids=["serial", "parallel"])
+@pytest.mark.parametrize(
+    "mismatch", ["missing_polar", "shape", "geometry", "coordinates", "unexpected_polar"]
+)
+def test_cetus_rejects_incompatible_existing_output(tmp_path, no_hyperthreading, mismatch):
+    """Stale outputs fail conversion before upload, without being overwritten."""
+    from zea.data.convert.cetus import convert_cetus
+
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    write_cetus_test_volume(src / "patient01_ED.nii.gz", np.random.default_rng(DEFAULT_TEST_SEED))
+    args = types.SimpleNamespace(
+        src=src,
+        dst=dst,
+        no_hyperthreading=no_hyperthreading,
+        no_polar=mismatch == "missing_polar",
+        polar_shape=CETUS_TEST_POLAR_SHAPE,
+        upload=False,
+    )
+    convert_cetus(args)
+    output = dst / "train" / "patient01" / "patient01_ED.hdf5"
+    if mismatch in ("geometry", "coordinates"):
+        with File(output, "r+") as f:
+            key = (
+                "custom/polar_geometry/apex"
+                if mismatch == "geometry"
+                else "tracks/track_0/data/image_polar/coordinates"
+            )
+            del f[key]
+    before = output.read_bytes()
+    args.no_polar = mismatch == "unexpected_polar"
+    if mismatch == "shape":
+        args.polar_shape = (33, 16, 16)
+    # Cartesian-only uploads are independently forbidden; all other cases must reach the
+    # existing-file check and fail before upload is called.
+    args.upload = not args.no_polar
+    with mock.patch("zea.data.convert.cetus.upload_cetus") as upload:
+        with pytest.raises(RuntimeError, match="1 of 1 CETUS files failed.*patient01_ED"):
+            convert_cetus(args)
+        upload.assert_not_called()
+    assert output.read_bytes() == before
+
+
+@pytest.mark.parametrize("polar_shape", [None, CETUS_TEST_POLAR_SHAPE])
+def test_cetus_skips_compatible_existing_output(tmp_path, polar_shape):
+    """Compatible files are still resumable without loading or rewriting the source."""
+    from zea.data.convert.cetus import process_cetus
+
+    source, output = tmp_path / "patient01_ED.nii.gz", tmp_path / "patient01_ED.hdf5"
+    write_cetus_test_volume(source, np.random.default_rng(DEFAULT_TEST_SEED))
+    process_cetus(source, output, polar_shape=polar_shape)
+    before = output.read_bytes()
+    with mock.patch("zea.data.convert.cetus.sitk_load", side_effect=AssertionError("not skipped")):
+        process_cetus(source, output, polar_shape=polar_shape)
+    assert output.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "platform, cpus, expected_workers",
+    [
+        ("win32", 64, 61),
+        ("linux", 64, 64),
+        ("win32", 4, 4),
+        ("linux", None, 1),
+        ("win32", 128, 61),
+        ("linux", 128, 90),
+    ],
+)
+def test_cetus_process_pool_worker_limits(tmp_path, monkeypatch, platform, cpus, expected_workers):
+    """A full 90-volume batch respects CPU, task-count and Windows process-pool limits."""
+    from zea.data.convert import cetus
+
+    src = tmp_path / "src"
+    src.mkdir()
+    for patient in range(1, 46):
+        for time_point in ("ED", "ES"):
+            (src / f"patient{patient:02d}_{time_point}.nii.gz").touch()
+    monkeypatch.setattr(cetus, "sys", types.SimpleNamespace(platform=platform))
+    monkeypatch.setattr(cetus.os, "cpu_count", lambda: cpus)
+    # Inspect scheduling without spawning workers or reading synthetic placeholder files.
+    with mock.patch.object(cetus, "ProcessPoolExecutor") as executor:
+        monkeypatch.setattr(cetus, "as_completed", lambda futures: [])
+        cetus.convert_cetus(types.SimpleNamespace(src=src, dst=tmp_path / "dst"))
+        executor.assert_called_once_with(max_workers=expected_workers)
+        assert executor.return_value.__enter__.return_value.submit.call_count == 90
 
 
 def test_images_non_uint8_raises():

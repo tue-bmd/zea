@@ -460,19 +460,26 @@ def _silhouette_edges(silhouette):
     return low, high
 
 
-def _straight_edge_rows(edge, n_lateral, is_low):
+def _straight_edge_rows(edge, opposite_edge, n_lateral, is_low):
     """Rows in which a silhouette edge lies on the straight side of the sector.
 
-    Going down from the apex, an edge moves outward along a straight line until the far cap of
-    the sector bends it back in. Rows below the outermost point are therefore dropped, as are
-    rows where the edge touches the volume border, because the sector is clipped there.
+    An outward-moving edge is straight until the far cap bends it back in. If its
+    outermost point is already on the first data row, it can instead be an inward-moving
+    edge of an off-axis sector. In that case use the opposite edge's outermost row: that
+    farther-out ray reaches the spherical cap first, so this is a conservative cutoff.
+    Rows where the edge touches either volume border are excluded as clipped.
     """
     valid = np.isfinite(edge)
     outward = np.where(valid, -edge if is_low else edge, -np.inf)
     last_row = np.argmax(outward)  # first row where the edge is furthest out
+    if valid.any() and last_row == np.flatnonzero(valid)[0]:
+        opposite_valid = np.isfinite(opposite_edge)
+        opposite_outward = np.where(
+            opposite_valid, opposite_edge if is_low else -opposite_edge, -np.inf
+        )
+        last_row = np.argmax(opposite_outward)
     rows = np.arange(len(edge))
-    on_border = np.zeros_like(valid)
-    on_border[valid] = (edge[valid] <= 0) if is_low else (edge[valid] >= n_lateral - 1)
+    on_border = (edge <= 0) | (edge >= n_lateral - 1)
     return valid & (rows <= last_row) & ~on_border
 
 
@@ -658,8 +665,9 @@ def detect_frustum_parameters(
     2. Project the mask along each lateral axis. Each projection is a 2-D sector whose straight
        sides are rays from the apex.
     3. In every depth row of a projection, take the outermost data voxel on both sides. Rows
-       where the sector is clipped by the volume border, and rows below the point where an edge
-       is furthest out (where the far cap begins), are not used.
+       where the sector is clipped by the volume border, and rows beyond the straight side
+       (where the far cap begins), are not used. For an inward-moving off-axis edge, the
+       opposite, outward-moving edge determines a conservative end of the straight side.
     4. Fit a line to each of the four edges, iteratively rejecting outliers.
     5. Refit the four lines so that they all pass through a single apex.
     6. Take the radial range from the nearest and farthest data voxel seen from the apex.
@@ -729,8 +737,8 @@ def detect_frustum_parameters(
     if mask.ndim != 3:
         raise ValueError(f"mask must be 3-D (z, x, y), got shape {mask.shape}")
     spacing = np.asarray(spacing, dtype=np.float64)
-    if spacing.shape != (3,) or np.any(spacing <= 0):
-        raise ValueError(f"spacing must contain three positive values, got {spacing}")
+    if spacing.shape != (3,) or not np.all(np.isfinite(spacing) & (spacing > 0)):
+        raise ValueError(f"spacing must contain three finite positive values, got {spacing}")
 
     if keep_largest_component:
         mask = _largest_connected_component(mask)
@@ -743,9 +751,10 @@ def detect_frustum_parameters(
         silhouette = mask.any(axis=3 - axis)  # project along the other lateral axis
         n_lateral = silhouette.shape[1]
         pair, lines = [], []
-        for edge, is_low in zip(_silhouette_edges(silhouette), (True, False)):
+        low, high = _silhouette_edges(silhouette)
+        for edge, opposite_edge, is_low in ((low, high, True), (high, low, False)):
             side = f"{name}_{'min' if is_low else 'max'}"
-            rows = _straight_edge_rows(edge, n_lateral, is_low)
+            rows = _straight_edge_rows(edge, opposite_edge, n_lateral, is_low)
             if rows.sum() < min_edge_points:
                 raise ValueError(
                     f"Failed to detect scan frustum: only {rows.sum()} usable depth rows on the "
