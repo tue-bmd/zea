@@ -34,6 +34,7 @@ from zea.cli_args import (
     _Verasonics,
 )
 from zea.cli_args import ConvertDataset as Dataset
+from zea.cli_args import resolve_device
 from zea.internal.device import init_device
 
 __all__ = [
@@ -54,9 +55,9 @@ __all__ = [
 def main():
     """Parse command-line arguments and dispatch to the selected dataset conversion routine."""
     args = tyro.cli(Dataset)
+    init_device(resolve_device(args), allow_preallocate=False)
     args.run()
 
 
 if __name__ == "__main__":
-    init_device(allow_preallocate=False)
     main()

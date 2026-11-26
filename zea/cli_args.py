@@ -14,7 +14,7 @@ and each module's own ``python -m`` entry point can reuse the same dispatch.
 import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, ClassVar, Literal, Union
 
 import numpy as np
 import tyro
@@ -28,6 +28,22 @@ if sitk is not None:
 #: ``python -m zea.data.process`` entry point, so the two can't drift apart.
 DEFAULT_DEVICE = "auto:1"
 DEVICE_HELP = "Compute device passed to init_device (e.g. 'cpu', 'auto:1')."
+
+
+def resolve_device(args, device: str | None = None) -> str:
+    """Return ``device``, or the default device for the (nested) subcommand ``args``.
+
+    A subcommand dataclass can set a ``default_device`` class variable (e.g. ``'cpu'`` for
+    converters that barely touch the backend), which is used when no device was given.
+    Otherwise falls back to :data:`DEFAULT_DEVICE`.
+    """
+    if device is not None:
+        return device
+    while args is not None:
+        if hasattr(args, "default_device"):
+            return args.default_device
+        args = getattr(args, "subcommand", None)
+    return DEFAULT_DEVICE
 
 
 @dataclass
@@ -810,6 +826,9 @@ class _Picmus:
 class _Verasonics:
     """Convert Verasonics data to zea dataset."""
 
+    # Conversion is h5py/numpy work; a GPU only adds startup cost.
+    default_device: ClassVar[str] = "cpu"
+
     src: tyro.conf.Positional[Path]
     """Source folder path."""
     dst: tyro.conf.Positional[Path]
@@ -817,13 +836,19 @@ class _Verasonics:
     frames: list[str] | None = None
     """The frames to add to the file. This can be a list of integers, a range of integers
     (e.g. 4-8), or 'all'. Defaults to 'all', unless specified in a convert.yaml file."""
+    buffers: list[int] | None = None
+    """The RF buffers to convert, counted from 0 like the frames: 0 is MATLAB's
+    RcvData{1} and becomes the track rf_buffer_0. Defaults to every buffer, unless
+    specified in a convert.yaml file. Selecting frames needs a single buffer."""
     allow_accumulate: bool = False
     """Sometimes, some transmits are already accumulated on the Verasonics system (e.g.
     harmonic imaging through pulse inversion). In this case, the mode in the Receive
     structure is set to 1 (accumulate). If this flag is set, such files will be processed.
     Otherwise, an error is raised when such a mode is detected."""
-    device: str = "cpu"
-    """Device to use for conversion (e.g., 'cpu' or 'gpu:0')."""
+    connector_applied: bool | None = None
+    """Whether the raw data was already reordered with Trans.ConnectorES before saving.
+    Required for files that have as many channels as probe elements and no
+    save_raw_version, unless specified in a convert.yaml file."""
     upload: bool = False
     """Upload the converted dataset to HuggingFace Hub after conversion. Only for zea
     maintainers with push access to the repository."""

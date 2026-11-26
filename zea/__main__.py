@@ -25,6 +25,7 @@ from zea.cli_args import (
     DataPathsArgs,
     ProcessArgs,
     ToolsArgs,
+    resolve_device,
 )
 
 # subcommands that don't require a device
@@ -46,9 +47,12 @@ class CLI:
         ]
     ]
     device: Annotated[
-        tyro.conf.CascadeSubcommandArgs[str],
-        tyro.conf.arg(help=DEVICE_HELP),
-    ] = DEFAULT_DEVICE
+        tyro.conf.CascadeSubcommandArgs[str | None],
+        tyro.conf.arg(
+            help=f"{DEVICE_HELP} Defaults to '{DEFAULT_DEVICE}', or 'cpu' for "
+            "subcommands that don't benefit from a GPU (e.g. convert verasonics)."
+        ),
+    ] = None
 
 
 def _check_if_device_needed(subcommand) -> bool:
@@ -72,7 +76,10 @@ def main() -> None:
 
         # Conversion runs should not preallocate the full GPU, mirroring the
         # standalone ``python -m zea.data.convert`` entry point.
-        init_device(cli_args.device, allow_preallocate=not isinstance(args, ConvertArgs))
+        init_device(
+            resolve_device(args, cli_args.device),
+            allow_preallocate=not isinstance(args, ConvertArgs),
+        )
 
     # Each subcommand dataclass imports its implementation lazily and runs it.
     args.run()
