@@ -235,22 +235,22 @@ class LinearInterpOperator(Operator):
             haze = np.random.randn(64, 64, 1)
 
             # Create hazy measurement
-            measurement = operator.forward(tissue, haze, haze_level=0.5)
+            measurement = operator.forward(tissue, haze, blend_level=0.5)
     """
 
-    def forward(self, data1, data2, blend_level: float = 0.5):
+    def forward(self, data, other, blend_level: float = 0.5):
         r"""Apply linear interpolation to blend two components.
 
         Args:
-            data1: First component.
-            data2: Second component.
+            data: First component.
+            other: Second component.
             blend_level: Blending factor :math:`\alpha \in [0, 1]`. Higher values
                 mean more contribution from the second component. Default is 0.5.
 
         Returns:
             Blended measurement.
         """
-        out = (1 - blend_level) * data1 + blend_level * data2
+        out = (1 - blend_level) * data + blend_level * other
         return out
 
     def transpose(self, data, blend_level: float = 0.5):
