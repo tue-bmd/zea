@@ -1482,3 +1482,11 @@ def test_default_polar_limits_without_azimuth_angles():
     parameters = Parameters(polar_angles=np.array([-0.2, 0.2]))
     np.testing.assert_allclose(parameters.polar_limits, (-0.26, 0.26), rtol=1e-6)
     assert parameters.elevation_limits is None
+
+
+def test_default_elevation_limits_without_polar_angles():
+    """Azimuth angles alone don't give an elevation range: with the polar angles missing,
+    elevation_limits is None rather than a zero-width (0, 0)."""
+    parameters = Parameters(azimuth_angles=np.radians([90.0, -90.0]))
+    assert parameters.polar_angles is None
+    assert parameters.elevation_limits is None

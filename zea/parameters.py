@@ -1003,6 +1003,8 @@ class Parameters(BaseParameters):
         ``(sin(theta) cos(phi), sin(theta) sin(phi), cos(theta))``. In 2D imaging
         ``phi = 0`` and ``theta`` is signed, positive toward +x, so it equals the polar
         angle ``atan(x / z)`` of the grid (see :attr:`polar_limits`).
+
+        ``None`` if not provided.
         """
         value = self._params.get("polar_angles")
         if value is None:
@@ -1073,16 +1075,16 @@ class Parameters(BaseParameters):
         :attr:`polar_limits` spans a 3D frustum (see :func:`zea.display.scan_convert_3d`).
 
         Defaults to the range of the transmits' elevation angles with a 15 % margin on each
-        side. Returns ``None`` if azimuth angles were not provided (e.g. standard 2D imaging).
+        side. Returns ``None`` if azimuth angles and/or polar angles were not provided.
 
         The presence check uses the raw parameter to avoid triggering the
         :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
         """
         value = self._params.get("elevation_limits")
-        if value is None and self._params.get("azimuth_angles") is not None:
+        polar = self.polar_angles
+        if value is None and polar is not None and self._params.get("azimuth_angles") is not None:
             azimuth = np.asarray(self.azimuth_angles, dtype=np.float64)
-            polar = self.polar_angles
-            polar = np.zeros_like(azimuth) if polar is None else np.asarray(polar, np.float64)
+            polar = np.asarray(polar, dtype=np.float64)
             # Each transmit's angle in the y-z plane
             elevation = np.arctan2(np.sin(polar) * np.sin(azimuth), np.cos(polar))
             value = float(elevation.min()), float(elevation.max())
