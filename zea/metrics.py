@@ -438,13 +438,12 @@ class Metrics:
         if batched and batch_shape:
             # Batched metrics (e.g. lpips) take one batch axis, and torch.vmap can not map their
             # networks (Conv2D channels_last memory format checks), so pass all images at once.
-            image_shape = ops.shape(y_true)[-3:]
             metric_fn = tensor.vmap(fun, batch_size=mapped_batch_size, fn_supports_batch=True)
             out = func_on_device(
                 metric_fn,
                 device,
-                ops.reshape(y_true, (-1, *image_shape)),
-                ops.reshape(y_pred, (-1, *image_shape)),
+                ops.reshape(y_true, (-1, *ops.shape(y_true)[-3:])),
+                ops.reshape(y_pred, (-1, *ops.shape(y_pred)[-3:])),
             )
             out = ops.reshape(out, batch_shape)
         else:

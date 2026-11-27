@@ -386,6 +386,10 @@ def map(f, xs):  # noqa: A001
     xs = keras.tree.map_structure(lambda x: None if x is None else ops.convert_to_tensor(x), xs)
     leaves = [leaf for leaf in keras.tree.flatten(xs) if leaf is not None]
     length = ops.shape(leaves[0])[0]
+    # JAX clamps out-of-bounds indices, so a shorter leaf would silently repeat its last element.
+    lengths = {ops.shape(leaf)[0] for leaf in leaves}
+    if len(lengths) > 1:
+        raise ValueError(f"All inputs to map need the same leading dimension, got {lengths}.")
     if length == 0:
         return ops.map(f, xs)  # infers the shape of the empty outputs
 

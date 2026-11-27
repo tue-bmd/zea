@@ -1149,6 +1149,16 @@ def test_map_matches_ops_map(structure):
     return ops.convert_to_numpy(result_leaves[0])
 
 
+def test_map_rejects_mismatched_lengths():
+    """Inputs with different leading dimensions should raise, as `keras.ops.map` does, instead of
+    JAX clamping the out-of-bounds indices of the shorter one."""
+    import zea
+
+    xs = (np.ones((3, 2), "float32"), np.ones((2, 2), "float32"))
+    with pytest.raises((ValueError, IndexError)):
+        zea.func.map(lambda t: t[0] + t[1], xs)
+
+
 @pytest.mark.parametrize(
     "mask_shape, blob_center, blob_radius",
     [
