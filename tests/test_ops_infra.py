@@ -462,33 +462,111 @@ def test_pipeline_jit_options_pipeline_does_not_jit_nested_map():
     assert inner_map._jittable_call.__func__ is inner_map.jittable_call.__func__
 
 
-def test_map_inside_outer_jit_does_not_disable_vmap_jit():
-    """Map nested in a jit_options='pipeline' parent must not disable its internal vmap JIT.
+def _subprocess_map_without_jit_loops(backend):  # pragma: no cover
+    """Check that a jit_options=None Map loops eagerly, and never unrolls inside an outer jit."""
+    import logging
+    import os
 
-    disable_jit=True causes vmap to fall back to a Python for-loop (simple_map), which
-    unrolls inside the outer JIT trace and is catastrophic for large inputs.
+    os.environ["KERAS_BACKEND"] = backend
+
+    import keras
+    import numpy as np
+
+    from zea import ops
+    from zea.ops import Map
+
+    class CountCalls(ops.Operation):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.calls = 0
+
+        def call(self, data):
+            self.calls += 1
+            return {"data": keras.ops.multiply(data, 2.0)}
+
+    if backend == "jax":
+        import jax
+
+        outer_jits = {
+            "jit": lambda fn, data: jax.jit(fn)(data),
+            # The data is a constant inside the trace, not a tracer
+            "jit, closed over": lambda fn, data: jax.jit(lambda: fn(jax.numpy.asarray(data)))(),
+        }
+    else:
+        import tensorflow as tf
+
+        outer_jits = {
+            "tf.function": lambda fn, data: tf.function(fn)(data),
+            "tf.function, closed over": lambda fn, data: tf.function(
+                lambda: fn(tf.constant(data))
+            )(),
+        }
+
+    def run(outer_jit, n, with_batch_dim, calls=1):
+        counter = CountCalls()
+        mapped = Map(
+            operations=[counter],
+            argnames="data",
+            batch_size=2,
+            jit_options=None,
+            with_batch_dim=with_batch_dim,
+        )
+        data = np.arange(n * 2 * n, dtype="float32").reshape(n, 2 * n)  # n frames of n patches
+        if not with_batch_dim:
+            data = data[0]
+        fn = lambda x: mapped(data=x)["data"]  # noqa: E731
+        for _ in range(calls):
+            out = outer_jit(fn, data) if outer_jit else fn(data)
+            np.testing.assert_allclose(keras.ops.convert_to_numpy(out), 2 * data)
+        return counter.calls
+
+    for with_batch_dim in (True, False):
+        frames = 3 if with_batch_dim else 1
+        # Eager: called once per frame and patch (plus TensorFlow's one call per map to infer
+        # the output signature)
+        assert run(None, 3, with_batch_dim) >= frames * 3, with_batch_dim
+        for name, outer_jit in outer_jits.items():
+            # Traced once (twice per loop on TensorFlow), however many frames and patches
+            calls = [run(outer_jit, n, with_batch_dim) for n in (3, 5)]
+            assert calls[0] == calls[1] <= 4, (name, with_batch_dim, calls)
+
+    if backend == "jax":
+        # Outside a jit, the eager loops compile nothing after the first call
+        compiles = []
+
+        class CountCompiles(logging.Handler):
+            def emit(self, record):
+                if "Compiling" in record.getMessage():
+                    compiles.append(record.getMessage())
+
+        jax.config.update("jax_log_compiles", True)
+        logger = logging.getLogger("jax")
+        logger.addHandler(CountCompiles())
+        logger.setLevel(logging.WARNING)
+        run(None, 3, True)
+        compiles.clear()
+        run(None, 3, True, calls=2)
+        assert not compiles, compiles
+
+
+@pytest.mark.parametrize("backend", ["jax", "tensorflow"])
+def test_map_without_jit_loops_eagerly_unless_traced(backend):
+    """A Map with jit_options=None loops in Python, but not inside a jit set up elsewhere.
+
+    Runs in a subprocess, as `run_in_backend` disables jit.
     """
-    inner_map = Map(
-        operations=[AddOperation()],
-        argnames="x",
-        chunks=4,
-        jit_options=None,
+    missing = missing_required_backends([backend])
+    if missing:
+        pytest.skip(format_backend_skip_reason(missing))
+
+    code = textwrap.dedent(inspect.getsource(_subprocess_map_without_jit_loops))
+    code += f"\n_subprocess_map_without_jit_loops({backend!r})\n"
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=300
     )
-    # Standalone with jit_options=None: disable_jit should be True (no JIT anywhere)
-    assert inner_map._inside_outer_jit is False
-
-    ops.Pipeline(
-        operations=[MultiplyOperation(), inner_map],
-        jit_options="pipeline",
+    assert result.returncode == 0, (
+        f"The Map looped wrongly on {backend}.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
-
-    # Nested inside a "pipeline" parent: disable_jit must be False so that
-    # vmap uses ops.map / jax.vmap rather than the Python-loop fallback.
-    assert inner_map._inside_outer_jit is True
-
-    # A truly standalone Map (never nested) stays out of any outer JIT.
-    standalone = Map(operations=[AddOperation()], argnames="x", chunks=4, jit_options="ops")
-    assert standalone._inside_outer_jit is False
 
 
 def test_inside_outer_jit_propagates_transitively():

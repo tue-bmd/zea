@@ -185,6 +185,29 @@ def test_metrics_class_batch_size():
     return results_with_batch_size["mse"]
 
 
+def test_batched_metric_reshapes_inputs_with_their_own_channels():
+    """A batched metric gets grayscale and RGB batches paired image by image, like LPIPS needs."""
+    rng = np.random.default_rng(DEFAULT_TEST_SEED)
+    y_true = rng.random((2, 3, 8, 8, 1)).astype(np.float32)
+    y_pred = rng.random((2, 3, 8, 8, 3)).astype(np.float32)
+
+    def batched_mse(a, b):  # broadcasts the single channel, like LPIPS does
+        return ops.mean(ops.square(a - b), axis=(1, 2, 3))
+
+    out = metrics.Metrics._call_metric_fn(
+        batched_mse,
+        ops.convert_to_tensor(y_true),
+        ops.convert_to_tensor(y_pred),
+        average_batches=False,
+        return_numpy=True,
+        device=None,
+        batched=True,
+    )
+
+    expected = np.mean((y_true - y_pred) ** 2, axis=(-3, -2, -1))
+    np.testing.assert_allclose(out, expected, rtol=1e-5)
+
+
 def test_metrics_registry():
     """Test if all metrics are in the registry"""
 

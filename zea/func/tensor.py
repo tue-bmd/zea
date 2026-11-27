@@ -343,30 +343,6 @@ def batch_cov(x, rowvar=True, bias=False, ddof=None):
     return cov_matrices
 
 
-def simple_map(function, elements):
-    """Like `ops.map` but no tracing or jit compilation."""
-
-    if elements is None:
-        return function(None)
-
-    multiple_inputs = isinstance(elements, (list, tuple))
-
-    outputs = []
-    if not multiple_inputs:
-        batch_size = elements.shape[0]
-        for index in range(batch_size):
-            outputs.append(function(elements[index]))
-    else:
-        batch_size = elements[0].shape[0]
-        for index in range(batch_size):
-            outputs.append(function([e[index] if e is not None else None for e in elements]))
-
-    if isinstance(outputs[0], (list, tuple)):
-        return [ops.stack(tensors) for tensors in zip(*outputs)]
-    else:
-        return ops.stack(outputs)
-
-
 if keras.backend.backend() == "numpy":
 
     def vectorized_map(function, elements):
@@ -378,6 +354,50 @@ if keras.backend.backend() == "numpy":
         return [np.stack(tensors) for tensors in zip(*outputs)]
 else:
     vectorized_map = ops.vectorized_map
+
+
+def _jax_is_tracing() -> bool:
+    """Whether JAX is staging a jit, scan or other trace right now, whatever the inputs are."""
+    import jax.numpy as jnp
+    from jax.core import Tracer
+
+    # Under a staged trace even a new constant is a tracer. vmap and grad alone are not staged.
+    return isinstance(jnp.zeros(()), Tracer)
+
+
+def map(f, xs):  # noqa: A001
+    """Like `keras.ops.map`, but loops in Python on JAX when nothing is being traced.
+
+    Outside a jit, `jax.lax.map` compiles its loop again on every call, as it wraps `f` in a new
+    function each time. A Python loop needs no compiling, and its values can be inspected in a
+    debugger. Inside a jit or other trace this is `keras.ops.map`, so the loop is not unrolled.
+    Other backends always use `keras.ops.map`, which already loops eagerly outside a graph.
+
+    Args:
+        f: Function to apply to each element along the leading axis of `xs`.
+        xs: Tensor, or nested structure of tensors, to map over along their leading axis.
+
+    Returns:
+        The outputs of `f`, stacked along a new leading axis.
+    """
+    if keras.backend.backend() != "jax" or _jax_is_tracing():
+        return ops.map(f, xs)
+
+    xs = keras.tree.map_structure(lambda x: None if x is None else ops.convert_to_tensor(x), xs)
+    leaves = [leaf for leaf in keras.tree.flatten(xs) if leaf is not None]
+    length = ops.shape(leaves[0])[0]
+    # JAX clamps out-of-bounds indices, so a shorter leaf would silently repeat its last element.
+    lengths = {ops.shape(leaf)[0] for leaf in leaves}
+    if len(lengths) > 1:
+        raise ValueError(f"All inputs to map need the same leading dimension, got {lengths}.")
+    if length == 0:
+        return ops.map(f, xs)  # infers the shape of the empty outputs
+
+    outputs = [
+        f(keras.tree.map_structure(lambda x: None if x is None else x[i], xs))
+        for i in range(length)
+    ]
+    return keras.tree.map_structure(lambda *ys: None if ys[0] is None else ops.stack(ys), *outputs)
 
 
 def _is_mapped(leaf, axis) -> bool:
@@ -542,7 +562,6 @@ def vmap(
     chunks: int | None = None,
     batch_size: int | None = None,
     fn_supports_batch: bool = False,
-    disable_jit: bool = False,
 ):
     """`vmap` with batching or chunking support to avoid memory issues.
 
@@ -564,7 +583,7 @@ def vmap(
             all outputs below it, and a tuple, list or dict should match the structure of the
             outputs. `None` keeps an output that does not depend on the mapped axis unmapped. It
             is only supported by the native `jax.vmap`, which can check that dependency, so it
-            raises an error on other backends, with `disable_jit` and with `fn_supports_batch`.
+            raises an error on other backends and with `fn_supports_batch`.
         batch_size: Size of the batch for each step. If `None`, the function will be equivalent
             to `vmap`. If `1`, will be equivalent to `map`. Mutually exclusive with `chunks`.
         chunks: Number of chunks to split the input into. If `None` or `1`, the function will be
@@ -573,8 +592,6 @@ def vmap(
             In this case, this function will only handle padding and reshaping for batching.
             Unlike in `jax.vmap`, `in_axes` and `out_axes` then do not move any axes: `fun`
             should take its batch at `in_axes` and return it at `out_axes` itself.
-        disable_jit: If True, disables JIT compilation for backends that support it.
-            This can be useful for debugging. Will fall back to simple mapping.
     Returns:
         A function that applies `fun` in a batched manner over the specified axes.
     """
@@ -602,11 +619,11 @@ def vmap(
 
     # Other map functions stack all results, so they can not check that an output is really
     # unmapped. Without this check, a mapped output would silently be reduced to its first element.
-    native_jax_vmap = keras.backend.backend() == "jax" and not disable_jit and not fn_supports_batch
+    native_jax_vmap = keras.backend.backend() == "jax" and not fn_supports_batch
     if not native_jax_vmap and None in keras.tree.flatten(out_axes):
         raise ValueError(
             "out_axes=None is only supported by the native `jax.vmap`, so on the jax backend "
-            "without `disable_jit` and `fn_supports_batch`."
+            "without `fn_supports_batch`."
         )
 
     no_chunks_or_batch = batch_size is None and (chunks is None or chunks == 1)
@@ -615,9 +632,7 @@ def vmap(
         return fun
 
     # vmap to support batches
-    vmap_fun = _map(
-        fun, in_axes=in_axes, out_axes=out_axes, map_fn=None if not disable_jit else simple_map
-    )
+    vmap_fun = _map(fun, in_axes=in_axes, out_axes=out_axes)
 
     if no_chunks_or_batch:
         return vmap_fun
@@ -625,8 +640,6 @@ def vmap(
     batch_fun = fun if fn_supports_batch else vmap_fun
 
     # map (sequentially) to support batches/chunks that fit in memory
-    map_fn = ops.map if not disable_jit else simple_map
-
     def batched_fun(*args, **kwargs):
         tree = (args, kwargs)
         leaves, leaf_axes = _flatten_inputs(args, kwargs, in_axes)
@@ -654,7 +667,7 @@ def vmap(
         batch_in_axes, _ = keras.tree.pack_sequence_as(tree, batch_axes)
 
         # The leading axis of each output are the batches
-        outputs = _map(batch_fun, in_axes=batch_in_axes, out_axes=0, map_fn=map_fn)(
+        outputs = _map(batch_fun, in_axes=batch_in_axes, out_axes=0, map_fn=map)(
             *new_args, **new_kwargs
         )
 
@@ -1093,7 +1106,7 @@ def compute_required_patch_overlap(image_shape, patch_shape):
     if not all(ops.isclose(new_overlap, ops.round(new_overlap))):
         return
 
-    new_overlap = tuple(map(int, new_overlap))
+    new_overlap = tuple(int(o) for o in new_overlap)
 
     return new_overlap
 

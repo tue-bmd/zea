@@ -264,9 +264,7 @@ def ncc(x, y):
     return num / ops.maximum(denom, keras.config.epsilon())
 
 
-@metrics_registry(
-    name="lpips", paired=True, jittable=True, torch_vmappable=False, torch_jittable=False
-)
+@metrics_registry(name="lpips", paired=True, jittable=True, batched=True, torch_jittable=False)
 def get_lpips(image_range, clip=False):
     """
     Get the Learned Perceptual Image Patch Similarity (LPIPS) metric.
@@ -306,9 +304,7 @@ def get_lpips(image_range, clip=False):
     return lpips
 
 
-@metrics_registry(
-    name="ultrapips", paired=True, jittable=True, torch_vmappable=False, torch_jittable=False
-)
+@metrics_registry(name="ultrapips", paired=True, jittable=True, batched=True, torch_jittable=False)
 def get_ultrapips(image_range, clip=False, preset="ultrapips-tusa"):
     """
     Get the UltraPIPS perceptual similarity metric for B-mode ultrasound.
@@ -410,7 +406,7 @@ class Metrics:
 
         # Initialize all metrics
         self.metrics = {}
-        self.torch_vmappable = {}
+        self.batched = {}
         for m in metrics:
             jittable = metrics_registry.get_parameter(m, "jittable")
             metric_fn = get_metric(m, **reduce_to_signature(metrics_registry[m], kwargs))
@@ -420,9 +416,7 @@ class Metrics:
                     torch=metrics_registry.get_parameter(m, "torch_jittable", default=True),
                 )
             self.metrics[m] = metric_fn
-            self.torch_vmappable[m] = metrics_registry.get_parameter(
-                m, "torch_vmappable", default=True
-            )
+            self.batched[m] = metrics_registry.get_parameter(m, "batched", default=False)
 
         # Other settings
         self.quantize = quantize
@@ -437,29 +431,28 @@ class Metrics:
         return_numpy,
         device,
         mapped_batch_size=None,
-        torch_vmappable=True,
+        batched=False,
     ):
-        num_batch_axes = max(0, ops.ndim(y_true) - 3)
+        batch_shape = ops.shape(y_true)[:-3]
 
-        # Because most metric functions do not support batching, we vmap over the batch axes.
-        # This does assume that the metric function can handle single images of shape (h, w, c).
-        # Some metrics (e.g. lpips) are not compatible with torch.vmap (e.g. due to Conv2D
-        # channels_last memory format checks), so we fall back to a sequential loop.
-        metric_fn = fun
-        for _ in range(num_batch_axes):
-            # recursively vmap the leading axis
-            # disable_jit only when on the torch backend and the metric is not
-            # torch-vmappable (e.g. LPIPS), so that other backends (JAX, etc.)
-            # still benefit from their native vmap / vectorized_map paths.
-            disable_jit = not torch_vmappable and keras.backend.backend() == "torch"
-            metric_fn = tensor.vmap(
+        if batched and batch_shape:
+            # Batched metrics (e.g. lpips) take one batch axis, and torch.vmap can not map their
+            # networks (Conv2D channels_last memory format checks), so pass all images at once.
+            metric_fn = tensor.vmap(fun, batch_size=mapped_batch_size, fn_supports_batch=True)
+            out = func_on_device(
                 metric_fn,
-                in_axes=0,
-                disable_jit=disable_jit,
-                batch_size=mapped_batch_size,
+                device,
+                ops.reshape(y_true, (-1, *ops.shape(y_true)[-3:])),
+                ops.reshape(y_pred, (-1, *ops.shape(y_pred)[-3:])),
             )
-
-        out = func_on_device(metric_fn, device, y_true, y_pred)
+            out = ops.reshape(out, batch_shape)
+        else:
+            # Other metric functions take single images of shape (h, w, c), so vmap them over
+            # each batch axis.
+            metric_fn = fun
+            for _ in batch_shape:
+                metric_fn = tensor.vmap(metric_fn, in_axes=0, batch_size=mapped_batch_size)
+            out = func_on_device(metric_fn, device, y_true, y_pred)
 
         if average_batches:
             out = ops.mean(out)
@@ -513,7 +506,7 @@ class Metrics:
                 return_numpy,
                 device,
                 mapped_batch_size=mapped_batch_size,
-                torch_vmappable=self.torch_vmappable[name],
+                batched=self.batched[name],
             )
         return results
 
