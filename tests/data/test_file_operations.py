@@ -1,6 +1,6 @@
 """Test the file operations module."""
 
-import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Generator
@@ -31,6 +31,14 @@ from . import generate_dummy_scan, generate_example_dataset
 
 HF_INPUT_PATH = "hf://zeahub/pytest/case_0.hdf5"
 HF_FOLDER_PATH = "hf://zeahub/pytest/folder"
+
+
+def _run_zea_cli(monkeypatch, *args):
+    """Run the ``zea`` CLI in-process (a subprocess re-imports all backends)."""
+    from zea.__main__ import main
+
+    monkeypatch.setattr(sys, "argv", ["zea", *map(str, args)])
+    main()
 
 
 @pytest.fixture
@@ -173,7 +181,7 @@ def test_file_operations_compound_transmits(tmp_hdf5_path):
     assert parameters["tx_apodizations"].shape[0] == 1
 
 
-def test_file_operations_cli_sum(tmp_hdf5_path):
+def test_file_operations_cli_sum(tmp_hdf5_path, monkeypatch):
     """Tests the sum_data function CLI by creating two example datasets,
     summing them and checking if the result is correct."""
 
@@ -191,14 +199,7 @@ def test_file_operations_cli_sum(tmp_hdf5_path):
     # Sum the datasets
     output_path = tmp_hdf5_path.parent / "summed_dataset.hdf5"
 
-    os.system(
-        "python -m zea data sum "
-        + str(path1)
-        + " "
-        + str(path2)
-        + " --output-path "
-        + str(output_path)
-    )
+    _run_zea_cli(monkeypatch, "data", "sum", path1, path2, "--output-path", output_path)
 
     # Load the summed dataset and check if the data is correct
     with File(output_path) as f:
@@ -206,7 +207,7 @@ def test_file_operations_cli_sum(tmp_hdf5_path):
         assert raw_data[0, 0, 0, 0, 0] == data1[0, 0, 0, 0, 0] + data2[0, 0, 0, 0, 0]
 
 
-def test_file_operations_cli_extract(tmp_hdf5_path):
+def test_file_operations_cli_extract(tmp_hdf5_path, monkeypatch):
     """Tests the load_data function CLI by creating an example dataset and
     loading a subset of the data."""
 
@@ -216,12 +217,10 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system(
-        "python -m zea data extract "
-        + str(input_path)
-        + " "
-        + str(output_path)
-        + " --frames 0-1 --transmits 0 3 4"
+    _run_zea_cli(
+        monkeypatch,
+        *("data", "extract", input_path, output_path),
+        *("--frames", "0-1", "--transmits", "0", "3", "4"),
     )
 
     data_dict = SimpleNamespace(**_load_data_dict(output_path))
@@ -232,7 +231,7 @@ def test_file_operations_cli_extract(tmp_hdf5_path):
     assert data_dict.beamformed_data["values"].shape[0] == 2
 
 
-def test_file_operations_cli_resave(tmp_hdf5_path):
+def test_file_operations_cli_resave(tmp_hdf5_path, monkeypatch):
     """Tests the resave operation CLI by creating an example dataset and
     resaving it to a new file."""
 
@@ -242,13 +241,13 @@ def test_file_operations_cli_resave(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system("python -m zea data resave " + str(input_path) + " " + str(output_path))
+    _run_zea_cli(monkeypatch, "data", "resave", input_path, output_path)
 
     # Validate the resaved dataset
     validate_file(output_path)
 
 
-def test_file_operations_cli_compound_frames(tmp_hdf5_path):
+def test_file_operations_cli_compound_frames(tmp_hdf5_path, monkeypatch):
     """Tests the compound_frames function CLI by creating an example dataset and
     compounding frames."""
 
@@ -258,7 +257,7 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system("python -m zea data compound_frames " + str(input_path) + " " + str(output_path))
+    _run_zea_cli(monkeypatch, "data", "compound_frames", input_path, output_path)
 
     data_dict = SimpleNamespace(**_load_data_dict(output_path))
     assert data_dict.raw_data.shape[0] == 1  # Only one frame should remain
@@ -266,7 +265,7 @@ def test_file_operations_cli_compound_frames(tmp_hdf5_path):
     assert data_dict.beamformed_data["values"].shape[0] == 1
 
 
-def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
+def test_file_operations_cli_compound_transmits(tmp_hdf5_path, monkeypatch):
     """Tests the compound_transmits function CLI by creating an example dataset and
     compounding transmits."""
 
@@ -276,7 +275,7 @@ def test_file_operations_cli_compound_transmits(tmp_hdf5_path):
     # Create an example dataset
     generate_example_dataset(input_path, add_optional_dtypes=True, image_dtype=np.float32)
 
-    os.system("python -m zea data compound_transmits " + str(input_path) + " " + str(output_path))
+    _run_zea_cli(monkeypatch, "data", "compound_transmits", input_path, output_path)
 
     data_dict = SimpleNamespace(**_load_data_dict(output_path))
     assert data_dict.raw_data.shape[1] == 1  # Only one transmit should remain

@@ -22,15 +22,19 @@ Current
 
 New Features
 ^^^^^^^^^^^^
+- :func:`zea.tools.fit_scan_cone.detect_frustum_parameters` estimates the scan frustum (apex, azimuth and elevation ranges and depth) of a scan-converted 3-D volume, like :func:`~zea.tools.fit_scan_cone.detect_cone_parameters` does for 2-D images. ``zea convert cetus`` uses it to also store every CETUS volume on a polar ``(rho, theta, phi)`` grid as ``image_polar``, with its ranges under ``custom/polar_geometry``, so it can be scan converted back with :func:`zea.display.scan_convert_3d`. Set the grid size with ``--polar-shape`` (:gh:`727` by :user:`swpenninga`)
 
 Changed
 ^^^^^^^
+- ``zea convert cetus`` stores the ``image`` and ``segmentation`` coordinates as ``[x, y, z]`` positions with the estimated apex at the origin, as the zea format specifies, in the same frame as ``image_polar``. They were ``[depth, height, width]`` positions measured from the corner of the volume (:gh:`727` by :user:`swpenninga`)
 - :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
 - Removed ``zea.func.simple_map`` and the ``disable_jit`` argument of :func:`zea.func.vmap`. :func:`zea.func.vmap` and the operations that loop over a batch now use the new :func:`zea.func.map` which always loops eagerly outside jit (:gh:`725` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
 - :class:`zea.ops.Map` with ``jit_options=None`` and a batch dimension unrolled its patch loop on JAX, so memory grew with the number of patches (:gh:`725` by :user:`wesselvannierop`)
+- ``zea convert cetus`` reported every file as written even when some failed, and did not say which file failed when converting in parallel. It now logs each failed file by name, counts only the files that were converted, and ends with an error before any upload if a file failed (:gh:`727` by :user:`swpenninga`)
+- :class:`zea.ops.Refocus` wrapped the start of each record onto its end; it now zero-pads fast time (``pad_fast_time=True``, the default) (:gh:`724` by :user:`wesselvannierop`)
 - Logging a character the console can't encode (e.g. ``→`` on a redirected Windows stdout) printed a ``--- Logging error ---`` traceback instead of the message; such characters are now escaped (:gh:`721` by :user:`wesselvannierop`)
 - :class:`zea.metrics.Metrics` gave wrong LPIPS and UltraPIPS values when ``image_range`` was not ``(0, 255)``: the images were translated twice (:gh:`715` by :user:`tristan-deep`)
 

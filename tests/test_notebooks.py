@@ -35,7 +35,7 @@ CONFIG_DIR = Path("configs")
 
 # Automatically discover notebooks
 NOTEBOOKS_DIR = Path("docs/source/notebooks")
-NOTEBOOKS = list(NOTEBOOKS_DIR.rglob("*.ipynb"))
+NOTEBOOKS = sorted(NOTEBOOKS_DIR.rglob("*.ipynb"))
 
 # Per-notebook parameters for CI testing (faster execution)
 # these overwrite the default parameters in the notebooks

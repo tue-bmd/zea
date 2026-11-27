@@ -2542,13 +2542,16 @@ class Refocus(Operation):
             - ``'tikhonov'``, ``'rsvd'``, ``'tsvd'``: Relative regularization
               strength. Defaults to ``1e-2`` when ``None``.
 
+        pad_fast_time (bool): Zero-pad fast time to ``2 * n_ax`` before the FFT
+            (cropped back after) to avoid circular wraparound. Defaults to ``True``.
+
         **kwargs: Additional arguments forwarded to
             :class:`~zea.ops.Operation`.
     """
 
     _VALID_METHODS = ("adjoint", "tikhonov", "rsvd", "tsvd")
 
-    def __init__(self, method="adjoint", param=None, **kwargs):
+    def __init__(self, method="adjoint", param=None, pad_fast_time=True, **kwargs):
         if method not in self._VALID_METHODS:
             raise ValueError(f"method must be one of {self._VALID_METHODS}, got '{method}'")
         # SVD is not supported by TF XLA, so SVD-based methods cannot be JIT-compiled
@@ -2566,6 +2569,7 @@ class Refocus(Operation):
         )
         self.method = method
         self.param = param
+        self.pad_fast_time = pad_fast_time
 
     def _get_hinv(self, delays, f_vec, apod):
         """Compute batched Hinv for all normalised frequencies at once.
@@ -2636,10 +2640,16 @@ class Refocus(Operation):
 
         if n_ch not in (1, 2):
             raise ValueError(f"Refocus supports RF (n_ch=1) or IQ (n_ch=2) data, got n_ch={n_ch}.")
+
+        # Pad so the delay shifts don't wrap around circularly.
+        n_fft = 2 * n_ax if self.pad_fast_time else n_ax
+        if n_fft != n_ax:
+            data = ops.pad(data, ((0, 0), (0, n_fft - n_ax), (0, 0), (0, 0)))
+
         # Refocus for RF
         if n_ch == 1:
             # --- FFT over all channels at once ---
-            # data: (n_tx, n_ax, n_el, n_ch) -> (n_ch, n_el, n_tx, n_ax)
+            # data: (n_tx, n_fft, n_el, n_ch) -> (n_ch, n_el, n_tx, n_fft)
             rf = ops.cast(ops.transpose(data, (3, 2, 0, 1)), "float32")
             # (n_ch, n_el_recv, n_tx, n_freq)
             RF_enc_r, RF_enc_i = ops.rfft(rf)
@@ -2653,7 +2663,7 @@ class Refocus(Operation):
             RF_enc = ops.reshape(RF_enc, (n_freq, n_tx, n_el * n_ch))
 
             # --- Batched inverse encoding matrices (skip DC at index 0) ---
-            frequency = ops.cast(ops.arange(n_freq), "float32") / n_ax
+            frequency = ops.cast(ops.arange(n_freq), "float32") / n_fft
             freq_noDC = frequency[1:]  # (n_freq - 1,)
             # Hinv: (n_freq - 1, n_elements, n_tx)
             Hinv = self._get_hinv(delays_samples, freq_noDC, apod)
@@ -2673,10 +2683,10 @@ class Refocus(Operation):
             # irfft acts on the last axis: move n_freq last
             # -> (n_elements, n_el_recv, n_ch, n_freq)
             RF_decoded = ops.transpose(RF_decoded, (1, 2, 3, 0))
-            # -> (n_elements, n_el_recv, n_ch, n_ax)
-            rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_ax)
-            # -> (n_elements, n_ax, n_el_recv, n_ch)
-            rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))
+            # -> (n_elements, n_el_recv, n_ch, n_fft)
+            rf_decoded = ops.irfft((ops.real(RF_decoded), ops.imag(RF_decoded)), fft_length=n_fft)
+            # -> (n_elements, n_fft, n_el_recv, n_ch), cropped back to the record
+            rf_decoded = ops.transpose(rf_decoded, (0, 3, 1, 2))[:, :n_ax]
 
             return ops.cast(rf_decoded, "float32")
         # Refocus for IQ
@@ -2700,13 +2710,13 @@ class Refocus(Operation):
             IQ_enc = ops.transpose(IQ_enc, (2, 1, 0))
             # --- Batched inverse encoding matrices ---
             # FFT frequencies contain positive and negative frequencies for IQ.
-            # For even n_ax the Nyquist bin (k == n_ax // 2) is the negative
+            # For even n_fft the Nyquist bin (k == n_fft // 2) is the negative
             # frequency -0.5, not +0.5 (matches numpy.fft.fftfreq convention).
-            k = ops.arange(n_ax)
+            k = ops.arange(n_fft)
             frequency = ops.where(
-                k < (n_ax + 1) // 2,
-                ops.cast(k, "float32") / n_ax,
-                ops.cast(k - n_ax, "float32") / n_ax,
+                k < (n_fft + 1) // 2,
+                ops.cast(k, "float32") / n_fft,
+                ops.cast(k - n_fft, "float32") / n_fft,
             )
             frequency = (
                 frequency + demodulation_frequency / sampling_frequency
@@ -2740,8 +2750,8 @@ class Refocus(Operation):
             # -> (n_elements, n_el_recv, n_ax, n_ch)
             iq_decoded = ops.stack((iq_decoded_r, iq_decoded_i), axis=-1)
 
-            # -> (n_elements, n_ax, n_el_recv, n_ch)
-            iq_decoded = ops.transpose(iq_decoded, (0, 2, 1, 3))
+            # -> (n_elements, n_fft, n_el_recv, n_ch), cropped back to the record
+            iq_decoded = ops.transpose(iq_decoded, (0, 2, 1, 3))[:, :n_ax]
             return ops.cast(iq_decoded, "float32")
 
     # ------------------------------------------------------------------
