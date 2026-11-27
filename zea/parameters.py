@@ -1072,10 +1072,8 @@ class Parameters(BaseParameters):
         shape (2,). Sets the default :attr:`ylims`, and with :attr:`rlims` and
         :attr:`polar_limits` spans a 3D frustum (see :func:`zea.display.scan_convert_3d`).
 
-        If not explicitly provided, the range of the transmits' elevation angles
-        ``atan2(sin(theta) sin(phi), cos(theta))``, from :attr:`polar_angles` and
-        :attr:`azimuth_angles`, with a 15 % margin on each side. Returns ``None`` if
-        azimuth angles were not provided (e.g. standard 2D imaging).
+        Defaults to the range of the transmits' elevation angles with a 15 % margin on each
+        side. Returns ``None`` if azimuth angles were not provided (e.g. standard 2D imaging).
 
         The presence check uses the raw parameter to avoid triggering the
         :attr:`azimuth_angles` "using zeros" fallback warning for 2D data.
