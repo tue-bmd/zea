@@ -26,7 +26,7 @@ New Features
 Changed
 ^^^^^^^
 - :meth:`zea.Pipeline.from_default` no longer starts with :class:`zea.ops.ApplyWindow`. :class:`zea.ops.Demodulate` pads fast time by default, which already prevents the wraparound artifact at depth that the window suppressed, and the window also attenuated real data at both ends of the record. Add ``ApplyWindow()`` before ``Demodulate`` yourself to keep the previous behavior (:gh:`711` by :user:`wesselvannierop`)
-- Removed ``zea.func.simple_map`` and the ``disable_jit`` argument of :func:`zea.func.vmap`. :func:`zea.func.vmap` and the operations that loop over a batch now use the new :func:`zea.func.map`, which is ``ops.map`` except on JAX outside a jit, where it loops in Python: there ``jax.lax.map`` would compile its loop again on every call. Operations with ``jit_options=None`` on JAX therefore run eagerly, without recompiling (:gh:`725` by :user:`wesselvannierop`)
+- Removed ``zea.func.simple_map`` and the ``disable_jit`` argument of :func:`zea.func.vmap`. :func:`zea.func.vmap` and the operations that loop over a batch now use the new :func:`zea.func.map` which always loops eagerly outside jit (:gh:`725` by :user:`wesselvannierop`)
 
 Fixed
 ^^^^^
